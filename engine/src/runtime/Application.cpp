@@ -11,6 +11,7 @@
 #include "render/RendererInternal.h"
 #include "runtime/Presentation.h"
 #include "runtime/Recorder.h"
+#include "compute/AdvancedWorld.h"
 #include "Phisiks/Assets/Assets.h"
 #include "Phisiks/Audio/Audio.h"
 
@@ -203,7 +204,10 @@ namespace Phisiks {
             HandleGlobalActions();
 
             // 2. Scene transitions at a safe point
-            if (m_scenes.ApplyPending(m_ctx)) GlobalEvents().Enqueue(SceneLoadedEvent{ m_scenes.CurrentName() });
+            if (m_scenes.ApplyPending(m_ctx)) {
+                Advanced::Clear();   // GPU particles / soft bodies of the previous scene
+                GlobalEvents().Enqueue(SceneLoadedEvent{ m_scenes.CurrentName() });
+            }
             scene = m_scenes.Current();
 
             // 3. Variable-rate gameplay
@@ -231,7 +235,9 @@ namespace Phisiks {
                     scene->SyncPhysicsBodies();          // also pushes kinematic targets for this step
                 }
                 m_ctx.player.FixedUpdate(m_ctx.camera.GetYaw(), fixedDt);
+                if (scene) scene->ApplyForceFields(fixedDt);      // force fields -> rigid bodies
                 Physics::Step(fixedDt);
+                if (scene && m_rendererReady) Advanced::Step(*scene, fixedDt);   // GPU particles + XPBD
                 ++steps;
             }
             if (scene) scene->PullPhysicsPoses();         // dynamic bodies -> transforms
@@ -288,6 +294,7 @@ namespace Phisiks {
         Log::Info() << "Shutdown: unloading scene '" << m_scenes.CurrentName() << "' ("
                     << (m_scenes.Current() ? m_scenes.Current()->EntityCount() : 0) << " entities, " << Physics::GetStats().dynamicBodies << " dynamic bodies)";
         m_scenes.UnloadCurrent(m_ctx);
+        Advanced::Clear();
         const Physics::Stats physicsStats = Physics::GetStats();
         Log::Info() << "Shutdown: after unload " << (m_scenes.Current() ? m_scenes.Current()->EntityCount() : 0) << " entities, "
                     << physicsStats.dynamicBodies << " dynamic, " << physicsStats.staticBodies << " static, "

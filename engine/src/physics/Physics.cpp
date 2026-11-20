@@ -104,6 +104,9 @@ namespace Phisiks::Physics {
             std::vector<TriggerEvent> triggerEvents;
             uint64_t steps = 0;
             float currentStepDt = 1.0f / 60.0f;
+            // AddForce / AddTorque accumulate here and act on every sub-step of the next Step()
+            // (PhysX clears its force accumulators after each simulate()).
+            std::vector<std::pair<BodyId, glm::vec3>> pendingForces, pendingTorques;
         };
         State g;
 
@@ -450,15 +453,26 @@ namespace Phisiks::Physics {
         for (CharacterSlot& slot : g.characters) if (slot.alive) ApplyFilter(slot.controller->getActor(), slot.layer);
     }
 
+    namespace {
+        PxRigidDynamic* MovableDynamic(BodyId id) {
+            BodySlot* s = Resolve(id);
+            return (s && s->type == BodyType::Dynamic) ? s->actor->is<PxRigidDynamic>() : nullptr;
+        }
+    }
+
     void Step(float dt) {
         if (!g.initialized || dt <= 0.0f) return;
         const uint32_t substeps = std::max(1u, g.settings.substeps);
         const float h = dt / float(substeps);
         g.currentStepDt = dt;
         for (uint32_t i = 0; i < substeps; ++i) {
+            for (const auto& [id, f] : g.pendingForces) if (PxRigidDynamic* d = MovableDynamic(id)) d->addForce(ToPx(f), PxForceMode::eFORCE);
+            for (const auto& [id, t] : g.pendingTorques) if (PxRigidDynamic* d = MovableDynamic(id)) d->addTorque(ToPx(t), PxForceMode::eFORCE);
             g.scene->simulate(h);
             g.scene->fetchResults(true);
         }
+        g.pendingForces.clear();
+        g.pendingTorques.clear();
         ++g.steps;
     }
 
@@ -580,18 +594,11 @@ namespace Phisiks::Physics {
     glm::vec3 GetLinearVelocity(BodyId id)  { PxRigidDynamic* d = AsDynamic(id); return d ? ToGlm(d->getLinearVelocity()) : glm::vec3(0.0f); }
     glm::vec3 GetAngularVelocity(BodyId id) { PxRigidDynamic* d = AsDynamic(id); return d ? ToGlm(d->getAngularVelocity()) : glm::vec3(0.0f); }
 
-    namespace {
-        PxRigidDynamic* MovableDynamic(BodyId id) {
-            BodySlot* s = Resolve(id);
-            return (s && s->type == BodyType::Dynamic) ? s->actor->is<PxRigidDynamic>() : nullptr;
-        }
-    }
-
     void SetLinearVelocity(BodyId id, const glm::vec3& v)  { if (PxRigidDynamic* d = MovableDynamic(id)) d->setLinearVelocity(ToPx(v)); }
     void SetAngularVelocity(BodyId id, const glm::vec3& v) { if (PxRigidDynamic* d = MovableDynamic(id)) d->setAngularVelocity(ToPx(v)); }
-    void AddForce(BodyId id, const glm::vec3& f)            { if (PxRigidDynamic* d = MovableDynamic(id)) d->addForce(ToPx(f), PxForceMode::eFORCE); }
+    void AddForce(BodyId id, const glm::vec3& f)            { if (MovableDynamic(id)) { g.pendingForces.emplace_back(id, f); } }
     void AddImpulse(BodyId id, const glm::vec3& j)          { if (PxRigidDynamic* d = MovableDynamic(id)) d->addForce(ToPx(j), PxForceMode::eIMPULSE); }
-    void AddTorque(BodyId id, const glm::vec3& t)           { if (PxRigidDynamic* d = MovableDynamic(id)) d->addTorque(ToPx(t), PxForceMode::eFORCE); }
+    void AddTorque(BodyId id, const glm::vec3& t)           { if (MovableDynamic(id)) { g.pendingTorques.emplace_back(id, t); } }
     void AddImpulseAtPoint(BodyId id, const glm::vec3& j, const glm::vec3& p) {
         if (PxRigidDynamic* d = MovableDynamic(id)) PxRigidBodyExt::addForceAtPos(*d, ToPx(j), ToPx(p), PxForceMode::eIMPULSE, true);
     }

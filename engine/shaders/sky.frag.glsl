@@ -7,8 +7,10 @@
 
 in vec2 v_uv;
 layout(location = 0) out vec4 o_color;
+layout(location = 1) out uint o_entity;   // sky = no entity: written explicitly, see Renderer (sky pass)
 
 void main() {
+    o_entity = 0u;
     if (u_fogParams2.w > 0.5) {
         // Orthographic views (top/front/side): plain vertical backdrop gradient.
         o_color = vec4(mix(u_skyHorizon.rgb, u_skyZenith.rgb, v_uv.y), 1.0);

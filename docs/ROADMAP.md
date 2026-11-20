@@ -18,46 +18,17 @@ Every phase ends with a clean Release build, all unit and runtime checks green, 
 | P4 | `p4-renderer` | Forward PBR renderer, indirect drawing, shadows, analytic fog, persistent shader binary cache with crash journal, pixel-level runtime checks |
 | P5 | `p5-assets-audio` | `Phisiks::Audio` (WASAPI + mixer), on-demand `Phisiks::Assets`, CC0 asset generator, dark studio look, multi-viewport and orthographic cameras, orbit camera, deterministic headless simulation with frame/data export |
 | P6 | `p6-clean-engine` | Repository contains only Phisiks code, CC0 assets and listed third-party libraries; strict layering/name check; MIT licence |
+| P7 / P7b | `p7-compute` | `Phisiks::Compute` (OpenGL 4.6 compute + SSBOs, `IComputeBackend` with OpenCL/SYCL hooks); persistent-mapped ring buffer; GPU frustum + Hi-Z occlusion culling writing the indirect commands; GPU spatial hash and particles; `Phisiks::Physics::Advanced` GPU XPBD (rope, cloth, soft bodies) with scene colliders; force fields (uniform, planetary, vortex, N-body) on rigid bodies, particles and XPBD; raymarched SDF/CSG and vector-field arrow visualisers; FieldLab scene |
 
 ## Next
 
-### P7: `Phisiks::Compute` (OpenGL 4.6 compute + SSBOs)
-**API:**
-- `ComputeProgram`, cached like the graphics programs;
-- `GpuBuffer` (SSBO / indirect / atomic counter);
-- `PersistentRingBuffer` (`glBufferStorage` persistent + coherent, triple-buffered, fence-guarded);
-- `Dispatch`/`Barrier` helpers;
-- GPU timers per pass.
-
-**Techniques, each implemented and measured against the CPU path:**
-1. GPU frustum culling into the indirect command buffer with an atomic count (`glMultiDrawElementsIndirectCount`), verified to produce the same visible set as the CPU culling.
-2. Hi-Z occlusion culling: a depth pyramid from the previous frame, two-phase.
-3. GPU particles: emit, simulate and compact in compute, with a spatial-hash grid (counting sort + prefix scan) for neighbour queries; particle conservation is checked.
-4. Persistent-mapped uploads for per-frame object, light and draw data.
-
-**Backends:** an `IComputeBackend` interface with the GL implementation. OpenCL/SYCL hooks are declared, not implemented.
-
-**Analytical SDF and vector-field visualiser:**
-- a raymarched pass for `Phisiks::Math::SDF` primitives and smooth CSG;
-- GPU mesh extraction (marching cubes);
-- vector-field glyphs and streamlines for force fields.
-
-### P7b: `Phisiks::Physics::Advanced`
-**GPU XPBD on GL compute:**
-- distance, bending and volume constraints;
-- graph-coloured parallel solve with substeps;
-- for rope, cloth and soft bodies.
-
-**Programmable force fields:**
-- uniform;
-- spherical planet gravity;
-- vortex;
-- N-body, with a GPU tiled O(N²) kernel.
-
-**Other:**
-- Continuous SDF collision queries (sphere tracing, conservative advancement).
-- Coupling with PhysX rigid bodies is one-way at first: PhysX bodies act as kinematic colliders for XPBD.
-- Simulations are recorded through the deterministic export path.
+### P7 follow-ups (not yet implemented)
+These parts of the original P7/P7b plan were not delivered in `p7-compute`:
+- **Culling:** two-phase Hi-Z (re-test last frame's occluded objects against this frame's depth, so nothing pops for one frame on disocclusion); GPU timers per pass.
+- **Particles:** emission and compaction (systems currently have a fixed particle count).
+- **Visualiser:** marching-cubes mesh extraction of SDFs; streamlines (only arrow glyphs exist).
+- **XPBD:** continuous SDF collision queries (sphere tracing / conservative advancement); two-way coupling with PhysX (PhysX bodies are one-way colliders today); recording GPU soft-body / particle state through the deterministic export path.
+- **Backends:** OpenCL and SYCL implementations of `IComputeBackend` (the interface and enumeration hooks exist).
 
 ### P8: PhisiksLab and templates
 **App and UI:**

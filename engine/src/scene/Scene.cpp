@@ -1,6 +1,7 @@
 #include "Phisiks/Scene/Scene.h"
 #include "Phisiks/Core/Log.h"
 #include "Phisiks/Physics/Physics.h"
+#include "Phisiks/Physics/Fields.h"
 #include "scene/SceneInternal.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -330,6 +331,52 @@ namespace Phisiks {
             if (rigidbody.type != Physics::BodyType::Kinematic) continue;
             const Entity entity(this, handle);
             Physics::SetKinematicTarget(runtime.body, entity.WorldPosition(), entity.WorldRotation());
+        }
+    }
+
+    void Scene::ApplyForceFields(float fixedDt) {
+        struct Placed { Physics::ForceField field; glm::vec3 origin, axis; };
+        std::vector<Placed> fields;
+        const Physics::ForceField* nbody = nullptr;
+        glm::vec3 nbodyOrigin(0.0f);
+        for (auto [handle, field] : m_registry.view<Physics::ForceField>().each()) {
+            if (!field.affectsRigidBodies) continue;
+            const Entity e(this, handle);
+            if (field.type == Physics::FieldType::NBody) { if (!nbody) { nbody = &field; nbodyOrigin = e.WorldPosition(); } continue; }
+            fields.push_back({ field, e.WorldPosition(), glm::normalize(e.WorldRotation() * field.axis) });
+        }
+        if (fields.empty() && !nbody) return;
+
+        std::vector<Physics::BodyId> bodies;
+        std::vector<glm::vec3> positions;
+        std::vector<float> masses;
+        for (auto [handle, rigidbody, runtime] : m_registry.view<Rigidbody, SceneInternal::PhysicsRuntime>().each()) {
+            if (rigidbody.type != Physics::BodyType::Dynamic) continue;
+            bodies.push_back(runtime.body);
+            positions.push_back(Physics::FieldMath::SamplePosition(Physics::GetPosition(runtime.body), Physics::GetLinearVelocity(runtime.body),
+                                                                   fixedDt, Physics::GetSettings().substeps));
+            masses.push_back(Physics::GetMass(runtime.body));
+        }
+        // N-body: the bodies inside the field's influence radius (all of them if it is 0) attract each other.
+        std::vector<glm::vec3> mutual(bodies.size(), glm::vec3(0.0f));
+        if (nbody) {
+            std::vector<size_t> members;
+            std::vector<glm::vec3> p;
+            std::vector<float> m;
+            for (size_t i = 0; i < bodies.size(); ++i) {
+                if (nbody->influenceRadius > 0.0f && glm::length(positions[i] - nbodyOrigin) > nbody->influenceRadius) continue;
+                members.push_back(i);
+                p.push_back(positions[i]);
+                m.push_back(masses[i]);
+            }
+            std::vector<glm::vec3> a(members.size());
+            if (members.size() > 1) Physics::FieldMath::NBodyAccelerations(p.data(), m.data(), members.size(), nbody->strength, nbody->softening, a.data());
+            for (size_t k = 0; k < members.size(); ++k) mutual[members[k]] = a[k];
+        }
+        for (size_t i = 0; i < bodies.size(); ++i) {
+            glm::vec3 a = mutual[i];
+            for (const Placed& f : fields) a += Physics::FieldMath::Acceleration(f.field, f.origin, f.axis, positions[i]);
+            if (glm::dot(a, a) > 0.0f) Physics::AddForce(bodies[i], a * masses[i]);
         }
     }
 

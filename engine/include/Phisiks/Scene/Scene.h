@@ -126,6 +126,9 @@ namespace Phisiks {
         // ---- Systems (the Application calls these; tests may call them directly)
         void SyncPhysicsBodies();                      // create/rebuild/destroy bodies; push kinematic targets
         void PullPhysicsPoses();                       // dynamic bodies -> transforms
+        // ForceField components -> forces on dynamic rigid bodies for the next physics step
+        // (uniform / planetary / vortex fields, and mutual gravity for NBody fields).
+        void ApplyForceFields(float fixedDt);
         void SyncPresentation();                       // renderers, lights, camera, audio (backends)
         Entity GetPrimaryCamera();
 

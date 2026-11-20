@@ -1,7 +1,9 @@
 #version 460 core
 // Mesh vertex shader for indirect multi-draw: per-object data comes from the instance buffer,
-// indexed by gl_BaseInstance (set per draw command) + gl_InstanceID.
+// through the remap list at gl_BaseInstance (set per draw command) + gl_InstanceID.
 #include "common.glsl"
+
+layout(std430, binding = 9) readonly buffer RemapBuffer { uint u_remap[]; };
 
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
@@ -19,7 +21,8 @@ flat out uint v_instance;
 #endif
 
 void main() {
-    uint instance = uint(gl_BaseInstance + gl_InstanceID);
+    // Draw commands index a remap list (written by CPU or GPU culling) that holds the instances.
+    uint instance = u_remap[uint(gl_BaseInstance + gl_InstanceID)];
     vec4 world = u_instances[instance].model * vec4(a_position, 1.0);
     v_worldPos = world.xyz;
 #ifdef SHADOW_PASS

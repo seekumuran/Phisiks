@@ -135,8 +135,8 @@ TEST_CASE("Shaders: every program's stages are embedded and preprocess") {
             used.insert(stage.file);
         }
     }
-    CHECK(used.size() == 10);              // stage files (plus 5 shared includes)
-    CHECK(Shaders::FileNames().size() == 15);
+    CHECK(used.size() == 22);              // stage files (plus 9 shared includes)
+    CHECK(Shaders::FileNames().size() == 31);
 }
 
 // ============================================================================ primitives

@@ -1,4 +1,5 @@
 #include "SandboxScenes.h"
+#include "FieldLab.h"
 #include "SceneBuilder.h"
 #include "Phisiks/Framework/GameContext.h"
 #include "Phisiks/Framework/GameplayComponents.h"
@@ -191,5 +192,6 @@ namespace Lab {
     void RegisterScenes(SceneManager& scenes) {
         scenes.Register("Sandbox", [] { return std::make_unique<SandboxScene>(); });
         scenes.Register("PhysicsTower", [] { return std::make_unique<PhysicsTowerScene>(); });
+        scenes.Register("FieldLab", [] { return std::make_unique<FieldLabScene>(); });
     }
 }

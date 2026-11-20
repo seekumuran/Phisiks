@@ -7,6 +7,7 @@
 
 #include "Phisiks/Render/RenderStats.h"
 
+#include <glm/gtc/quaternion.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -47,6 +48,8 @@ namespace Phisiks::Render {
         float shadowDistance = 40.0f;      // directional shadow coverage from the camera (m)
         int shadowMapSize = 2048;          // directional; spot/point use half of it
         int msaaSamples = 4;               // 1 = off; applied when the swap-chain size changes or on Init
+        bool gpuCulling = true;            // frustum culling in a compute shader writing the indirect commands
+        bool occlusionCulling = true;      // + Hi-Z occlusion against the previous frame's depth (window views)
         glm::vec4 clearColor{ 0.012f, 0.013f, 0.018f, 1.0f };
     };
     RenderSettings& Settings();
@@ -134,5 +137,44 @@ namespace Phisiks::Render {
     // GL texture (RGBA8, tonemapped) of an offscreen camera target (Camera::target), 0 if none yet.
     uint32_t GetTargetTexture(const std::string& name);
     bool CaptureTarget(const std::string& name, FrameCapture& out);   // like CaptureFrame, for an offscreen target
-    uint32_t GetGLErrorCount();          // GL_DEBUG_TYPE_ERROR messages since the renderer started
+    uint32_t GetGLErrorCount();
+
+    // ---------------------------------------------------------------- analytical visualisers
+    // Raymarched SDF / smooth-CSG scene (mirrors Phisiks::Math::SDF). Primitives are combined in order:
+    // the first starts the shape, each next one is unioned / subtracted / intersected with smoothness k.
+    enum class SdfShape : uint32_t { Sphere = 0, Box = 1, RoundBox = 2, Torus = 3, Capsule = 4, Cylinder = 5 };
+    enum class SdfOperation : uint32_t { Union = 0, Subtraction = 1, Intersection = 2 };
+    struct SdfPrimitive {
+        SdfShape shape = SdfShape::Sphere;
+        glm::vec3 position{ 0.0f };
+        glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
+        // Sphere: x radius | Box: xyz half extents | RoundBox: xyz half extents, w rounding |
+        // Torus: x ring radius, y tube radius | Capsule: x half length (local Y), y radius | Cylinder: x half height, y radius
+        glm::vec4 params{ 0.5f, 0.5f, 0.5f, 0.0f };
+        SdfOperation operation = SdfOperation::Union;
+        float smoothness = 0.0f;           // k (m); 0 = sharp CSG
+    };
+    struct SdfVisualization {
+        bool enabled = false;
+        std::vector<SdfPrimitive> primitives;   // up to a few dozen
+        glm::vec3 boundsMin{ -1.0f }, boundsMax{ 1.0f };   // raymarch region (world)
+        glm::vec3 color{ 0.8f, 0.82f, 0.85f };
+        float roughness = 0.35f;
+        float metallic = 0.0f;
+        uint32_t entityId = 0xFFFFFFFFu;    // Entity::Id() reported in the id buffer (0xFFFFFFFF = none)
+        bool showSlice = false;             // slice plane coloured by signed distance (0.1 m isolines)
+        glm::vec4 slicePlane{ 0.0f, 0.0f, 1.0f, 0.0f };   // xyz unit normal, w offset
+    };
+    void SetSdfVisualization(const SdfVisualization& sdf);
+    const SdfVisualization& GetSdfVisualization();
+
+    // Vector-field arrows: the scene's ForceField components sampled on the GPU on a grid.
+    struct FieldVisualization {
+        bool enabled = false;
+        glm::vec3 boundsMin{ -5.0f, 0.5f, -5.0f }, boundsMax{ 5.0f, 3.0f, 5.0f };
+        glm::ivec3 resolution{ 10, 3, 10 };
+        float arrowScale = 0.05f;           // metres per (m/s^2)
+        float maxLength = 0.6f;
+    };
+    void SetFieldVisualization(const FieldVisualization& field);          // GL_DEBUG_TYPE_ERROR messages since the renderer started
 }

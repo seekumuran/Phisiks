@@ -48,9 +48,12 @@ From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` ge
 ```powershell
 .\Build\bin\Release\PhisiksLab.exe                              # interactive
 .\Build\bin\Release\PhisiksLab.exe --scene PhysicsTower
+.\Build\bin\Release\PhisiksLab.exe --scene FieldLab        # GPU particles, XPBD cloth/rope/soft body, force fields, SDF
 .\Build\bin\Release\PhisiksLab.exe --autotest --run-dir Build/runs/mytest   # exit code = failed checks
 ```
 Logs go to `<run-dir>/engine.log` (default `Build/runs/latest`). Crash dumps go to `<run-dir>/crash.dmp`.
+
+Scenes: `Sandbox`, `PhysicsTower`, `FieldLab` (`N` cycles). The autotest visits all three and runs the GPU compute checks (culling, Hi-Z, spatial hash, XPBD, N-body, fields, SDF) on the machine's GPU; it needs OpenGL 4.6 with compute shaders and at least 16 shader-storage bindings.
 
 ## PhisiksLab controls
 | Input | Action |

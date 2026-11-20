@@ -244,7 +244,7 @@ Tests:
 - Original game 40 s regression: no crash, same pre-existing log error set.
 
 ## P6 — Clean engine and MIT licence (tag `p6-clean-engine`)
-- **Safety tag:** `pre-strip` was set on the clean P5 commit before anything was removed.
+- **Safety tag:** `pre-strip` was set on the clean P5 commit before anything was removed (deleted later, see the cleanup note at the end of this entry).
 - **Removed from git** (recoverable from `pre-strip`):
   - all inherited sources (`src/`, 863 files), including the original game executable target;
   - the tracked parts of the old data tree;
@@ -273,3 +273,49 @@ Verification, from an empty `Build/` directory and an empty shader cache:
   - truly cold shader cache: 7 programs compiled in 138 ms;
   - warm: 7 ms from cache;
   - WASAPI device open; no errors or warnings in the log.
+
+**Cleanup after P6 (before P7).** At the owner's request the out-of-repository archive (11 GB) was deleted permanently, the `baseline-original` and `pre-strip` tags were removed, and the git history was rewritten to a single commit (`Phisiks: clean engine (phases P0-P6)`, tag `p6-clean-engine`), so no object of the original code base remains in the repository. The repository moved to `Desktop/Games/Phisiks`. A clean rebuild there gave 0 errors, 100/100 unit tests and ctest 3/3.
+
+## P7 + P7b — GPU compute, GPU physics, SDF and field visualisers (tag `p7-compute`)
+**`Phisiks::Compute`** (`engine/include/Phisiks/Compute/Compute.h`, `engine/src/compute/`):
+- `IComputeBackend` (buffers, upload/download, kernels from GLSL, bindings, uniforms, dispatch, barrier); OpenGL 4.6 implementation; `EnumerateBackends()` lists OpenCL and SYCL as unavailable hooks.
+- User kernels are cached on disk by the engine shader cache, like the renderer's programs.
+
+**GPU-driven rendering** (`engine/src/render/Renderer.cpp`, `engine/shaders/cull.comp.glsl`, `hiz.comp.glsl`):
+- Per-frame instance and cull data stream through a persistent, coherently mapped ring buffer (`render/gl/RingBuffer`, 3 regions, one fence each). Blocked waits are counted in `RenderStats::ringBlockedWaits`.
+- Instances are uploaded once per frame, sorted by mesh. Each view gets one `DrawElementsIndirectCommand` per mesh plus a slice of a remap buffer (`mesh.vert` reads `remap[gl_BaseInstance + gl_InstanceID]`).
+- `cull.comp` tests each object's bounding sphere against the view frustum, then (window views) against a Hi-Z max-depth pyramid built from the previous frame's resolved depth, reprojected with the previous view-projection. Visible objects append to the remap slice and `atomicAdd` the command's `instanceCount`; the commands are then drawn with `glMultiDrawElementsIndirect`.
+- Counters (visible / frustum-culled / occlusion-culled) are read back without stalling from a 6-slot fenced ring. `RenderSettings::gpuCulling` / `occlusionCulling` switch the paths; the CPU path remains.
+
+**GPU particles and spatial hash** (`hash.comp`, `scan.comp`, `particles.comp`): count / prefix-scan / scatter counting sort into a hash grid; particle-particle collisions through 27-cell neighbour queries; force fields, scene colliders and an optional tiled shared-memory N-body kernel. Particles render as shaded sphere sprites with entity ids.
+
+**`Phisiks::Physics::Advanced`** (`engine/include/Phisiks/Physics/Advanced.h`, `Xpbd.h`, `Fields.h`):
+- Components `ParticleSystem`, `SoftBody` (rope / cloth / tetrahedral soft box) and `ForceField` (uniform, spherical planet gravity with interior `GM r/R^3`, vortex, N-body; smooth influence radius; per-target mask).
+- XPBD (small-step, graph-coloured): distance and tet-volume constraints, collisions with the scene's box/sphere `Collider`s and the ground. CPU reference solver in `engine/src/physics/Xpbd.cpp`.
+- Two GPU solvers with bit-identical results: a fused single-workgroup kernel (whole step in one dispatch, colours separated by `barrier()`) for bodies up to 8192 nodes / 32768 constraints, and one dispatch per colour per sub-step for larger bodies. The fused kernel cut the FieldLab GPU physics step from ~1100 dispatches (~20 ms CPU) to 13 dispatches (0.2-0.3 ms CPU).
+- Force fields act on PhysX rigid bodies through `Scene::ApplyForceFields`, called before every fixed step. The field is sampled at the mean velocity-kick time of the sub-steps, which keeps a 60 Hz orbit within 0.4% of its radius (sampling at the current position gave 7%). An N-body field couples only the dynamic bodies inside its influence radius.
+
+**Visualisers:** `Render::SetSdfVisualization` raymarches up to a few dozen SDF primitives combined with smooth CSG (sphere, box, round box, torus, capsule, cylinder), PBR-shaded with shadows, writing depth and entity id, with an optional signed-distance slice plane (implemented; not covered by a runtime check). `Render::SetFieldVisualization` samples the scene's force fields on a GPU grid and draws arrows.
+
+**FieldLab scene** (PhisiksLab, `N` to cycle): planet with three orbiting moons, a vortex swirling 4096 GPU particles (with field arrows), a mutually attracting N-body cluster, a pinned cloth curtain, a cloth draped over a sphere, a swinging rope, a soft box and a metallic SDF sculpture.
+
+**Engine fixes found by the P7 checks:**
+- `Physics::AddForce` / `AddTorque` acted only during the first PhysX sub-step (PhysX clears its accumulators after each `simulate`). They now accumulate and are re-applied on every sub-step of the next `Step`, as documented.
+- On the Intel UHD driver, pixels nothing was drawn to kept stale entity ids from earlier frames after resolving the cleared integer MSAA id attachment. The sky pass now writes id 0 to every such pixel.
+- The Intel driver exposes only 16 SSBO bindings, so the compute bindings use 4–8 and 13–15 (graphics: 1–3, 9–12).
+- Soft-box tetrahedra in mirrored lattice cells are re-oriented to positive rest volume.
+
+**Verification** (Release, Intel UHD Graphics, OpenGL 4.6):
+- Clean Release build of every target from an empty build directory: **0 errors, 0 warnings, 228 s**. Layering + name check: clean (154 files).
+- `PhisiksUnitTests` **112/112** (+12): field math (inverse-square and interior gravity, vortex profile, influence fade, N-body momentum conservation), spatial hash = brute force exactly, XPBD colouring validity, rope length, analytic stretch `alpha*m*g`, soft-box rest volume and volume after landing, pinned cloth, PhysX orbit under a planetary field, backend hooks.
+- ctest **3/3**.
+- Runtime autotest **114/114** (+31), with 0 OpenGL errors:
+  - **GPU vs CPU culling:** identical visible/culled counts (14/1) and an identical entity-id image (0 of 1,296,000 pixels differ).
+  - **Hi-Z:** a box hidden behind the wall raises the occlusion-culled count by exactly 1 and has 0 pixels with occlusion off; the image with occlusion on is identical to the one with it off.
+  - **Spatial hash:** GPU neighbour counts equal brute force for 8000 points (60,504 pairs, 0 mismatches).
+  - **XPBD:** GPU vs CPU max node difference 3.7e-5 m (rope), 9.0e-7 m (cloth), 6.2e-3 m (soft box, 180 steps with ground contact); fused and multi-pass identical. Stretch `alpha*m*g`: 0.00981 m vs analytic 0.00981 m. Soft-box volume 99.99% of rest.
+  - **N-body:** GPU vs CPU max error 2.5e-5 for |a| up to 182 m/s^2 (2048 bodies). **Field sampling:** max error 7.2e-6 for |a| up to 6.4 m/s^2.
+  - **FieldLab:** 4096 particles finite and above ground; over 90% of the particles near the vortex axis turn counter-clockwise per frame (92-99% across runs); cloth pinned corners fixed; drape rests on its sphere without penetrating; soft box keeps its 0.8 m height; moons hold their orbit radius within 0.15%; the N-body cluster contracts; particles, both cloths and the SDF are visible in the id buffer.
+  - **SDF raymarch:** a sphere's silhouette covers 33,900 px vs 33,835 px analytic (0.19%).
+  - **Compute API:** a user saxpy kernel through `IComputeBackend` is exact for 10,000 elements.
+  - **Shader cache:** 29 programs; truly cold 520 ms (29 compiled), warm 41 ms (29 from cache).

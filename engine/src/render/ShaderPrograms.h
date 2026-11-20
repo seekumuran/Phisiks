@@ -9,7 +9,7 @@ namespace Phisiks::Render::Shaders {
     const std::string* Find(const std::string& fileName);
     std::vector<std::string> FileNames();
 
-    enum class Stage { Vertex, Fragment };
+    enum class Stage { Vertex, Fragment, Compute };
     struct StageDef { Stage stage; const char* file; };
     struct ProgramDef {
         const char* name;
@@ -17,6 +17,17 @@ namespace Phisiks::Render::Shaders {
         std::vector<std::string> defines;
     };
 
-    enum ProgramId { FORWARD, SHADOW, SHADOW_POINT, SKY, TONEMAP, LINES, TEXT, PROGRAM_COUNT };
+    enum ProgramId {
+        // graphics
+        FORWARD, SHADOW, SHADOW_POINT, SKY, TONEMAP, LINES, TEXT,
+        SPRITES, SOFTBODY, SOFTBODY_SHADOW, SDF, ARROWS,
+        // compute
+        CULL, HIZ_INIT, HIZ_DOWNSAMPLE,
+        HASH_COUNT, HASH_SCATTER, HASH_QUERY, SCAN_LOCAL, SCAN_BLOCKS, SCAN_ADD,
+        NBODY, PARTICLES_STEP,
+        XPBD_PREDICT, XPBD_SOLVE, XPBD_FINISH, XPBD_FUSED, XPBD_NORMALS,
+        FIELD_SAMPLE,
+        PROGRAM_COUNT
+    };
     const std::vector<ProgramDef>& Programs();   // indexed by ProgramId
 }

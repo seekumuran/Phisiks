@@ -16,10 +16,19 @@ Player movement and `Scene::FixedUpdate` run inside the fixed-step loop, before 
 The runtime harness (`tests/runtime/AutoTest`) runs inside PhisiksLab with the real renderer, PhysX and audio. It drives gameplay only through injected input actions, records a measured value for every check, and verifies rendering through the renderer's entity-id buffer and final image (pixel checks, A/B frames). A feature isn't reported complete without a passing measured check.
 
 ## ADR-6: Forward renderer with indirect drawing and an id buffer
-One shared vertex/index buffer, an instance SSBO, and one `DrawElementsIndirectCommand` per mesh type per view, with frustum culling on the CPU (moves to compute in P7). Every view writes HDR colour and an entity-id attachment. Screenshots read a renderer-owned presented image (scene + overlay), not the window back buffer, so they don't depend on swap-chain behaviour.
+One shared vertex/index buffer, an instance SSBO, and one `DrawElementsIndirectCommand` per mesh type per view, with frustum culling on the CPU (GPU culling since P7, ADR-10). Every view writes HDR colour and an entity-id attachment. Screenshots read a renderer-owned presented image (scene + overlay), not the window back buffer, so they don't depend on swap-chain behaviour.
 
 ## ADR-7: Engine-owned program-binary cache + crash journal
 The renderer stores every linked program with `glGetProgramBinary`. Each file is keyed by an FNV-1a hash of the preprocessed sources and the driver identity (vendor, renderer, version), carries a header and checksum, and is written with temp-file + rename. Programs compile only during startup, serially, behind a journal file naming the program being compiled. A leftover journal triggers a safe-mode rebuild of that program on the next run. Invalid, stale or driver-rejected binaries fall back to compiling.
 
 ## ADR-8: Original code and generated assets only
 All code in the repository is original and MIT-licensed (`LICENSE`). Third-party libraries are used unmodified from `vendor/` under their own licences (`THIRD_PARTY_NOTICES.md`). Sample assets are generated procedurally by `tools/assetgen` and released under CC0, so the repository contains no third-party art, audio or models.
+
+## ADR-9: GPU compute on OpenGL 4.6 behind `IComputeBackend`
+Compute uses the existing GL 4.6 context and shader cache rather than a second API: it shares buffers with the renderer without interop and runs on any GL 4.6 iGPU. Engine systems (culling, particles, XPBD) dispatch renderer-owned programs directly. Tools and user code go through `Phisiks::Compute::IComputeBackend`, whose OpenCL and SYCL enumerations exist as hooks so another backend can be added without changing callers. Every GPU kernel has a CPU reference that tests compare against.
+
+## ADR-10: GPU-driven culling writes the indirect commands through a remap list
+Instances are uploaded once per frame (persistent-mapped ring); each view has one indirect command per mesh and a remap slice that the vertex shader reads via `gl_BaseInstance + gl_InstanceID`. The cull shader appends visible instances and increments `instanceCount` with atomics, so the GPU path and the CPU path share all drawing code and can be compared pixel-for-pixel. Hi-Z uses the previous frame's depth (single phase, see Known Issues).
+
+## ADR-11: Small-step XPBD with graph colouring; fused single-workgroup solver
+XPBD runs one iteration per sub-step with Lagrange multipliers reset each sub-step, which is stable and makes `alpha*m*g` an exact analytic test. Constraints are graph-coloured so each colour is solved in parallel without atomics. Dispatch overhead, not arithmetic, dominated on the iGPU (a 64-node soft box needs 51 colours x 16 sub-steps), so bodies that fit run the whole fixed step in one workgroup with `barrier()` between colours; large bodies use one dispatch per colour. Both produce bit-identical results.

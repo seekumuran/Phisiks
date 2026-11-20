@@ -15,6 +15,8 @@
 #include "render/ShaderPrograms.h"
 #include "render/ShaderPreprocessor.h"
 #include "render/gl/GLObjects.h"
+#include "render/gl/RingBuffer.h"
+#include "compute/AdvancedWorld.h"
 #include "Phisiks/Assets/Assets.h"
 #include "Phisiks/Core/Log.h"
 #include "Phisiks/Core/Time.h"
@@ -31,6 +33,8 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+
+namespace Phisiks::Compute::Internal { void ReleaseBackends(); }
 
 namespace Phisiks::Render {
     namespace {
@@ -54,6 +58,8 @@ namespace Phisiks::Render {
         struct MaterialGpu { glm::vec4 baseRoughness, patternMetallic, emissivePattern, params, textureParams; };
         static_assert(sizeof(MaterialGpu) == 80, "std430 layout");
         struct DrawCommand { uint32_t count, instanceCount, firstIndex; int32_t baseVertex; uint32_t baseInstance; };
+        struct CullObjectGpu { glm::vec4 sphere; glm::uvec4 meshInstance; };
+        struct SdfPrimitiveGpu { glm::vec4 positionShape, rotation, params, op; };
         struct LineVertex { glm::vec3 position; glm::vec4 color; };
         struct TextVertex { glm::vec2 position; glm::vec2 texel; glm::vec4 color; };
 
@@ -122,6 +128,33 @@ namespace Phisiks::Render {
             GL::Framebuffer shadowFbo;
             GL::Texture fontAtlas;
 
+            // persistent-mapped per-frame uploads (instances, cull objects) + remap lists
+            GL::RingBuffer ring;
+            GLint ssboAlignment = 16;
+            GL::Buffer remapBuffer;
+
+            // GPU culling statistics: one counter buffer per frame in flight, read back (never waiting) as
+            // soon as its fence has signalled. The driver may queue ~3 frames, so keep more slots than that.
+            static constexpr int CULL_SLOTS = 6;
+            GLuint cullStats[CULL_SLOTS] = {};
+            GLsync cullFences[CULL_SLOTS] = {};
+            uint64_t cullFrame = 0;
+            uint32_t gpuVisible = 0, gpuFrustumCulled = 0, gpuOcclusionCulled = 0;
+
+            // Hi-Z pyramid of the window (previous frame) for occlusion culling
+            GL::Texture hizDepth, hiz;
+            GL::Framebuffer hizDepthFbo;
+            glm::ivec2 hizSize{ 0 };
+            int hizLevels = 0;
+            bool hizValid = false;
+            std::vector<glm::mat4> hizViewProjections;   // window views of the frame the pyramid was built from
+            std::vector<glm::ivec4> hizRects;
+
+            // visualisers
+            SdfVisualization sdf;
+            GL::Buffer sdfBuffer;
+            FieldVisualization fieldViz;
+
             RenderStats frameStats;
             uint32_t glErrors = 0;
             uint32_t loggedDebugMessages = 0;
@@ -157,7 +190,9 @@ namespace Phisiks::Render {
                         Log::Error() << "Renderer: " << stage.file << ": " << expanded.error;
                         return false;
                     }
-                    stages.push_back({ stage.stage == Shaders::Stage::Vertex ? GLenum(GL_VERTEX_SHADER) : GLenum(GL_FRAGMENT_SHADER), expanded.source });
+                    const GLenum glStage = stage.stage == Shaders::Stage::Vertex ? GLenum(GL_VERTEX_SHADER)
+                                        : stage.stage == Shaders::Stage::Fragment ? GLenum(GL_FRAGMENT_SHADER) : GLenum(GL_COMPUTE_SHADER);
+                    stages.push_back({ glStage, expanded.source });
                 }
                 const GLuint program = g->shaderCache.GetProgram(defs[i].name, std::move(stages));
                 if (!program) return false;
@@ -557,6 +592,10 @@ namespace Phisiks::Render {
     }
 
     ShaderCacheStats GetShaderCacheStats() { return g ? g->shaderCache.Stats() : ShaderCacheStats{}; }
+
+    void SetSdfVisualization(const SdfVisualization& sdf) { if (g) g->sdf = sdf; }
+    const SdfVisualization& GetSdfVisualization() { static SdfVisualization none; return g ? g->sdf : none; }
+    void SetFieldVisualization(const FieldVisualization& field) { if (g) g->fieldViz = field; }
     uint32_t GetGLErrorCount() { return g ? g->glErrors : 0; }
 
     // ====================================================================== internal
@@ -619,12 +658,26 @@ namespace Phisiks::Render {
 
             EnsureAlbedoCapacity(4);
             EnsureShadowTargets();
+            glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &g->ssboAlignment);
+            g->ring.Create("Per-frame uploads", 1 << 20);
+            g->remapBuffer.Create("Remap", 4096);
+            g->sdfBuffer.Create("SDF primitives", 1024);
+            for (GLuint& b : g->cullStats) {
+                glCreateBuffers(1, &b);
+                glNamedBufferStorage(b, 16, nullptr, GL_DYNAMIC_STORAGE_BIT);
+            }
+            Advanced::Init();
             return true;
         }
 
         void Shutdown() {
             if (!g) return;
             glFinish();
+            Advanced::Shutdown();
+            Compute::Internal::ReleaseBackends();
+            for (GLsync& f : g->cullFences) if (f) glDeleteSync(f);
+            glDeleteBuffers(State::CULL_SLOTS, g->cullStats);
+            g->ring.Release();
             glDeleteVertexArrays(1, &g->meshVao);
             glDeleteVertexArrays(1, &g->lineVao);
             glDeleteVertexArrays(1, &g->textVao);
@@ -663,6 +716,21 @@ namespace Phisiks::Render {
         void DestroyLight(uint64_t handle) { if (g) g->lights.erase(handle); }
 
         void SetCameras(const std::vector<CameraInput>& cameras) { if (g) g->cameras = cameras; }
+
+        uint32_t ProgramHandle(int programId) {
+            return g && programId >= 0 && programId < Shaders::PROGRAM_COUNT ? g->programs[programId].Id() : 0;
+        }
+
+        uint32_t BuildComputeProgram(const std::string& name, const std::string& source) {
+            if (!g) return 0;
+            const auto resolver = [](const std::string& file) { return Shaders::Find(file); };
+            const ShaderPreprocessor::Result expanded = ShaderPreprocessor::Expand(source, resolver);
+            if (!expanded.ok) {
+                Log::Error() << "Compute kernel '" << name << "': " << expanded.error;
+                return 0;
+            }
+            return g->shaderCache.GetProgram(name, { { GL_COMPUTE_SHADER, expanded.source } });
+        }
 
         bool ReadPresented(std::vector<uint8_t>& rgba, int& width, int& height) {
             if (!g || !g->window.rendered || g->window.present.Id() == 0) return false;
@@ -781,48 +849,101 @@ namespace Phisiks::Render {
                 views.push_back(v);
             }
 
-            // ---------------------------------------------------------- instances + indirect commands
-            std::vector<InstanceGpu> instances;
-            std::vector<DrawCommand> commands;
-            auto append = [&](std::vector<const Item*>& list) {
-                std::sort(list.begin(), list.end(), [](const Item* a, const Item* b) { return a->mesh < b->mesh; });
-                const size_t first = commands.size();
-                for (const Item* item : list) {
-                    const Object& o = *item->object;
-                    InstanceGpu gpu;
-                    gpu.model = o.world;
-                    gpu.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(o.world)));
-                    gpu.scaleMaterial = glm::vec4(glm::length(glm::vec3(o.world[0])), glm::length(glm::vec3(o.world[1])), glm::length(glm::vec3(o.world[2])), float(item->material));
-                    gpu.ids = glm::uvec4(o.entityId + 1, 0, 0, 0);
-                    gpu.uvScale = glm::vec4(o.renderer.uvScale, 0.0f, 0.0f);
-                    const MeshEntry& mesh = g->meshes[item->mesh];
-                    if (commands.size() == first || commands.back().firstIndex != mesh.firstIndex) {
-                        commands.push_back({ mesh.indexCount, 0, mesh.firstIndex, mesh.baseVertex, uint32_t(instances.size()) });
-                    }
-                    ++commands.back().instanceCount;
-                    instances.push_back(gpu);
+            // ---------------------------------------------------------- instances, remap lists, indirect commands
+            // Each object gets one instance (sorted by mesh) in the persistent ring. Draw commands index a
+            // per-view remap list of instance indices: CPU culling fills it here, GPU culling (cull.comp)
+            // fills it on the GPU and bumps the commands' instanceCount directly.
+            std::vector<Advanced::SoftBodyDraw> softDraws;
+            std::vector<Advanced::SpriteDraw> spriteDraws;
+            Advanced::CollectDraws(softDraws, spriteDraws);
+            std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.mesh < b.mesh; });
+            const uint32_t itemCount = uint32_t(items.size());
+            std::vector<uint32_t> slotOfMesh(g->meshes.size(), UINT32_MAX), slotFirst, slotCount, slotMesh;
+            for (uint32_t i = 0; i < itemCount; ++i) {
+                const uint32_t m = items[i].mesh;
+                if (slotOfMesh[m] == UINT32_MAX) {
+                    slotOfMesh[m] = uint32_t(slotMesh.size());
+                    slotMesh.push_back(m);
+                    slotFirst.push_back(i);
+                    slotCount.push_back(0);
                 }
-                return std::pair<size_t, size_t>(first, commands.size() - first);
+                ++slotCount[slotOfMesh[m]];
+            }
+            const uint32_t slots = uint32_t(slotMesh.size());
+            const uint32_t softBase = itemCount;                       // soft-body instances follow the mesh items
+            const uint32_t instanceCount = std::max(itemCount + uint32_t(softDraws.size()), 1u);
+            const size_t instanceBytes = instanceCount * sizeof(InstanceGpu);
+            const size_t cullBytes = std::max(itemCount, 1u) * sizeof(CullObjectGpu);
+            g->ring.BeginFrame(instanceBytes + cullBytes + 4 * size_t(g->ssboAlignment) + 1024);
+            const size_t instanceOffset = g->ring.Allocate(instanceBytes, size_t(g->ssboAlignment));
+            const size_t cullOffset = g->ring.Allocate(cullBytes, size_t(g->ssboAlignment));
+            InstanceGpu* instances = static_cast<InstanceGpu*>(g->ring.Pointer(instanceOffset));
+            CullObjectGpu* cullObjects = static_cast<CullObjectGpu*>(g->ring.Pointer(cullOffset));
+            for (uint32_t i = 0; i < itemCount; ++i) {
+                const Item& item = items[i];
+                const Object& o = *item.object;
+                InstanceGpu gpu;
+                gpu.model = o.world;
+                gpu.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(o.world)));
+                gpu.scaleMaterial = glm::vec4(glm::length(glm::vec3(o.world[0])), glm::length(glm::vec3(o.world[1])), glm::length(glm::vec3(o.world[2])), float(item.material));
+                gpu.ids = glm::uvec4(o.entityId + 1, 0, 0, 0);
+                gpu.uvScale = glm::vec4(o.renderer.uvScale, 0.0f, 0.0f);
+                instances[i] = gpu;
+                cullObjects[i] = { glm::vec4(item.center, item.radius), glm::uvec4(slotOfMesh[item.mesh], i, 0, 0) };
+            }
+            for (size_t k = 0; k < softDraws.size(); ++k) {
+                uint32_t material = 0;
+                auto m = g->materialByName.find(softDraws[k].material);
+                if (m != g->materialByName.end()) material = m->second;
+                InstanceGpu gpu;
+                gpu.model = glm::mat4(1.0f);
+                gpu.normalMatrix = glm::mat4(1.0f);
+                gpu.scaleMaterial = glm::vec4(1.0f, 1.0f, 1.0f, float(material));
+                gpu.ids = glm::uvec4(softDraws[k].entityId + 1, 0, 0, 0);
+                gpu.uvScale = glm::vec4(1.0f);
+                instances[softBase + k] = gpu;
+            }
+            if (itemCount + softDraws.size() == 0) instances[0] = InstanceGpu{};
+
+            // Remap layout: [shadow casters][view 0][view 1]..., each itemCount long with a slice per mesh.
+            // Command layout: [casters: slots][view 0: slots][view 1: slots]...
+            const bool gpuCulling = settings.gpuCulling && itemCount > 0;
+            std::vector<uint32_t> remap(std::max<size_t>(size_t(itemCount) * (views.size() + 1), 1), 0);
+            std::vector<DrawCommand> commands(size_t(slots) * (views.size() + 1));
+            auto initCommands = [&](size_t block) {
+                for (uint32_t k = 0; k < slots; ++k) {
+                    const MeshEntry& mesh = g->meshes[slotMesh[k]];
+                    commands[block * slots + k] = { mesh.indexCount, 0, mesh.firstIndex, mesh.baseVertex, uint32_t(block * itemCount + slotFirst[k]) };
+                }
             };
-            std::vector<const Item*> casters;
-            for (const Item& item : items) if (item.object->renderer.castShadows) casters.push_back(&item);
-            const auto [casterFirst, casterCount] = append(casters);
+            auto addVisible = [&](size_t block, uint32_t item) {
+                DrawCommand& c = commands[block * slots + slotOfMesh[items[item].mesh]];
+                remap[c.baseInstance + c.instanceCount++] = item;
+            };
+            initCommands(0);
+            for (uint32_t i = 0; i < itemCount; ++i) if (items[i].object->renderer.castShadows) addVisible(0, i);
+            const size_t casterFirst = 0, casterCount = slots;
             bool firstWindowView = true;
-            for (View& v : views) {
-                const RenderMath::Frustum frustum = RenderMath::ExtractFrustum(v.viewProjection);
-                std::vector<const Item*> visible;
-                for (const Item& item : items) {
-                    if (frustum.IntersectsSphere(item.center, item.radius)) visible.push_back(&item);
-                    else ++stats.instancesCulled;
+            for (size_t vi = 0; vi < views.size(); ++vi) {
+                View& v = views[vi];
+                initCommands(vi + 1);
+                v.firstCommand = (vi + 1) * slots;
+                v.commandCount = slots;
+                if (!gpuCulling) {
+                    const RenderMath::Frustum frustum = RenderMath::ExtractFrustum(v.viewProjection);
+                    for (uint32_t i = 0; i < itemCount; ++i) {
+                        if (frustum.IntersectsSphere(items[i].center, items[i].radius)) addVisible(vi + 1, i);
+                        else ++stats.instancesCulled;
+                    }
+                    for (size_t c = v.firstCommand; c < v.firstCommand + v.commandCount; ++c) {
+                        stats.instancesDrawn += commands[c].instanceCount;
+                        stats.trianglesDrawn += commands[c].count / 3 * commands[c].instanceCount;
+                    }
                 }
-                stats.instancesDrawn += uint32_t(visible.size());
-                std::tie(v.firstCommand, v.commandCount) = append(visible);
-                for (size_t i = v.firstCommand; i < v.firstCommand + v.commandCount; ++i) stats.trianglesDrawn += commands[i].count / 3 * commands[i].instanceCount;
-                if (firstWindowView && v.target == &g->window) { stats.drawCommands = uint32_t(v.commandCount); firstWindowView = false; }
+                if (firstWindowView && v.target == &g->window) { stats.drawCommands = slots; firstWindowView = false; }
             }
             stats.views = uint32_t(views.size());
-            if (instances.empty()) instances.push_back(InstanceGpu{});
-            g->instanceBuffer.Upload(instances.data(), instances.size() * sizeof(InstanceGpu));
+            g->remapBuffer.Upload(remap.data(), remap.size() * sizeof(uint32_t));
             if (!commands.empty()) g->indirectBuffer.Upload(commands.data(), commands.size() * sizeof(DrawCommand));
 
             // ---------------------------------------------------------- per-view frame data
@@ -874,11 +995,54 @@ namespace Phisiks::Render {
             g->frameUbo.Upload(frameBytes.data(), frameBytes.size());
 
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g->lightBuffer.Id());
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g->instanceBuffer.Id());
+            glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, g->ring.Id(), GLintptr(instanceOffset), GLsizeiptr(instanceBytes));
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g->materialBuffer.Id());
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, g->remapBuffer.Id());
             glBindBuffer(GL_DRAW_INDIRECT_BUFFER, g->indirectBuffer.Id());
             glBindVertexArray(g->meshVao);
             if (!views.empty()) glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->frameUbo.Id(), 0, sizeof(FrameDataGpu));
+
+            // ---------------------------------------------------------- GPU culling (frustum + Hi-Z occlusion)
+            const int statsSlot = int(g->cullFrame % State::CULL_SLOTS);
+            stats.gpuCulling = gpuCulling;
+            if (gpuCulling && !views.empty()) {
+                const uint32_t zero = 0;
+                glClearNamedBufferData(g->cullStats[statsSlot], GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
+                const GL::Program& cull = g->programs[Shaders::CULL];
+                cull.Use();
+                glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 4, g->ring.Id(), GLintptr(cullOffset), GLsizeiptr(cullBytes));
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, g->indirectBuffer.Id());
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, g->remapBuffer.Id());
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, g->cullStats[statsSlot]);
+                glBindTextureUnit(0, g->hizValid ? g->hiz.Id() : g->fontAtlas.Id());
+                glUniform1ui(cull.Uniform("u_objectCount"), itemCount);
+                glUniform1i(cull.Uniform("u_hizLevels"), std::max(g->hizLevels, 1));
+                size_t windowView = 0;
+                for (size_t vi = 0; vi < views.size(); ++vi) {
+                    const View& v = views[vi];
+                    const RenderMath::Frustum frustum = RenderMath::ExtractFrustum(v.viewProjection);
+                    glUniform4fv(cull.Uniform("u_planes"), 6, &frustum.planes[0][0]);
+                    glUniform1ui(cull.Uniform("u_commandBase"), uint32_t(v.firstCommand));
+                    // Occlusion needs last frame's pyramid for this same window view.
+                    bool occlusion = false;
+                    if (v.target == &g->window) {
+                        occlusion = settings.occlusionCulling && g->hizValid && g->hizSize == windowSize &&
+                                    windowView < g->hizViewProjections.size() && g->hizRects[windowView] == v.rect;
+                        if (occlusion) {
+                            glUniformMatrix4fv(cull.Uniform("u_prevViewProjection"), 1, GL_FALSE, &g->hizViewProjections[windowView][0][0]);
+                            glUniform4f(cull.Uniform("u_hizRect"), float(v.rect.x), float(v.rect.y), float(v.rect.z), float(v.rect.w));
+                        }
+                        ++windowView;
+                    }
+                    glUniform1i(cull.Uniform("u_occlusion"), occlusion ? 1 : 0);
+                    stats.occlusionActive = stats.occlusionActive || occlusion;
+                    glDispatchCompute((itemCount + 63) / 64, 1, 1);
+                }
+                glMemoryBarrier(GL_COMMAND_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+                stats.instancesDrawn = g->gpuVisible;
+                stats.instancesCulled = g->gpuFrustumCulled + g->gpuOcclusionCulled;
+                stats.occlusionCulled = g->gpuOcclusionCulled;
+            }
 
             // ---------------------------------------------------------- shadow maps
             const float one = 1.0f;
@@ -889,6 +1053,19 @@ namespace Phisiks::Render {
                 glClearNamedFramebufferfv(g->shadowFbo.Id(), GL_DEPTH, 0, &one);
                 glUniformMatrix4fv(program.Uniform("u_lightViewProjection"), 1, GL_FALSE, &viewProj[0][0]);
                 DrawCommands(casterFirst, casterCount);
+                if (!softDraws.empty() && program.Id() == g->programs[Shaders::SHADOW].Id()) {
+                    const GL::Program& softShadow = g->programs[Shaders::SOFTBODY_SHADOW];
+                    softShadow.Use();
+                    glUniformMatrix4fv(softShadow.Uniform("u_lightViewProjection"), 1, GL_FALSE, &viewProj[0][0]);
+                    for (const Advanced::SoftBodyDraw& d : softDraws) {
+                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.positions);
+                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, d.normals);
+                        glBindVertexArray(d.vao);
+                        glDrawElements(GL_TRIANGLES, GLsizei(d.indexCount), GL_UNSIGNED_INT, nullptr);
+                    }
+                    glBindVertexArray(g->meshVao);
+                    program.Use();
+                }
                 ++stats.shadowViews;
             };
             auto beginShadowPass = [&] {
@@ -901,7 +1078,7 @@ namespace Phisiks::Render {
                 glEnable(GL_POLYGON_OFFSET_FILL);
                 glPolygonOffset(1.5f, 2.0f);
             };
-            if (shadows && casterCount > 0 && !views.empty()) {
+            if (shadows && (casterCount > 0 || !softDraws.empty()) && !views.empty()) {
                 beginShadowPass();
                 const GL::Program& shadow = g->programs[Shaders::SHADOW];
                 shadow.Use();
@@ -927,6 +1104,23 @@ namespace Phisiks::Render {
                 glDisable(GL_POLYGON_OFFSET_FILL);
             }
 
+            // ---------------------------------------------------------- visualiser inputs (once per frame)
+            uint32_t fieldSamples = 0, fieldSampleCount = 0;
+            if (g->fieldViz.enabled && Advanced::Available()) {
+                const glm::ivec3 res = glm::max(g->fieldViz.resolution, glm::ivec3(1));
+                fieldSampleCount = uint32_t(res.x * res.y * res.z);
+                fieldSamples = Advanced::SampleFieldGrid(g->fieldViz.boundsMin, g->fieldViz.boundsMax, res);
+                glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+            }
+            if (g->sdf.enabled && !g->sdf.primitives.empty()) {
+                std::vector<SdfPrimitiveGpu> prims;
+                for (const SdfPrimitive& pr : g->sdf.primitives) {
+                    prims.push_back({ glm::vec4(pr.position, float(uint32_t(pr.shape))), glm::vec4(pr.rotation.x, pr.rotation.y, pr.rotation.z, pr.rotation.w),
+                                      pr.params, glm::vec4(float(uint32_t(pr.operation)), pr.smoothness, 0.0f, 0.0f) });
+                }
+                g->sdfBuffer.Upload(prims.data(), prims.size() * sizeof(SdfPrimitiveGpu));
+            }
+
             // ---------------------------------------------------------- clear targets used this frame
             const glm::vec4 clear(settings.clearColor.r, settings.clearColor.g, settings.clearColor.b, 1.0f);
             const GLuint noEntity[4] = { 0, 0, 0, 0 };
@@ -945,7 +1139,7 @@ namespace Phisiks::Render {
             for (size_t i = 0; i < views.size(); ++i) {
                 View& v = views[i];
                 glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->frameUbo.Id(), GLintptr(i * stride), sizeof(FrameDataGpu));
-                if (shadows && dirShadowLight && casterCount > 0) {
+                if (shadows && dirShadowLight && (casterCount > 0 || !softDraws.empty())) {
                     beginShadowPass();
                     const GL::Program& shadow = g->programs[Shaders::SHADOW];
                     shadow.Use();
@@ -975,14 +1169,77 @@ namespace Phisiks::Render {
                 g->programs[Shaders::FORWARD].Use();
                 DrawCommands(v.firstCommand, v.commandCount);
 
-                // sky (far plane, only where nothing was drawn) and debug lines: colour only
-                glColorMaski(1, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+                // XPBD cloth / soft bodies (two-sided), straight from the solver buffers
+                if (!softDraws.empty()) {
+                    glDisable(GL_CULL_FACE);
+                    const GL::Program& soft = g->programs[Shaders::SOFTBODY];
+                    soft.Use();
+                    for (size_t k = 0; k < softDraws.size(); ++k) {
+                        const Advanced::SoftBodyDraw& d = softDraws[k];
+                        glUniform1ui(soft.Uniform("u_instance"), softBase + uint32_t(k));
+                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.positions);
+                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, d.normals);
+                        glBindVertexArray(d.vao);
+                        glDrawElements(GL_TRIANGLES, GLsizei(d.indexCount), GL_UNSIGNED_INT, nullptr);
+                    }
+                    stats.softBodiesDrawn = uint32_t(softDraws.size());
+                    glEnable(GL_CULL_FACE);
+                }
+                // GPU particles and rope nodes as shaded sphere sprites
+                if (!spriteDraws.empty()) {
+                    glEnable(GL_PROGRAM_POINT_SIZE);
+                    const GL::Program& sprites = g->programs[Shaders::SPRITES];
+                    sprites.Use();
+                    const Camera& cam = v.input->camera;
+                    const float pointScale = cam.projection == Projection::Orthographic ? float(v.rect.w) / std::max(cam.orthoHeight, 1e-3f)
+                                                                                          : float(v.rect.w) / (2.0f * std::tan(cam.verticalFov * 0.5f));
+                    glUniform1f(sprites.Uniform("u_pointScale"), pointScale);
+                    glBindVertexArray(g->emptyVao);
+                    uint32_t drawn = 0;
+                    for (const Advanced::SpriteDraw& d : spriteDraws) {
+                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.buffer);
+                        glUniform1ui(sprites.Uniform("u_stride"), d.stride);
+                        glUniform1f(sprites.Uniform("u_radius"), d.radius);
+                        glUniform3fv(sprites.Uniform("u_color"), 1, &d.color[0]);
+                        glUniform3fv(sprites.Uniform("u_fastColor"), 1, &d.fastColor[0]);
+                        glUniform1f(sprites.Uniform("u_fastSpeed"), d.fastSpeed);
+                        glUniform1ui(sprites.Uniform("u_entityId"), d.entityId + 1);
+                        glDrawArrays(GL_POINTS, 0, GLsizei(d.count));
+                        drawn += d.count;
+                    }
+                    stats.particlesDrawn = drawn;
+                    glDisable(GL_PROGRAM_POINT_SIZE);
+                }
+                // Analytical SDF / CSG visualiser (raymarched, writes depth and the entity id)
+                if (g->sdf.enabled && !g->sdf.primitives.empty()) {
+                    glDisable(GL_CULL_FACE);
+                    const GL::Program& sdf = g->programs[Shaders::SDF];
+                    sdf.Use();
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 12, g->sdfBuffer.Id());
+                    glUniform1i(sdf.Uniform("u_sdfCount"), int(g->sdf.primitives.size()));
+                    glUniform3fv(sdf.Uniform("u_boundsMin"), 1, &g->sdf.boundsMin[0]);
+                    glUniform3fv(sdf.Uniform("u_boundsMax"), 1, &g->sdf.boundsMax[0]);
+                    glUniform4f(sdf.Uniform("u_surface"), g->sdf.color.r, g->sdf.color.g, g->sdf.color.b, g->sdf.roughness);
+                    glUniform1f(sdf.Uniform("u_metallic"), g->sdf.metallic);
+                    glUniform1ui(sdf.Uniform("u_entityId"), g->sdf.entityId == UINT32_MAX ? 0u : g->sdf.entityId + 1);
+                    glUniform1i(sdf.Uniform("u_showSlice"), g->sdf.showSlice ? 1 : 0);
+                    glUniform4fv(sdf.Uniform("u_slicePlane"), 1, &g->sdf.slicePlane[0]);
+                    glBindVertexArray(g->emptyVao);
+                    glDrawArrays(GL_TRIANGLES, 0, 3);
+                    glEnable(GL_CULL_FACE);
+                }
+
+                // Sky on the far plane, i.e. every pixel nothing was drawn to. It also writes entity id 0
+                // there: on the Intel UHD driver the cleared integer MSAA id attachment resolved stale ids
+                // from earlier frames in untouched pixels (found by the P7 SDF silhouette check), so the
+                // id of every pixel is now written by a draw each frame instead of relying on the clear.
                 glDepthMask(GL_FALSE);
                 glDepthFunc(GL_LEQUAL);
                 glDisable(GL_CULL_FACE);
                 g->programs[Shaders::SKY].Use();
                 glBindVertexArray(g->emptyVao);
                 glDrawArrays(GL_TRIANGLES, 0, 3);
+                glColorMaski(1, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);   // debug lines / arrows: colour only
                 if (!g->lines.empty() && v.target == &g->window) {
                     g->lineBuffer.Upload(g->lines.data(), g->lines.size() * sizeof(LineVertex));
                     g->programs[Shaders::LINES].Use();
@@ -990,10 +1247,75 @@ namespace Phisiks::Render {
                     glVertexArrayVertexBuffer(g->lineVao, 0, g->lineBuffer.Id(), 0, sizeof(LineVertex));
                     glDrawArrays(GL_LINES, 0, GLsizei(g->lines.size()));
                 }
+                if (fieldSamples && v.target == &g->window) {
+                    const GL::Program& arrows = g->programs[Shaders::ARROWS];
+                    arrows.Use();
+                    const FieldVisualization& fv = g->fieldViz;
+                    glUniform3i(arrows.Uniform("u_resolution"), fv.resolution.x, fv.resolution.y, fv.resolution.z);
+                    glUniform3fv(arrows.Uniform("u_boundsMin"), 1, &fv.boundsMin[0]);
+                    glUniform3fv(arrows.Uniform("u_boundsMax"), 1, &fv.boundsMax[0]);
+                    glUniform1f(arrows.Uniform("u_arrowScale"), fv.arrowScale);
+                    glUniform1f(arrows.Uniform("u_maxLength"), fv.maxLength);
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 14, fieldSamples);
+                    glBindVertexArray(g->emptyVao);
+                    glDrawArrays(GL_LINES, 0, GLsizei(fieldSampleCount * 6));
+                }
                 glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
                 glDepthMask(GL_TRUE);
                 glDepthFunc(GL_LESS);
                 glDisable(GL_SCISSOR_TEST);
+            }
+
+            // ---------------------------------------------------------- Hi-Z pyramid for next frame's occlusion culling
+            if (settings.gpuCulling && settings.occlusionCulling && !views.empty()) {
+                if (g->hizSize != windowSize) {
+                    g->hizSize = windowSize;
+                    g->hizLevels = 1 + int(std::floor(std::log2(float(std::max(windowSize.x, windowSize.y)))));
+                    GL::TextureDesc d;
+                    d.width = windowSize.x;
+                    d.height = windowSize.y;
+                    d.format = GL_DEPTH_COMPONENT32F;
+                    d.minFilter = d.magFilter = GL_NEAREST;
+                    g->hizDepth.Create("Hi-Z depth", d);
+                    g->hizDepthFbo.Create("Hi-Z depth");
+                    g->hizDepthFbo.AttachDepth(g->hizDepth);
+                    g->hizDepthFbo.SetDrawBuffers(0);
+                    d.format = GL_R32F;
+                    d.levels = g->hizLevels;
+                    d.minFilter = GL_NEAREST_MIPMAP_NEAREST;
+                    g->hiz.Create("Hi-Z pyramid", d);
+                    g->hizValid = false;
+                }
+                glDisable(GL_SCISSOR_TEST);
+                glBlitNamedFramebuffer(g->window.mainFbo.Id(), g->hizDepthFbo.Id(), 0, 0, windowSize.x, windowSize.y, 0, 0, windowSize.x, windowSize.y,
+                                       GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+                const GL::Program& init = g->programs[Shaders::HIZ_INIT];
+                init.Use();
+                glBindTextureUnit(0, g->hizDepth.Id());
+                glBindImageTexture(1, g->hiz.Id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+                glDispatchCompute((windowSize.x + 7) / 8, (windowSize.y + 7) / 8, 1);
+                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+                const GL::Program& down = g->programs[Shaders::HIZ_DOWNSAMPLE];
+                down.Use();
+                for (int level = 1; level < g->hizLevels; ++level) {
+                    const int w = std::max(windowSize.x >> level, 1), h = std::max(windowSize.y >> level, 1);
+                    glBindImageTexture(0, g->hiz.Id(), level - 1, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
+                    glBindImageTexture(1, g->hiz.Id(), level, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+                    glDispatchCompute((w + 7) / 8, (h + 7) / 8, 1);
+                    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+                }
+                glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+                g->hizViewProjections.clear();
+                g->hizRects.clear();
+                for (const View& v : views) {
+                    if (v.target != &g->window) continue;
+                    g->hizViewProjections.push_back(v.viewProjection);
+                    g->hizRects.push_back(v.rect);
+                }
+                g->hizValid = true;
+            }
+            else {
+                g->hizValid = false;
             }
 
             // ---------------------------------------------------------- resolve + tonemap every used target
@@ -1026,6 +1348,29 @@ namespace Phisiks::Render {
 
             glBindVertexArray(0);
             glEnable(GL_DEPTH_TEST);
+            g->ring.EndFrame();
+            if (gpuCulling && !views.empty()) {
+                if (g->cullFences[statsSlot]) glDeleteSync(g->cullFences[statsSlot]);   // never read: dropped
+                g->cullFences[statsSlot] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+                // Newest finished slot wins; older finished ones are retired.
+                for (int age = State::CULL_SLOTS - 1; age >= 1; --age) {
+                    if (g->cullFrame < uint64_t(age)) continue;
+                    const int slot = int((g->cullFrame - uint64_t(age)) % State::CULL_SLOTS);
+                    GLsync& fence = g->cullFences[slot];
+                    if (!fence) continue;
+                    const GLenum status = glClientWaitSync(fence, 0, 0);
+                    if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED) continue;
+                    uint32_t counters[4] = {};
+                    glGetNamedBufferSubData(g->cullStats[slot], 0, sizeof(counters), counters);
+                    g->gpuVisible = counters[0];
+                    g->gpuFrustumCulled = counters[1];
+                    g->gpuOcclusionCulled = counters[2];
+                    glDeleteSync(fence);
+                    fence = nullptr;
+                }
+                ++g->cullFrame;
+            }
+            stats.ringBlockedWaits = g->ring.BlockedWaits();
             g->lines.clear();
             g->text.clear();
             g->frameStats = stats;

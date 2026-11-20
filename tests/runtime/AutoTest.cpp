@@ -4,6 +4,14 @@
 #include "Phisiks/Core/Log.h"
 #include "Phisiks/Core/Time.h"
 #include "SandboxScenes.h"
+#include "FieldLab.h"
+#include "SceneBuilder.h"
+#include "Phisiks/Compute/Compute.h"
+#include "Phisiks/Physics/Advanced.h"
+#include "Phisiks/Physics/Fields.h"
+#include "Phisiks/Physics/Xpbd.h"
+#include "Phisiks/Render/Renderer.h"
+#include <glm/gtc/constants.hpp>
 
 #include "Phisiks/Physics/Physics.h"
 #include "Phisiks/Framework/GameplayComponents.h"
@@ -16,6 +24,8 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <memory>
+#include <random>
 #include <set>
 #include <sstream>
 
@@ -265,7 +275,7 @@ namespace Phisiks {
 
             const Render::ShaderCacheStats cache = Render::GetShaderCacheStats();
             Expect("shader programs built (cache or compile), none failed",
-                   cache.programs == 7 && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
+                   cache.programs == 29 && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
                    F("%.0f programs: %.0f from cache, %.0f compiled, ", cache.programs, cache.loadedFromCache, cache.compiled) + F("%.0f written, %.0f failed", cache.written, cache.failures));
             const RenderStats render = GetRenderStats();
             Expect("indirect drawing: at most one command per mesh type", render.drawCommands <= render.meshesLoaded && render.instancesDrawn >= 10,
@@ -756,6 +766,146 @@ namespace Phisiks {
             }
         } });
 
+        // 9e. GPU-driven culling: the compute path must produce exactly the CPU path's image and counts.
+        m_steps.push_back({ "GPU culling: compute shader vs CPU (identical frame)", [this](GameContext& ctx) {
+            Render::RenderSettings& rs = Render::Settings();
+            switch (m_phase) {
+                case 0:
+                    ctx.camera.SetMode(CameraMode::FirstPerson);
+                    ctx.player.Teleport(PLAYER_SPAWN);
+                    ctx.camera.SetYawPitch(0.0f, -0.1f);
+                    rs.gpuCulling = true;
+                    rs.occlusionCulling = false;
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_phase = 1;
+                    return false;
+                case 1:
+                    if (StepSimTime(ctx) - m_scratch[0] < 0.5) return false;
+                    ctx.input.InjectPress(Action::Pause);          // freeze animation: both frames must be identical
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (m_stepFrames - m_scratch[0] < 8) return false;   // GPU counters are read back 2 frames late
+                    const RenderStats r = GetRenderStats();
+                    m_scratch[1] = float(r.instancesDrawn);
+                    m_scratch[2] = float(r.instancesCulled);
+                    m_scratch[3] = r.gpuCulling ? 1.0f : 0.0f;
+                    RequestCapture();
+                    m_phase = 3;
+                    return false;
+                }
+                case 3:
+                    if (!m_captureReady) return false;
+                    m_reference = m_capture;
+                    rs.gpuCulling = false;
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 4;
+                    return false;
+                case 4:
+                    if (m_stepFrames - m_scratch[0] < 3) return false;
+                    RequestCapture();
+                    m_phase = 5;
+                    return false;
+                case 99: return ctx.state == GameState::Running;
+                default: {
+                    if (!m_captureReady) return false;
+                    const RenderStats cpu = GetRenderStats();
+                    Expect("GPU culling ran in a compute shader", m_scratch[3] == 1.0f && !cpu.gpuCulling, "gpuCulled flag set with GPU path, clear with CPU path");
+                    Expect("GPU visible / culled counts equal the CPU frustum test",
+                           double(m_scratch[1]) == double(cpu.instancesDrawn) && double(m_scratch[2]) == double(cpu.instancesCulled) && cpu.instancesDrawn > 0,
+                           F("GPU %.0f drawn / %.0f culled, CPU %.0f drawn / ", m_scratch[1], m_scratch[2], cpu.instancesDrawn) + F("%.0f culled", cpu.instancesCulled));
+                    size_t differing = 0;
+                    const size_t n = std::min(m_capture.entityIds.size(), m_reference.entityIds.size());
+                    for (size_t i = 0; i < n; ++i) differing += m_capture.entityIds[i] != m_reference.entityIds[i];
+                    Expect("entity-id image identical with GPU and CPU culling", n > 0 && differing == 0,
+                           F("%.0f of %.0f pixels differ", double(differing), double(n)));
+                    rs.gpuCulling = true;
+                    rs.occlusionCulling = true;
+                    ctx.input.InjectPress(Action::Pause);   // resume (injected input is cleared when a step ends)
+                    m_phase = 99;
+                    return false;
+                }
+            }
+        } });
+
+        // 9f. Hi-Z occlusion: a box hidden behind the wall is culled, nothing visible is.
+        m_steps.push_back({ "GPU culling: Hi-Z occlusion", [this](GameContext& ctx) {
+            Render::RenderSettings& rs = Render::Settings();
+            Scene& scene = *ctx.CurrentScene();
+            switch (m_phase) {
+                case 0:
+                    ctx.camera.SetMode(CameraMode::FirstPerson);
+                    ctx.player.Teleport(glm::vec3(0.0f, 0.05f, -5.0f));   // 2.75 m in front of the wall
+                    ctx.camera.SetYawPitch(0.0f, 0.0f);
+                    rs.gpuCulling = true;
+                    rs.occlusionCulling = true;
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_phase = 1;
+                    return false;
+                case 1:
+                    if (StepSimTime(ctx) - m_scratch[0] < 0.5) return false;
+                    ctx.input.InjectPress(Action::Pause);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (m_stepFrames - m_scratch[0] < 8) return false;
+                    const RenderStats r = GetRenderStats();
+                    m_scratch[1] = float(r.occlusionCulled);
+                    m_scratch[4] = r.occlusionActive ? 1.0f : 0.0f;
+                    // 0.8 m box 3 m behind the wall, entirely below the wall's top edge from this eye point
+                    Lab::SceneBuilder::AddStaticBox(scene, "OcclusionProbe", glm::vec3(0.0f, 0.4f, WALL_CENTER.z - 3.0f), glm::vec3(0.8f), "Sandbox/Ground");
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 3;
+                    return false;
+                }
+                case 3: {
+                    if (m_stepFrames - m_scratch[0] < 8) return false;
+                    m_scratch[2] = float(GetRenderStats().occlusionCulled);
+                    RequestCapture();
+                    m_phase = 4;
+                    return false;
+                }
+                case 4:
+                    if (!m_captureReady) return false;
+                    m_reference = m_capture;
+                    rs.occlusionCulling = false;
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 5;
+                    return false;
+                case 5:
+                    if (m_stepFrames - m_scratch[0] < 3) return false;
+                    RequestCapture();
+                    m_phase = 6;
+                    return false;
+                case 99:
+                    if (ctx.state != GameState::Running) return false;
+                    ctx.player.Teleport(PLAYER_SPAWN);
+                    return true;
+                default: {
+                    if (!m_captureReady) return false;
+                    const RenderStats off = GetRenderStats();
+                    Expect("Hi-Z occlusion active for the window view", m_scratch[4] == 1.0f, "previous-frame depth pyramid valid");
+                    Expect("hidden probe box is occlusion-culled (count rises by exactly 1)", m_scratch[2] == m_scratch[1] + 1.0f,
+                           F("occlusion-culled %.0f without the probe, %.0f with it", m_scratch[1], m_scratch[2]));
+                    const Entity probe = Find(ctx, "OcclusionProbe");
+                    Expect("probe is really hidden (0 pixels with occlusion off)", CountId(m_capture, PixelId(probe)) == 0,
+                           F("%.0f probe pixels", double(CountId(m_capture, PixelId(probe)))));
+                    size_t differing = 0;
+                    const size_t n = std::min(m_capture.entityIds.size(), m_reference.entityIds.size());
+                    for (size_t i = 0; i < n; ++i) differing += m_capture.entityIds[i] != m_reference.entityIds[i];
+                    Expect("occlusion culling removes nothing visible (identical id image)", n > 0 && differing == 0 && !off.occlusionActive,
+                           F("%.0f of %.0f pixels differ", double(differing), double(n)));
+                    if (probe.Valid()) scene.DestroyImmediate(probe);
+                    rs.occlusionCulling = true;
+                    ctx.input.InjectPress(Action::Pause);
+                    m_phase = 99;
+                    return false;
+                }
+            }
+        } });
+
         // 10. Scene transition releases everything from the previous scene.
         m_steps.push_back({ "Scene transition to PhysicsTower", [this](GameContext& ctx) {
             if (m_phase == 0) { ctx.scenes->Request("PhysicsTower"); m_phase = 1; return false; }
@@ -777,6 +927,310 @@ namespace Phisiks {
             return true;
         } });
 
+        // 10b. FieldLab: GPU particles, XPBD cloth / rope / soft box, force fields on rigid bodies.
+        {
+            auto snapshot = std::make_shared<std::vector<glm::vec4>>();
+            m_steps.push_back({ "FieldLab: GPU particles, XPBD and force fields", [this, snapshot](GameContext& ctx) {
+                using namespace Lab::FieldLayout;
+                namespace Adv = Physics::Advanced;
+                switch (m_phase) {
+                    case 0: ctx.scenes->Request("FieldLab"); m_phase = 1; return false;
+                    case 1:
+                        if (ctx.scenes->CurrentName() != "FieldLab") return false;
+                        m_scratch[0] = float(StepSimTime(ctx));
+                        m_phase = 2;
+                        return false;
+                    case 2: {
+                        if (StepSimTime(ctx) - m_scratch[0] < 2.0) return false;
+                        const Adv::Stats s = Adv::GetStats();
+                        Expect("GPU compute available on this device", s.gpuAvailable, "OpenGL 4.6 compute");
+                        Expect("GPU systems created", s.particles == PARTICLES && s.particleSystems == 1 && s.softBodies == 4 && s.colorsMax >= 2,
+                               F("%.0f particles, %.0f soft bodies, %.0f nodes, ", s.particles, s.softBodies, s.softBodyNodes) +
+                               F("%.0f constraints in up to %.0f colours", s.constraints, s.colorsMax));
+                        // fused solver: 1 solve + (cloth/box) 1 normals dispatch per soft body; particles: hash count,
+                        // 3 scan passes, scatter, step (+ n-body if enabled); far below substeps * colours.
+                        Expect("GPU physics step is a handful of dispatches (fused XPBD)", s.dispatchesLastStep > 0 && s.dispatchesLastStep <= 16,
+                               F("%.0f dispatches, %.2f ms CPU to record the step", s.dispatchesLastStep, s.cpuMsLastStep));
+                        const RenderStats r = GetRenderStats();
+                        Expect("particles and rope nodes drawn as sprites, cloth and jelly as meshes",
+                               r.particlesDrawn == PARTICLES + 27 && r.softBodiesDrawn == 3,
+                               F("%.0f sprites, %.0f soft-body meshes", r.particlesDrawn, r.softBodiesDrawn));
+
+                        // particles: all finite and above the ground
+                        Adv::ReadParticles(Find(ctx, "Particles"), *snapshot);
+                        bool finite = snapshot->size() == PARTICLES;
+                        float minY = 1e9f;
+                        for (const glm::vec4& p : *snapshot) { finite = finite && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z); minY = std::min(minY, p.y); }
+                        Expect("particles finite and resting on or above the ground", finite && minY >= PARTICLE_RADIUS - 0.005f,
+                               F("%.0f particles, lowest centre y %.4f m (radius %.3f)", double(snapshot->size()), minY, PARTICLE_RADIUS));
+
+                        // soft bodies
+                        std::vector<glm::vec4> x;
+                        auto allFinite = [&] { for (const glm::vec4& p : x) if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) return false; return !x.empty(); };
+                        Adv::ReadSoftBody(Find(ctx, "Curtain"), x);
+                        int pins = 0; float pinY = 0.0f;
+                        for (const glm::vec4& p : x) if (p.w == 0.0f) { ++pins; pinY = p.y; }
+                        Expect("curtain hangs from its two pinned corners", allFinite() && pins == 2 && std::abs(pinY - 3.6f) < 1e-4f,
+                               F("%.0f nodes, %.0f pinned at y %.4f", double(x.size()), pins, pinY));
+                        Adv::ReadSoftBody(Find(ctx, "Drape"), x);
+                        float closest = 1e9f, highest = -1e9f;
+                        for (const glm::vec4& p : x) { closest = std::min(closest, glm::length(glm::vec3(p) - DRAPE_SPHERE_CENTER)); highest = std::max(highest, p.y); }
+                        Expect("draped cloth rests on the sphere collider without passing through",
+                               allFinite() && closest >= DRAPE_SPHERE_RADIUS - 0.01f && closest < DRAPE_SPHERE_RADIUS + 0.1f && highest < DRAPE_SPHERE_CENTER.y + 1.2f,
+                               F("closest node %.3f m from centre (sphere radius %.2f), highest y %.2f", closest, DRAPE_SPHERE_RADIUS, highest));
+                        Adv::ReadSoftBody(Find(ctx, "Rope"), x);
+                        Expect("rope: 27 nodes, first one pinned in place", allFinite() && x.size() == 27 && x[0].w == 0.0f &&
+                               glm::length(glm::vec3(x[0]) - glm::vec3(-0.5f, 4.2f, -1.0f)) < 1e-4f,
+                               F("%.0f nodes, last node y %.2f", double(x.size()), x.empty() ? 0.0 : x.back().y));
+                        Adv::ReadSoftBody(Find(ctx, "Jelly"), x);
+                        float lo = 1e9f, hi = -1e9f;
+                        for (const glm::vec4& p : x) { lo = std::min(lo, p.y); hi = std::max(hi, p.y); }
+                        Expect("soft box landed and kept its shape", allFinite() && lo > -0.01f && lo < 0.1f && hi - lo > 0.7f && hi - lo < 0.9f,
+                               F("bottom y %.3f, height %.3f m (rest 0.8)", lo, hi - lo));
+
+                        // rigid bodies in fields
+                        double worst = 0.0, minSweep = 1e9;
+                        for (int i = 0; i < 3; ++i) {
+                            const glm::vec3 d = Find(ctx, "Moon_" + std::to_string(i)).WorldPosition() - PLANET_CENTER;
+                            worst = std::max(worst, std::abs(double(glm::length(d)) / MOON_ORBIT - 1.0));
+                            const double start = i * glm::two_pi<double>() / 3.0;
+                            double sweep = std::abs(std::remainder(start - std::atan2(double(d.z), double(d.x)), glm::two_pi<double>()));
+                            minSweep = std::min(minSweep, sweep);
+                        }
+                        Expect("moons orbit the planetary gravity field", worst < 0.05 && minSweep > 0.5,
+                               F("max radius deviation %.2f%%, smallest swept angle %.2f rad", worst * 100.0, minSweep));
+                        glm::vec3 centroid(0.0f);
+                        for (int i = 0; i < 6; ++i) centroid += Find(ctx, "Cluster_" + std::to_string(i)).WorldPosition() / 6.0f;
+                        double spread = 0.0;
+                        for (int i = 0; i < 6; ++i) spread += glm::length(Find(ctx, "Cluster_" + std::to_string(i)).WorldPosition() - centroid) / 6.0;
+                        Expect("n-body cluster contracts under mutual gravity", spread < 1.55, F("mean distance to centroid %.3f m (started at 1.6)", spread));
+                        m_scratch[0] = float(m_stepFrames);
+                        m_phase = 3;
+                        return false;
+                    }
+                    case 3: {
+                        if (m_stepFrames - m_scratch[0] < 2) return false;
+                        std::vector<glm::vec4> after;
+                        Adv::ReadParticles(Find(ctx, "Particles"), after);
+                        size_t inside = 0, ccw = 0;
+                        for (size_t i = 0; i < std::min(after.size(), snapshot->size()); ++i) {
+                            const glm::vec3 r = glm::vec3((*snapshot)[i]) - VORTEX_CENTER;
+                            if (r.x * r.x + r.z * r.z > 2.5f * 2.5f || r.x * r.x + r.z * r.z < 0.04f) continue;
+                            ++inside;
+                            ccw += glm::cross(r, glm::vec3(after[i]) - glm::vec3((*snapshot)[i])).y > 0.0f;
+                        }
+                        Expect("vortex field swirls the particles counter-clockwise", inside > 100 && ccw > 0.8 * inside,
+                               F("%.0f of %.0f particles near the axis turn counter-clockwise", double(ccw), double(inside)));
+                        Screenshot("09_fieldlab");
+                        RequestCapture();
+                        m_phase = 4;
+                        return false;
+                    }
+                    default: {
+                        if (!m_captureReady) return false;
+                        const size_t particles = CountId(m_capture, PixelId(Find(ctx, "Particles")));
+                        const size_t curtain = CountId(m_capture, PixelId(Find(ctx, "Curtain")));
+                        const size_t drape = CountId(m_capture, PixelId(Find(ctx, "Drape")));
+                        const size_t sdf = CountId(m_capture, PixelId(Find(ctx, "SdfSculpture")));
+                        Expect("pixels: particles, both cloths and the SDF sculpture are visible",
+                               particles > 200 && curtain > 200 && drape > 200 && sdf > 200,
+                               F("particles %.0f px, curtain %.0f px, drape %.0f px, ", double(particles), double(curtain), double(drape)) + F("SDF %.0f px", double(sdf)));
+                        return true;
+                    }
+                }
+            } });
+        }
+
+        // 10c. GPU kernels against their CPU references (synchronous readbacks).
+        m_steps.push_back({ "FieldLab: GPU kernels vs CPU references", [this](GameContext& ctx) {
+            namespace Adv = Physics::Advanced;
+            // spatial hash: exact neighbour counts on a 1/64 m lattice (exactly representable)
+            std::mt19937 rng(5);
+            std::uniform_int_distribution<int> q(0, 4 * 64 - 1);
+            std::vector<glm::vec3> p(8000);
+            for (glm::vec3& v : p) v = glm::vec3(float(q(rng)), float(q(rng)), float(q(rng))) / 64.0f;
+            std::vector<uint32_t> counts;
+            const bool hashOk = Adv::GpuNeighbourCounts(p, 0.25f, 16384, 0.25f, counts) && counts.size() == p.size();
+            size_t mismatches = 0, pairs = 0;
+            for (size_t i = 0; hashOk && i < p.size(); ++i) {
+                uint32_t n = 0;
+                for (size_t j = 0; j < p.size(); ++j) {
+                    const glm::vec3 d = p[i] - p[j];
+                    n += (i != j && d.x * d.x + d.y * d.y + d.z * d.z < 0.25f * 0.25f);
+                }
+                mismatches += n != counts[i];
+                pairs += n;
+            }
+            Expect("GPU spatial hash: neighbour counts equal brute force exactly", hashOk && mismatches == 0 && pairs > 0,
+                   F("%.0f points, %.0f neighbour pairs, %.0f mismatches", double(p.size()), double(pairs), double(mismatches)));
+
+            // XPBD: GPU solver vs CPU reference on the same model
+            auto compare = [&](Physics::Xpbd::Model model, int substeps, int steps, bool fused = true) {
+                Physics::Xpbd::Colorize(model);
+                Physics::Xpbd::Model gpu = model;
+                const Physics::Xpbd::Collider ground;
+                Physics::Xpbd::StepParams sp;
+                sp.substeps = substeps;
+                sp.colliders = &ground;
+                sp.colliderCount = 1;
+                for (int i = 0; i < steps; ++i) Physics::Xpbd::Step(model, sp);
+                if (!Adv::GpuStepModel(gpu, sp.dt, substeps, steps, true, fused)) return std::pair<double, Physics::Xpbd::Model>(1e9, gpu);
+                double diff = 0.0;
+                for (size_t i = 0; i < model.x.size(); ++i) {
+                    const double d = glm::length(glm::vec3(model.x[i]) - glm::vec3(gpu.x[i]));
+                    diff = std::isfinite(d) ? std::max(diff, d) : 1e9;
+                }
+                return std::pair<double, Physics::Xpbd::Model>(diff, gpu);
+            };
+            const auto [ropeDiff, rope] = compare(Physics::Xpbd::MakeRope(glm::vec3(0, 3, 0), glm::vec3(2, 3, 0), 16, 1.0f, 0.0f, true), 10, 60);
+            const auto [clothDiff, cloth] = compare(Physics::Xpbd::MakeCloth(glm::vec3(-1, 3, 0), glm::vec3(2, 0, 0), glm::vec3(0, -2, 0), 12, 12, 1.0f, 0.0f, 1e-2f, true), 10, 60);
+            const auto [boxDiff, box] = compare(Physics::Xpbd::MakeSoftBox(glm::vec3(0, 1.5f, 0), glm::vec3(0.8f, 0.6f, 1.0f), 3, 2.0f, 1e-4f, 0.0f), 16, 180);
+            Expect("GPU XPBD (fused single-workgroup solver) matches the CPU solver", ropeDiff < 0.01 && clothDiff < 0.01 && boxDiff < 0.01,
+                   F("max node difference: rope %.2e m, cloth %.2e m, soft box %.2e m", ropeDiff, clothDiff, boxDiff));
+            const double ropePasses = compare(Physics::Xpbd::MakeRope(glm::vec3(0, 3, 0), glm::vec3(2, 3, 0), 16, 1.0f, 0.0f, true), 10, 60, false).first;
+            const double clothPasses = compare(Physics::Xpbd::MakeCloth(glm::vec3(-1, 3, 0), glm::vec3(2, 0, 0), glm::vec3(0, -2, 0), 12, 12, 1.0f, 0.0f, 1e-2f, true), 10, 60, false).first;
+            const double boxPasses = compare(Physics::Xpbd::MakeSoftBox(glm::vec3(0, 1.5f, 0), glm::vec3(0.8f, 0.6f, 1.0f), 3, 2.0f, 1e-4f, 0.0f), 16, 180, false).first;
+            Expect("GPU XPBD (multi-pass solver for large bodies) matches the CPU solver", ropePasses < 0.01 && clothPasses < 0.01 && boxPasses < 0.01,
+                   F("max node difference: rope %.2e m, cloth %.2e m, soft box %.2e m", ropePasses, clothPasses, boxPasses));
+            Expect("GPU XPBD constraints stable (stretch, volume)",
+                   Physics::Xpbd::MaxRelativeStretch(rope) < 0.02f && Physics::Xpbd::MaxRelativeStretch(cloth) < 0.05f &&
+                   std::abs(Physics::Xpbd::TotalVolume(box) / 0.48f - 1.0f) < 0.05f,
+                   F("rope stretch %.3f%%, cloth stretch %.3f%%, soft-box volume %.2f%% of rest", Physics::Xpbd::MaxRelativeStretch(rope) * 100.0,
+                     Physics::Xpbd::MaxRelativeStretch(cloth) * 100.0, Physics::Xpbd::TotalVolume(box) / 0.48 * 100.0));
+            Physics::Xpbd::Model link = Physics::Xpbd::MakeRope(glm::vec3(0, 3, 0), glm::vec3(0, 2, 0), 1, 2.0f, 1e-3f, true);
+            Physics::Xpbd::Colorize(link);
+            link.damping = 2.0f;
+            Adv::GpuStepModel(link, 1.0f / 60.0f, 10, 600, false);
+            const double stretch = glm::length(glm::vec3(link.x[1]) - glm::vec3(link.x[0])) - 1.0;
+            const double expected = 1e-3 * 1.0 * 9.81;   // alpha * m * g, free node carries half of 2 kg
+            Expect("GPU XPBD: compliant link settles at alpha*m*g", std::abs(stretch - expected) < 0.02 * expected,
+                   F("stretch %.5f m, analytic %.5f m", stretch, expected));
+
+            // n-body: tiled shared-memory kernel vs O(n^2) reference
+            std::uniform_real_distribution<float> U(-4.0f, 4.0f), M(0.5f, 3.0f);
+            std::vector<glm::vec3> bodies(2048), gpuAcc, cpuAcc(2048);
+            std::vector<float> masses(2048);
+            for (size_t i = 0; i < bodies.size(); ++i) { bodies[i] = glm::vec3(U(rng), U(rng), U(rng)); masses[i] = M(rng); }
+            const bool nbodyOk = Adv::GpuNBody(bodies, masses, 0.5f, 0.05f, gpuAcc) && gpuAcc.size() == bodies.size();
+            Physics::FieldMath::NBodyAccelerations(bodies.data(), masses.data(), bodies.size(), 0.5f, 0.05f, cpuAcc.data());
+            double maxErr = 0.0, maxMag = 0.0;
+            for (size_t i = 0; nbodyOk && i < bodies.size(); ++i) {
+                maxErr = std::max(maxErr, double(glm::length(gpuAcc[i] - cpuAcc[i])));
+                maxMag = std::max(maxMag, double(glm::length(cpuAcc[i])));
+            }
+            Expect("GPU n-body matches the CPU reference", nbodyOk && maxErr <= 1e-4 * maxMag,
+                   F("2048 bodies: max error %.3e of max |a| %.3e", maxErr, maxMag));
+
+            // public compute abstraction: a user kernel through IComputeBackend (OpenGL implementation)
+            {
+                Compute::IComputeBackend* gpu = Compute::GetBackend(Compute::BackendType::OpenGL);
+                const Compute::DeviceInfo info = gpu ? gpu->Info() : Compute::DeviceInfo{};
+                const std::string source =
+                    "#version 460 core\n"
+                    "layout(local_size_x = 64) in;\n"
+                    "layout(std430, binding = 4) readonly buffer X { float x[]; };\n"
+                    "layout(std430, binding = 5) buffer Y { float y[]; };\n"
+                    "uniform float u_a;\n"
+                    "uniform uint u_n;\n"
+                    "void main() { uint i = gl_GlobalInvocationID.x; if (i < u_n) y[i] = u_a * x[i] + y[i]; }\n";
+                const uint32_t n = 10000;
+                std::vector<float> xs(n), ys(n, 1.0f);
+                for (uint32_t i = 0; i < n; ++i) xs[i] = 0.5f * float(i);
+                uint32_t wrong = n;
+                if (gpu) {
+                    const Compute::BufferId bx = gpu->CreateBuffer(n * sizeof(float)), by = gpu->CreateBuffer(n * sizeof(float));
+                    gpu->Upload(bx, xs.data(), n * sizeof(float));
+                    gpu->Upload(by, ys.data(), n * sizeof(float));
+                    const Compute::KernelId k = gpu->CreateKernel("saxpy", source);
+                    gpu->SetBuffer(k, 4, bx);
+                    gpu->SetBuffer(k, 5, by);
+                    gpu->SetUniform(k, "u_a", 3.0f);
+                    gpu->SetUniform(k, "u_n", n);
+                    gpu->Dispatch(k, (n + 63) / 64);
+                    gpu->Barrier();
+                    gpu->Download(by, ys.data(), n * sizeof(float));
+                    wrong = 0;
+                    for (uint32_t i = 0; i < n; ++i) wrong += ys[i] != 1.5f * float(i) + 1.0f;   // exact in float
+                    gpu->DestroyBuffer(bx);
+                    gpu->DestroyBuffer(by);
+                }
+                const std::vector<Compute::DeviceInfo> all = Compute::EnumerateBackends();
+                Expect("compute backend API: user kernel runs on the OpenGL backend (exact saxpy)",
+                       gpu && info.available && wrong == 0 && info.maxWorkGroupInvocations >= 1024,
+                       std::string(info.device) + F(": %.0f wrong of 10000, %.0f invocations/group, %.0f storage blocks/kernel", wrong, info.maxWorkGroupInvocations, info.maxStorageBlocksPerKernel));
+                Expect("OpenCL / SYCL listed as unavailable interface hooks", all.size() == 3 && all[0].available && !all[1].available && !all[2].available,
+                       all.size() == 3 ? all[1].note : std::string("?"));
+            }
+
+            // force-field sampling (the arrow visualiser's data) vs FieldMath
+            using namespace Lab::FieldLayout;
+            std::vector<glm::vec4> samples;
+            const bool fieldsOk = Adv::SampleFields(FIELD_BOUNDS_MIN, FIELD_BOUNDS_MAX, FIELD_RESOLUTION, samples) &&
+                                  samples.size() == size_t(FIELD_RESOLUTION.x * FIELD_RESOLUTION.y * FIELD_RESOLUTION.z);
+            double fieldErr = 0.0, fieldMag = 0.0;
+            for (size_t i = 0; fieldsOk && i < samples.size(); ++i) {
+                const glm::ivec3 c(int(i) % FIELD_RESOLUTION.x, (int(i) / FIELD_RESOLUTION.x) % FIELD_RESOLUTION.y, int(i) / (FIELD_RESOLUTION.x * FIELD_RESOLUTION.y));
+                const glm::vec3 point = glm::mix(FIELD_BOUNDS_MIN, FIELD_BOUNDS_MAX, (glm::vec3(c) + 0.5f) / glm::vec3(FIELD_RESOLUTION));
+                glm::vec3 a(0.0f);
+                ctx.CurrentScene()->Each<Physics::ForceField>([&](Entity e, Physics::ForceField& f) {
+                    a += Physics::FieldMath::Acceleration(f, e.WorldPosition(), glm::normalize(e.WorldRotation() * f.axis), point);
+                });
+                fieldErr = std::max(fieldErr, double(glm::length(glm::vec3(samples[i]) - a)));
+                fieldMag = std::max(fieldMag, double(glm::length(a)));
+            }
+            Expect("GPU field sampling matches FieldMath", fieldsOk && fieldMag > 1.0 && fieldErr <= 1e-4 * fieldMag,
+                   F("%.0f samples: max error %.3e of max |a| %.3e", double(samples.size()), fieldErr, fieldMag));
+            return true;
+        } });
+
+        // 10d. SDF raymarcher: a sphere's silhouette area matches the analytic projection.
+        m_steps.push_back({ "FieldLab: SDF raymarch silhouette", [this](GameContext& ctx) {
+            const Entity cam = Find(ctx, "MainCamera");
+            const float R = 0.5f, distance = 4.0f;
+            switch (m_phase) {
+                case 0: {
+                    const glm::vec3 eye = cam.WorldPosition(), forward = cam.WorldRotation() * glm::vec3(0, 0, -1);
+                    for (int k = 0; k < 3; ++k) { m_scratch[k] = eye[k]; m_scratch[3 + k] = forward[k]; }
+                    Render::SdfVisualization sdf = Render::GetSdfVisualization();
+                    sdf.primitives.clear();
+                    Render::SdfPrimitive sphere;
+                    sphere.shape = Render::SdfShape::Sphere;
+                    sphere.position = eye + forward * distance;
+                    sphere.params = glm::vec4(R, 0, 0, 0);
+                    sdf.primitives.push_back(sphere);
+                    sdf.boundsMin = sphere.position - glm::vec3(R + 0.05f);
+                    sdf.boundsMax = sphere.position + glm::vec3(R + 0.05f);
+                    sdf.showSlice = false;
+                    Render::SetSdfVisualization(sdf);
+                    m_scratch[6] = float(m_stepFrames);
+                    m_phase = 1;
+                    return false;
+                }
+                case 1:
+                    if (m_stepFrames - m_scratch[6] < 3) return false;
+                    Screenshot("10_sdf_sphere");
+                    RequestCapture();
+                    m_phase = 2;
+                    return false;
+                default: {
+                    if (!m_captureReady) return false;
+                    const glm::vec3 eye(m_scratch[0], m_scratch[1], m_scratch[2]);
+                    const float fov = cam.Get<Camera>().verticalFov;
+                    const double f = 0.5 * m_capture.height / std::tan(0.5 * fov);
+                    const double r = f * R / std::sqrt(double(distance) * distance - double(R) * R);
+                    const double expected = glm::pi<double>() * r * r;
+                    const double measured = double(CountId(m_capture, PixelId(Find(ctx, "SdfSculpture"))));
+                    const double moved = glm::length(cam.WorldPosition() - eye);
+                    Expect("SDF sphere silhouette area matches the analytic projection",
+                           moved < 1e-3 && std::abs(measured - expected) <= 0.01 * expected + glm::pi<double>() * r,
+                           F("%.0f px measured, %.1f px expected (radius %.2f px), ", measured, expected, r) +
+                           F("camera moved %.4f m, capture %.0fx%.0f", moved, m_capture.width, m_capture.height) + F(", fov %.3f", fov));
+                    Lab::FieldLabScene::ApplySdfSculpture(*ctx.CurrentScene());
+                    return true;
+                }
+            }
+        } });
+
         // 11. Round trip back: resource counts identical to the first load.
         m_steps.push_back({ "Scene transition back to Sandbox", [this](GameContext& ctx) {
             if (m_phase == 0) { ctx.scenes->Request("Sandbox"); m_phase = 1; return false; }
@@ -790,6 +1244,9 @@ namespace Phisiks {
             Expect("render objects equal first load", render.meshObjects == m_baseline.gameObjects, F("%.0f vs %.0f", render.meshObjects, double(m_baseline.gameObjects)));
             Expect("lights equal first load", render.lights == m_baseline.lights, F("%.0f vs %.0f", render.lights, double(m_baseline.lights)));
             Expect("character controllers equal first load", int(Physics::GetStats().characters) == m_baseline.characterControllers, F("%.0f", int(Physics::GetStats().characters)));
+            const Physics::Advanced::Stats gpu = Physics::Advanced::GetStats();
+            Expect("GPU particles and soft bodies released with FieldLab", gpu.particles == 0 && gpu.softBodies == 0 && gpu.particleSystems == 0,
+                   F("%.0f particles, %.0f soft bodies", gpu.particles, gpu.softBodies));
             return true;
         } });
 

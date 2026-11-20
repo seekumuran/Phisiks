@@ -20,6 +20,12 @@ namespace Phisiks {
         uint32_t texturesResident = 0;
         uint32_t texturesPending = 0;   // being decoded on the asset worker
         uint32_t meshesLoaded = 0;      // meshes registered (built-in + loaded on demand)
+        bool gpuCulling = false;        // the GPU culled this frame (instance counts are from 2 frames ago)
+        bool occlusionActive = false;   // Hi-Z occlusion ran for at least one view
+        uint32_t occlusionCulled = 0;
+        uint64_t ringBlockedWaits = 0;  // persistent upload ring: times the CPU had to wait for the GPU
+        uint32_t particlesDrawn = 0;    // GPU particles + rope nodes
+        uint32_t softBodiesDrawn = 0;
     };
 
     RenderStats GetRenderStats();    // zeros when no renderer is running (e.g. headless)

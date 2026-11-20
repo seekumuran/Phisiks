@@ -7,6 +7,7 @@
 #include <glm/mat4x4.hpp>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace Phisiks::Render::Internal {
@@ -29,6 +30,11 @@ namespace Phisiks::Render::Internal {
     void SetCameras(const std::vector<CameraInput>& cameras);   // rendered in this order
 
     void RenderFrame();             // renders into the default framebuffer (caller presents)
+
+    // GL program of a Shaders::ProgramId (compute systems dispatch the renderer's programs).
+    uint32_t ProgramHandle(int programId);
+    // Builds (and caches on disk) a compute program from GLSL source (#include of engine files allowed).
+    uint32_t BuildComputeProgram(const std::string& name, const std::string& source);
     // The last presented window image (scene + overlay text), RGBA8, rows bottom-up.
     bool ReadPresented(std::vector<uint8_t>& rgba, int& width, int& height);
     RenderStats Stats();
