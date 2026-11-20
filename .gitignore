@@ -1,0 +1,12 @@
+# Build output
+/Build/
+/build/
+/out/
+.vs/
+*.user
+
+# Third-party libraries are not committed (see docs/BUILD.md and THIRD_PARTY_NOTICES.md)
+/vendor/
+
+# Local shader cache fallback (when %LOCALAPPDATA% is unavailable)
+/.phisiks_cache/
