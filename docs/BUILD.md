@@ -11,9 +11,12 @@ Layout:
 The `check_layering` target runs before the engine builds and fails the build if apps or tests bypass the public API.
 
 ## Requirements
-- Windows 10/11 x64, Visual Studio 2026 (v145) C++ tools or Build Tools, CMake ≥ 3.25.
-- GPU: OpenGL 4.6 core; the renderer needs nothing beyond it. Check with `Build/bin/Release/glprobe.exe`.
-- Third-party libraries in `vendor/` (not committed; see `THIRD_PARTY_NOTICES.md`):
+- **Windows** 10/11 x64: Visual Studio 2026 (v145) C++ tools or Build Tools, CMake ≥ 3.25.
+- **Linux** (x86-64 / arm64): GCC 11+ or Clang 15+, CMake ≥ 3.25, Ninja, `libglfw3-dev` (or let CMake fetch GLFW 3.4), OpenGL development headers, ALSA / PulseAudio runtime.
+- **macOS** 12+: Xcode command-line tools, CMake, Ninja, `brew install glfw` (or let CMake fetch it). Runs on the OpenGL 4.1 tier.
+- GPU: OpenGL 4.6 core for the full tier (GPU culling and compute); any OpenGL 4.1 core GPU runs the 4.1 tier (CPU culling + CPU compute backend). `--gl41` forces the 4.1 tier anywhere. Check with `glprobe`.
+- Backends (CMake cache): `PHISIKS_PHYSICS_BACKEND` = `PhysX` (Windows default) or `Native` (Linux / macOS default); `PHISIKS_AUDIO_BACKEND` = `WASAPI` (Windows default) or `miniaudio`.
+- Third-party code in `vendor/` (not committed; see `THIRD_PARTY_NOTICES.md`). `python tools/fetch_deps.py` downloads every portable dependency at its pinned version (glm, EnTT, stb, glad (generated with glad2), Dear ImGui, ImGuizmo, miniaudio, nlohmann/json). The Windows-only prebuilt binaries (PhysX, GLFW) are placed by hand:
 
   | Folder | Contents |
   |---|---|
@@ -22,16 +25,29 @@ The `check_layering` target runs before the engine builds and fails the build if
   | `glm/glm/` | headers |
   | `entt/entt.hpp` | single header |
   | `stb_image/` | `stb_image.h`, `stb_image_write.h`, `stb_image.cpp` |
-  | `physx/` | PhysX 5 `include/`, `lib/{release,debug}` |
+  | `physx/` | PhysX 5 `include/`, `lib/{release,debug}` (Windows, PhysX backend) |
   | `DLLs/` | the PhysX runtime DLLs |
+  | `imgui/`, `imguizmo/`, `miniaudio/`, `nlohmann/` | fetched by `tools/fetch_deps.py` |
 - Shader programs are cached as driver binaries after the first run, in `%LOCALAPPDATA%\Phisiks\ShaderCache`. Override the location with the `PHISIKS_SHADER_CACHE_DIR` environment variable; delete the folder to force a cold compile.
 
 ## Build
 ```powershell
+# Windows, PhysX + WASAPI
 cmake --preset vs2026-x64
 cmake --build --preset release          # or relwithdebinfo (symbols) / debug
 ctest -C Release --test-dir Build/vs2026
+# Windows, the portable backends used on Linux / macOS (native physics + miniaudio) -> Build/bin-portable
+cmake --preset windows-portable
+cmake --build --preset portable-release
 ```
+```sh
+# Linux (macOS: macos-release / macos-debug)
+python3 tools/fetch_deps.py
+cmake --preset linux-release
+cmake --build --preset linux-release
+ctest --preset linux-release            # add -DPHISIKS_TEST_SKIP_RENDER=ON at configure time without a display
+```
+CI (`.github/workflows/ci.yml`) builds and tests the portable configuration on Ubuntu 24.04, macOS 14 and Windows Server 2022.
 From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` gets rewritten into a path.
 
 ## Outputs (`Build/bin/<Config>/`)
@@ -53,7 +69,19 @@ From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` ge
 ```
 Logs go to `<run-dir>/engine.log` (default `Build/runs/latest`). Crash dumps go to `<run-dir>/crash.dmp`.
 
-Scenes: `Sandbox`, `PhysicsTower`, `FieldLab` (`N` cycles). The autotest visits all three and runs the GPU compute checks (culling, Hi-Z, spatial hash, XPBD, N-body, fields, SDF) on the machine's GPU; it needs OpenGL 4.6 with compute shaders and at least 16 shader-storage bindings.
+Scenes: `Sandbox`, `PhysicsTower`, `FieldLab`, and the lesson scenes `Rotors`, `Orbits`, `PBR`, `Fountain` (`N` cycles).
+
+Studio options: `--no-studio` hides the ImGui panels, `--quality low|medium|high` applies a scalability preset, `--gl41` forces the OpenGL 4.1 tier.
+
+## PhisiksLab studio (Dear ImGui)
+| Panel | What |
+|---|---|
+| Menu bar | Scene: save / load JSON (path field), reload; Lessons |
+| Classroom | one-click lessons (Transforms & Rotors, RK4 vs Euler Orbits, Friction & Raycasts, Rigid-body Stacking, PBR Lighting, GPU Culling & Particles, XPBD Soft Bodies & SDFs, Emitters & Coupling); gravity, friction, solver substeps; quality preset, render scale, upscaler, RCAS sharpness, GPU culling, Hi-Z, shadows, fog, exposure, physics debug draw |
+| Hierarchy | entity tree; click to select (or click an object in the viewport) |
+| Inspector | name, Transform (+ translate / rotate / scale gizmo, world / local), mesh renderer + live material editing, light, collider, rigidbody, force field, particle system, soft body |
+| Telemetry | OS, GPU, OpenGL tier, physics backend; CPU frame / update / physics / render ms with history; GPU ms; RAM; internal -> output resolution; culling and body counts; compute backend |
+| Timeline | record toggle, pause / play, step back / forward, scrub slider over the replay ring (30 s at 60 Hz); playing after a scrub continues from that step | The autotest visits all three and runs the GPU compute checks (culling, Hi-Z, spatial hash, XPBD, N-body, fields, SDF) on the machine's GPU; it needs OpenGL 4.6 with compute shaders and at least 16 shader-storage bindings.
 
 ## PhisiksLab controls
 | Input | Action |
@@ -83,6 +111,7 @@ Closing the window shuts down cleanly.
 .\Build\bin\Release\PhisiksLab.exe --scene PhysicsTower --hidden --deterministic --max-frames 300 --export-dir Build/runs/frames --export-frames --export-every 10
 ```
 - `--steps-per-frame <n>` advances n fixed steps per frame.
+- `--export-vision` writes the synthetic-vision passes every exported frame to `<export-dir>/vision/`: `frame_N_rgb.png`, `frame_N_depth.pfm` (float32 linear depth in metres along the view axis, 0 = background), `frame_N_normal.png` (world normal × 0.5 + 0.5), `frame_N_id.png` (Entity::Id() + 1 as little-endian RGBA bytes), plus `cameras.csv` (intrinsics fx, fy, cx, cy, near, far and the view matrix per frame) and `entities.csv` (id → name). All passes are at the scene resolution and pixel-aligned.
 - Deterministic runs use the null audio device.
 - ctest `DeterministicReplay` runs the headless case twice and requires byte-identical CSV output.
 

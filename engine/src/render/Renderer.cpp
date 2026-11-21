@@ -1,4 +1,4 @@
-// Forward PBR renderer (OpenGL 4.6, clean-room).
+// Forward PBR renderer (OpenGL 4.6 tier, or the 4.1 tier: see render/gl/GLObjects.h; clean-room).
 //
 // Frame:
 //   1. stream in textures/meshes requested on demand; upload materials and lights
@@ -7,8 +7,11 @@
 //   3. spot / point shadow maps (shared by all views)
 //   4. per view (camera): directional shadow fit -> viewport/scissor into its target set ->
 //      forward PBR pass (HDR + entity id) -> sky -> debug lines
-//   5. per target set: MSAA resolve -> tonemap into LDR; the window set is blitted to the
-//      default framebuffer and overlay text is drawn on top.
+//   5. per target set: MSAA resolve -> tonemap into LDR. The window set renders at renderScale x
+//      the window size and is upscaled (EASU + RCAS, or bilinear) to the window, then overlay text
+//      is drawn on top and the result is blitted to the default framebuffer.
+// 4.1 tier: CPU culling, one instanced draw per command (u_baseInstance), storage read through
+// texture buffers, no Hi-Z; particles / XPBD / fields come from the CPU compute backend.
 #include "render/RendererInternal.h"
 #include "render/RenderMath.h"
 #include "render/ShaderCache.h"
@@ -21,6 +24,7 @@
 #include "Phisiks/Core/Log.h"
 #include "Phisiks/Core/Time.h"
 #include "Phisiks/Platform/Window.h"
+#include "Phisiks/Render/Upscaler.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -79,6 +83,10 @@ namespace Phisiks::Render {
             GL::Framebuffer mainFbo, resolveColorFbo, resolveIdFbo, ldrFbo;
             GL::Texture present;               // window only: LDR scene + overlay text (what is shown)
             GL::Framebuffer presentFbo;
+            glm::ivec2 outputSize{ 0 };        // window only: upscaled image (when size < outputSize)
+            GL::Texture upscaled, output;
+            GL::Framebuffer upscaledFbo, outputFbo;
+            bool upscaledThisFrame = false;
             bool usedThisFrame = false;
             bool rendered = false;
         };
@@ -158,6 +166,21 @@ namespace Phisiks::Render {
             RenderStats frameStats;
             uint32_t glErrors = 0;
             uint32_t loggedDebugMessages = 0;
+
+            // feature tier
+            bool compat = false;
+            int contextVersion = 0;
+            std::string rendererName, vendorName;
+            GL::TextureBuffer tboLights, tboInstances, tboMaterials, tboRemap, tboAux, tboAux2;
+            std::vector<DrawCommand> cpuCommands;              // 4.1: drawn one by one
+            std::vector<std::vector<uint8_t>> albedoImages;    // 4.1: re-uploaded when the array grows
+
+            // synthetic vision (aux G-buffer of the first window view)
+            bool visionRequested = false, visionReady = false;
+            VisionCapture vision;
+            glm::ivec2 auxSize{ 0 };
+            GL::Texture auxNormal, auxDepth, auxId, auxZ;
+            GL::Framebuffer auxFbo;
         };
         std::unique_ptr<State> g;
 
@@ -178,7 +201,9 @@ namespace Phisiks::Render {
             const auto resolver = [](const std::string& name) { return Shaders::Find(name); };
             const std::vector<Shaders::ProgramDef>& defs = Shaders::Programs();
             for (size_t i = 0; i < defs.size(); ++i) {
+                if (g->compat && Shaders::IsCompute(int(i))) continue;   // 4.1: CPU compute backend instead
                 std::vector<GL::StageSource> stages;
+                ShaderPreprocessor::ResourceBindings bindings;
                 for (const Shaders::StageDef& stage : defs[i].stages) {
                     const std::string* source = Shaders::Find(stage.file);
                     if (!source) {
@@ -192,10 +217,11 @@ namespace Phisiks::Render {
                     }
                     const GLenum glStage = stage.stage == Shaders::Stage::Vertex ? GLenum(GL_VERTEX_SHADER)
                                         : stage.stage == Shaders::Stage::Fragment ? GLenum(GL_FRAGMENT_SHADER) : GLenum(GL_COMPUTE_SHADER);
-                    stages.push_back({ glStage, expanded.source });
+                    stages.push_back({ glStage, g->compat ? ShaderPreprocessor::RewriteForGL41(expanded.source, bindings) : expanded.source });
                 }
                 const GLuint program = g->shaderCache.GetProgram(defs[i].name, std::move(stages));
                 if (!program) return false;
+                if (g->compat) GL::ApplyBindings(program, bindings);
                 g->programs[i].Adopt(program, defs[i].name);
             }
             return true;
@@ -205,8 +231,9 @@ namespace Phisiks::Render {
             if (!g->meshesDirty) return;
             g->vertexBuffer.Upload(g->vertices.data(), g->vertices.size() * sizeof(Vertex));
             g->indexBuffer.Upload(g->indices.data(), g->indices.size() * sizeof(uint32_t));
-            glVertexArrayVertexBuffer(g->meshVao, 0, g->vertexBuffer.Id(), 0, sizeof(Vertex));
-            glVertexArrayElementBuffer(g->meshVao, g->indexBuffer.Id());
+            GL::SetVertexBuffer(g->meshVao, g->vertexBuffer.Id(), sizeof(Vertex), {
+                { 0, 3, GL_FLOAT, offsetof(Vertex, position) }, { 1, 3, GL_FLOAT, offsetof(Vertex, normal) }, { 2, 2, GL_FLOAT, offsetof(Vertex, uv) } });
+            GL::SetElementBuffer(g->meshVao, g->indexBuffer.Id());
             g->meshesDirty = false;
         }
 
@@ -264,6 +291,86 @@ namespace Phisiks::Render {
             Log::Info() << "Renderer: target '" << label << "' " << size.x << "x" << size.y << ", MSAA " << samples << "x";
         }
 
+        // Window only: EASU output + RCAS output at the window size (when the scene renders smaller).
+        void EnsureUpscaleTargets(TargetSet& t, glm::ivec2 outputSize) {
+            if (t.outputSize == outputSize && t.output.Id() != 0) return;
+            t.outputSize = outputSize;
+            GL::TextureDesc d;
+            d.width = outputSize.x;
+            d.height = outputSize.y;
+            d.format = GL_RGBA8;
+            d.minFilter = d.magFilter = GL_NEAREST;
+            t.upscaled.Create("Upscaled (EASU)", d);
+            t.output.Create("Upscaled (RCAS)", d);
+            t.upscaledFbo.Create("Upscaled (EASU)");
+            t.upscaledFbo.AttachColor(0, t.upscaled);
+            t.upscaledFbo.SetDrawBuffers(1);
+            t.outputFbo.Create("Upscaled (RCAS)");
+            t.outputFbo.AttachColor(0, t.output);
+            t.outputFbo.SetDrawBuffers(1);
+            if (!t.present.Id() || t.present.Desc().width != outputSize.x || t.present.Desc().height != outputSize.y) {
+                d.minFilter = d.magFilter = GL_LINEAR;
+                t.present.Create("Presented frame", d);
+                t.presentFbo.Create("Present");
+                t.presentFbo.AttachColor(0, t.present);
+                t.presentFbo.SetDrawBuffers(1);
+            }
+        }
+
+        glm::ivec2 SceneSize(glm::ivec2 window) {
+            const float scale = std::clamp(g->settings.renderScale, 0.25f, 1.0f);
+            if (scale >= 0.999f) return window;
+            return glm::max(glm::ivec2(glm::round(glm::vec2(window) * scale)), glm::ivec2(16));
+        }
+
+        // EASU (or bilinear) from `source` (sourceSize) into `upscaledFbo`, then RCAS into `outputFbo`.
+        void RunUpscaler(GLuint sourceTexture, glm::ivec2 sourceSize, GLuint upscaledFbo, GLuint upscaledTexture, GLuint outputFbo, glm::ivec2 outputSize,
+                         Upscaler upscaler, float sharpness, GLuint sourceFbo) {
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+            glBindVertexArray(g->emptyVao);
+            if (upscaler == Upscaler::FSR1) {
+                glBindFramebuffer(GL_FRAMEBUFFER, upscaledFbo);
+                glViewport(0, 0, outputSize.x, outputSize.y);
+                const GL::Program& easu = g->programs[Shaders::EASU];
+                easu.Use();
+                glUniform2f(easu.Uniform("u_inputSize"), float(sourceSize.x), float(sourceSize.y));
+                glUniform2f(easu.Uniform("u_outputSize"), float(outputSize.x), float(outputSize.y));
+                GL::BindTexture(0, GL_TEXTURE_2D, sourceTexture);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glBindFramebuffer(GL_FRAMEBUFFER, outputFbo);
+                const GL::Program& rcas = g->programs[Shaders::RCAS];
+                rcas.Use();
+                glUniform1f(rcas.Uniform("u_sharpness"), std::exp2(-std::max(sharpness, 0.0f)));
+                GL::BindTexture(0, GL_TEXTURE_2D, upscaledTexture);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+            }
+            else {
+                GL::Blit(sourceFbo, outputFbo, sourceSize.x, sourceSize.y, outputSize.x, outputSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            }
+        }
+
+        void EnsureAuxTargets(glm::ivec2 size) {
+            if (g->auxSize == size) return;
+            g->auxSize = size;
+            GL::TextureDesc d;
+            d.width = size.x;
+            d.height = size.y;
+            d.minFilter = d.magFilter = GL_NEAREST;
+            d.format = GL_RGBA16F;            g->auxNormal.Create("Vision normals", d);
+            d.format = GL_R32F;               g->auxZ.Create("Vision linear depth", d);
+            d.format = GL_R32UI;              g->auxId.Create("Vision ids", d);
+            d.format = GL_DEPTH_COMPONENT32F; g->auxDepth.Create("Vision depth", d);
+            g->auxFbo.Create("Vision G-buffer");
+            g->auxFbo.AttachColor(0, g->auxNormal);
+            g->auxFbo.AttachColor(1, g->auxZ);
+            g->auxFbo.AttachColor(2, g->auxId);
+            g->auxFbo.AttachDepth(g->auxDepth);
+            g->auxFbo.SetDrawBuffers(3);
+            g->auxFbo.Check("Vision G-buffer");
+        }
+
         void EnsureShadowTargets() {
             const int size = std::clamp(g->settings.shadowMapSize, 256, 8192);
             if (size == g->shadowSize) return;
@@ -300,8 +407,13 @@ namespace Phisiks::Render {
             d.wrap = GL_REPEAT;
             GL::Texture grown;
             grown.Create("Albedo textures", d);
-            glTextureParameterf(grown.Id(), GL_TEXTURE_MAX_ANISOTROPY, 8.0f);
-            if (g->albedoUsed > 0) {
+            if (!g->compat) grown.SetParameter(GL_TEXTURE_MAX_ANISOTROPY, 8.0f);
+            if (g->compat) {   // no glCopyImageSubData on 4.1: re-upload the kept images
+                for (int layer = 0; layer < g->albedoUsed && layer < int(g->albedoImages.size()); ++layer)
+                    grown.UploadLayer(layer, GL_RGBA, GL_UNSIGNED_BYTE, g->albedoImages[layer].data());
+                if (g->albedoUsed > 0) grown.GenerateMipmaps();
+            }
+            else if (g->albedoUsed > 0) {
                 for (int level = 0; level < TEXTURE_LEVELS; ++level) {
                     const int s = std::max(TEXTURE_SIZE >> level, 1);
                     glCopyImageSubData(g->albedoArray.Id(), GL_TEXTURE_2D_ARRAY, level, 0, 0, 0,
@@ -333,10 +445,9 @@ namespace Phisiks::Render {
                     const Assets::Image& upload = sized.rgba.empty() ? image : sized;
                     EnsureAlbedoCapacity(g->albedoUsed + 1);
                     const int layer = g->albedoUsed++;
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-                    glTextureSubImage3D(g->albedoArray.Id(), 0, 0, 0, layer, TEXTURE_SIZE, TEXTURE_SIZE, 1, GL_RGBA, GL_UNSIGNED_BYTE, upload.rgba.data());
-                    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-                    glGenerateTextureMipmap(g->albedoArray.Id());
+                    g->albedoArray.UploadLayer(layer, GL_RGBA, GL_UNSIGNED_BYTE, upload.rgba.data());
+                    g->albedoArray.GenerateMipmaps();
+                    if (g->compat) g->albedoImages.push_back(upload.rgba);
                     g->textureLayer[it->first] = layer;
                     Log::Info() << "Renderer: texture '" << it->first << "' (" << image.width << "x" << image.height << ") -> layer " << layer;
                 }
@@ -364,39 +475,17 @@ namespace Phisiks::Render {
             return false;
         }
 
+        // Attribute layouts are set with the vertex buffer (GL::SetVertexBuffer) where it is bound.
         void SetupVertexArrays() {
-            glCreateVertexArrays(1, &g->meshVao);
-            const GLuint vao = g->meshVao;
-            glEnableVertexArrayAttrib(vao, 0);
-            glVertexArrayAttribFormat(vao, 0, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, position));
-            glVertexArrayAttribBinding(vao, 0, 0);
-            glEnableVertexArrayAttrib(vao, 1);
-            glVertexArrayAttribFormat(vao, 1, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, normal));
-            glVertexArrayAttribBinding(vao, 1, 0);
-            glEnableVertexArrayAttrib(vao, 2);
-            glVertexArrayAttribFormat(vao, 2, 2, GL_FLOAT, GL_FALSE, offsetof(Vertex, uv));
-            glVertexArrayAttribBinding(vao, 2, 0);
+            g->meshVao = GL::CreateVertexArray();
+            g->lineVao = GL::CreateVertexArray();
+            g->textVao = GL::CreateVertexArray();
+            g->emptyVao = GL::CreateVertexArray();
+        }
 
-            glCreateVertexArrays(1, &g->lineVao);
-            glEnableVertexArrayAttrib(g->lineVao, 0);
-            glVertexArrayAttribFormat(g->lineVao, 0, 3, GL_FLOAT, GL_FALSE, offsetof(LineVertex, position));
-            glVertexArrayAttribBinding(g->lineVao, 0, 0);
-            glEnableVertexArrayAttrib(g->lineVao, 1);
-            glVertexArrayAttribFormat(g->lineVao, 1, 4, GL_FLOAT, GL_FALSE, offsetof(LineVertex, color));
-            glVertexArrayAttribBinding(g->lineVao, 1, 0);
-
-            glCreateVertexArrays(1, &g->textVao);
-            glEnableVertexArrayAttrib(g->textVao, 0);
-            glVertexArrayAttribFormat(g->textVao, 0, 2, GL_FLOAT, GL_FALSE, offsetof(TextVertex, position));
-            glVertexArrayAttribBinding(g->textVao, 0, 0);
-            glEnableVertexArrayAttrib(g->textVao, 1);
-            glVertexArrayAttribFormat(g->textVao, 1, 2, GL_FLOAT, GL_FALSE, offsetof(TextVertex, texel));
-            glVertexArrayAttribBinding(g->textVao, 1, 0);
-            glEnableVertexArrayAttrib(g->textVao, 2);
-            glVertexArrayAttribFormat(g->textVao, 2, 4, GL_FLOAT, GL_FALSE, offsetof(TextVertex, color));
-            glVertexArrayAttribBinding(g->textVao, 2, 0);
-
-            glCreateVertexArrays(1, &g->emptyVao);
+        void SetLineBuffer() {
+            GL::SetVertexBuffer(g->lineVao, g->lineBuffer.Id(), sizeof(LineVertex), {
+                { 0, 3, GL_FLOAT, offsetof(LineVertex, position) }, { 1, 4, GL_FLOAT, offsetof(LineVertex, color) } });
         }
 
         MaterialGpu ToGpu(const MaterialDesc& m) {
@@ -440,6 +529,19 @@ namespace Phisiks::Render {
             return corners;
         }
 
+        uint32_t FloatBits(float v) { uint32_t u; std::memcpy(&u, &v, 4); return u; }
+
+        void BindSoftBuffers(const Advanced::SoftBodyDraw& d) {
+            if (g->compat) {
+                g->tboAux.Bind(13, GL_RGBA32F, d.positions);
+                g->tboAux2.Bind(14, GL_RGBA32F, d.normals);
+            }
+            else {
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.positions);
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, d.normals);
+            }
+        }
+
         void DrawTextPass(GLuint framebuffer, glm::ivec2 size) {
             if (g->text.empty()) return;
             g->textBuffer.Upload(g->text.data(), g->text.size() * sizeof(TextVertex));
@@ -453,28 +555,50 @@ namespace Phisiks::Render {
             const GL::Program& program = g->programs[Shaders::TEXT];
             program.Use();
             glUniform2f(program.Uniform("u_screenSize"), float(size.x), float(size.y));
-            glBindTextureUnit(0, g->fontAtlas.Id());
+            g->fontAtlas.Bind(0);
+            GL::SetVertexBuffer(g->textVao, g->textBuffer.Id(), sizeof(TextVertex), {
+                { 0, 2, GL_FLOAT, offsetof(TextVertex, position) }, { 1, 2, GL_FLOAT, offsetof(TextVertex, texel) }, { 2, 4, GL_FLOAT, offsetof(TextVertex, color) } });
             glBindVertexArray(g->textVao);
-            glVertexArrayVertexBuffer(g->textVao, 0, g->textBuffer.Id(), 0, sizeof(TextVertex));
             glDrawArrays(GL_TRIANGLES, 0, GLsizei(g->text.size()));
             glDisable(GL_BLEND);
         }
 
-        void DrawCommands(size_t firstCommand, size_t count) {
+        void DrawCommands(const GL::Program& program, size_t firstCommand, size_t count) {
             if (count == 0) return;
-            glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, reinterpret_cast<const void*>(firstCommand * sizeof(DrawCommand)), GLsizei(count), 0);
+            if (!g->compat) {
+                glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, reinterpret_cast<const void*>(firstCommand * sizeof(DrawCommand)), GLsizei(count), 0);
+                return;
+            }
+            const GLint base = program.Uniform("u_baseInstance");
+            for (size_t c = firstCommand; c < firstCommand + count && c < g->cpuCommands.size(); ++c) {
+                const DrawCommand& d = g->cpuCommands[c];
+                if (d.instanceCount == 0) continue;
+                glUniform1ui(base, d.baseInstance);
+                glDrawElementsInstancedBaseVertex(GL_TRIANGLES, GLsizei(d.count), GL_UNSIGNED_INT, reinterpret_cast<const void*>(size_t(d.firstIndex) * sizeof(uint32_t)),
+                                                  GLsizei(d.instanceCount), d.baseVertex);
+            }
         }
 
+        // Window: the shown resolution (ids of an upscaled frame are nearest-sampled from the scene).
         bool Capture(const TargetSet& t, FrameCapture& out) {
             if (!t.rendered || t.size.x <= 0) return false;
-            out.width = t.size.x;
-            out.height = t.size.y;
+            const bool upscaled = t.upscaledThisFrame;
+            out.width = upscaled ? t.outputSize.x : t.size.x;
+            out.height = upscaled ? t.outputSize.y : t.size.y;
             const size_t pixels = size_t(out.width) * size_t(out.height);
             out.rgba.resize(pixels * 4);
+            (upscaled ? t.output : t.ldr).Read(GL_RGBA, GL_UNSIGNED_BYTE, out.rgba.size(), out.rgba.data());
+            std::vector<uint32_t> ids(size_t(t.size.x) * size_t(t.size.y));
+            t.idResolved.Read(GL_RED_INTEGER, GL_UNSIGNED_INT, ids.size() * 4, ids.data());
+            if (!upscaled) { out.entityIds = std::move(ids); return true; }
             out.entityIds.resize(pixels);
-            glPixelStorei(GL_PACK_ALIGNMENT, 4);
-            glGetTextureImage(t.ldr.Id(), 0, GL_RGBA, GL_UNSIGNED_BYTE, GLsizei(out.rgba.size()), out.rgba.data());
-            glGetTextureImage(t.idResolved.Id(), 0, GL_RED_INTEGER, GL_UNSIGNED_INT, GLsizei(out.entityIds.size() * 4), out.entityIds.data());
+            for (int y = 0; y < out.height; ++y) {
+                const int sy = std::min(int((y + 0.5f) * t.size.y / out.height), t.size.y - 1);
+                for (int x = 0; x < out.width; ++x) {
+                    const int sx = std::min(int((x + 0.5f) * t.size.x / out.width), t.size.x - 1);
+                    out.entityIds[size_t(y) * out.width + x] = ids[size_t(sy) * t.size.x + sx];
+                }
+            }
             return true;
         }
     }
@@ -598,6 +722,86 @@ namespace Phisiks::Render {
     void SetFieldVisualization(const FieldVisualization& field) { if (g) g->fieldViz = field; }
     uint32_t GetGLErrorCount() { return g ? g->glErrors : 0; }
 
+    // ====================================================================== presets / info / vision / upscaling
+    void ApplyQualityPreset(QualityPreset preset) {
+        RenderSettings& r = Settings();
+        switch (preset) {
+            case QualityPreset::Low:
+                r.renderScale = 0.667f; r.upscaler = Upscaler::FSR1; r.sharpness = 0.2f;
+                r.msaaSamples = 1; r.shadowMapSize = 1024; r.shadowDistance = 25.0f; r.occlusionCulling = false;
+                break;
+            case QualityPreset::Medium:
+                r.renderScale = 0.77f; r.upscaler = Upscaler::FSR1; r.sharpness = 0.25f;
+                r.msaaSamples = 2; r.shadowMapSize = 2048; r.shadowDistance = 35.0f; r.occlusionCulling = true;
+                break;
+            case QualityPreset::High:
+                r.renderScale = 1.0f; r.upscaler = Upscaler::FSR1; r.sharpness = 0.25f;
+                r.msaaSamples = 4; r.shadowMapSize = 2048; r.shadowDistance = 40.0f; r.occlusionCulling = true;
+                break;
+        }
+        r.shadowsEnabled = true;
+        r.gpuCulling = true;
+    }
+    const char* ToString(QualityPreset preset) {
+        switch (preset) {
+            case QualityPreset::Low: return "Low";
+            case QualityPreset::Medium: return "Medium";
+            case QualityPreset::High: return "High";
+        }
+        return "?";
+    }
+
+    RendererInfo GetRendererInfo() {
+        RendererInfo info;
+        if (!g) return info;
+        info.contextVersion = g->contextVersion;
+        info.compatTier = g->compat;
+        info.gpuCompute = !g->compat;
+        info.renderer = g->rendererName;
+        info.vendor = g->vendorName;
+        return info;
+    }
+
+    void RequestVisionCapture() { if (g) { g->visionRequested = true; g->visionReady = false; } }
+    bool GetVisionCapture(VisionCapture& out) {
+        if (!g || !g->visionReady) return false;
+        out = g->vision;
+        return true;
+    }
+
+    bool UpscaleImage(const std::vector<uint8_t>& rgba, int width, int height, int outWidth, int outHeight, Upscaler upscaler, float sharpness, std::vector<uint8_t>& out) {
+        if (!g || width <= 0 || height <= 0 || outWidth <= 0 || outHeight <= 0 || rgba.size() < size_t(width) * height * 4) return false;
+        GL::TextureDesc d;
+        d.width = width;
+        d.height = height;
+        d.minFilter = d.magFilter = GL_LINEAR;
+        GL::Texture input;
+        input.Create("Upscale input", d);
+        input.Upload2D(GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        GL::Framebuffer inputFbo;
+        inputFbo.Create("Upscale input");
+        inputFbo.AttachColor(0, input);
+        inputFbo.SetDrawBuffers(1);
+        d.width = outWidth;
+        d.height = outHeight;
+        d.minFilter = d.magFilter = GL_NEAREST;
+        GL::Texture mid, result;
+        mid.Create("Upscale EASU", d);
+        result.Create("Upscale RCAS", d);
+        GL::Framebuffer midFbo, resultFbo;
+        midFbo.Create("Upscale EASU");
+        midFbo.AttachColor(0, mid);
+        midFbo.SetDrawBuffers(1);
+        resultFbo.Create("Upscale RCAS");
+        resultFbo.AttachColor(0, result);
+        resultFbo.SetDrawBuffers(1);
+        RunUpscaler(input.Id(), glm::ivec2(width, height), midFbo.Id(), mid.Id(), resultFbo.Id(), glm::ivec2(outWidth, outHeight), upscaler, sharpness, inputFbo.Id());
+        out.resize(size_t(outWidth) * outHeight * 4);
+        result.Read(GL_RGBA, GL_UNSIGNED_BYTE, out.size(), out.data());
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return true;
+    }
+
     // ====================================================================== internal
     namespace Internal {
         bool IsInitialized() { return g != nullptr; }
@@ -611,15 +815,27 @@ namespace Phisiks::Render {
             GLint major = 0, minor = 0;
             glGetIntegerv(GL_MAJOR_VERSION, &major);
             glGetIntegerv(GL_MINOR_VERSION, &minor);
-            Log::Info() << "Renderer: OpenGL " << major << "." << minor << " - " << reinterpret_cast<const char*>(glGetString(GL_RENDERER));
-            if (major < 4 || (major == 4 && minor < 6)) {
-                Log::Error() << "Renderer: OpenGL 4.6 is required";
+            const int version = major * 10 + minor;
+            if (version < 41) {
+                Log::Error() << "Renderer: OpenGL 4.1 is required (context " << major << "." << minor << ")";
                 return false;
             }
+            // 4.6 tier needs the full 4.6 context and the window not capped below it.
+            const int requested = Platform::GetRequestedGLVersion();
+            const bool compat = version < 46 || (requested > 0 && requested < 46);
+            GL::SetTier(compat ? GL::Tier::GL41 : GL::Tier::GL46);
 
             g = std::make_unique<State>();
-            glEnable(GL_DEBUG_OUTPUT);
-            glDebugMessageCallback(OnDebugMessage, nullptr);
+            g->compat = compat;
+            g->contextVersion = version;
+            g->rendererName = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+            g->vendorName = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+            Log::Info() << "Renderer: OpenGL " << major << "." << minor << " - " << g->rendererName << " (" << g->vendorName << "), "
+                        << (compat ? "4.1 feature tier: CPU culling, CPU compute, texture-buffer storage" : "4.6 feature tier");
+            if (!compat) {
+                glEnable(GL_DEBUG_OUTPUT);
+                glDebugMessageCallback(OnDebugMessage, nullptr);
+            }
             glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &g->uboAlignment);
 
             g->shaderCache.Init();
@@ -658,14 +874,11 @@ namespace Phisiks::Render {
 
             EnsureAlbedoCapacity(4);
             EnsureShadowTargets();
-            glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &g->ssboAlignment);
+            if (!compat) glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &g->ssboAlignment);
             g->ring.Create("Per-frame uploads", 1 << 20);
             g->remapBuffer.Create("Remap", 4096);
             g->sdfBuffer.Create("SDF primitives", 1024);
-            for (GLuint& b : g->cullStats) {
-                glCreateBuffers(1, &b);
-                glNamedBufferStorage(b, 16, nullptr, GL_DYNAMIC_STORAGE_BIT);
-            }
+            if (!compat) for (GLuint& b : g->cullStats) b = GL::CreateBufferObject(16, nullptr);
             Advanced::Init();
             return true;
         }
@@ -676,13 +889,13 @@ namespace Phisiks::Render {
             Advanced::Shutdown();
             Compute::Internal::ReleaseBackends();
             for (GLsync& f : g->cullFences) if (f) glDeleteSync(f);
-            glDeleteBuffers(State::CULL_SLOTS, g->cullStats);
+            if (!g->compat) glDeleteBuffers(State::CULL_SLOTS, g->cullStats);
             g->ring.Release();
             glDeleteVertexArrays(1, &g->meshVao);
             glDeleteVertexArrays(1, &g->lineVao);
             glDeleteVertexArrays(1, &g->textVao);
             glDeleteVertexArrays(1, &g->emptyVao);
-            glDebugMessageCallback(nullptr, nullptr);
+            if (!g->compat) glDebugMessageCallback(nullptr, nullptr);
             Log::Info() << "Renderer: shut down (" << g->glErrors << " OpenGL errors reported)";
             g.reset();
         }
@@ -722,7 +935,7 @@ namespace Phisiks::Render {
         }
 
         uint32_t BuildComputeProgram(const std::string& name, const std::string& source) {
-            if (!g) return 0;
+            if (!g || g->compat) return 0;
             const auto resolver = [](const std::string& file) { return Shaders::Find(file); };
             const ShaderPreprocessor::Result expanded = ShaderPreprocessor::Expand(source, resolver);
             if (!expanded.ok) {
@@ -736,9 +949,9 @@ namespace Phisiks::Render {
             if (!g || !g->window.rendered || g->window.present.Id() == 0) return false;
             width = g->window.size.x;
             height = g->window.size.y;
+            if (g->window.upscaledThisFrame) { width = g->window.outputSize.x; height = g->window.outputSize.y; }
             rgba.resize(size_t(width) * height * 4);
-            glPixelStorei(GL_PACK_ALIGNMENT, 4);
-            glGetTextureImage(g->window.present.Id(), 0, GL_RGBA, GL_UNSIGNED_BYTE, GLsizei(rgba.size()), rgba.data());
+            g->window.present.Read(GL_RGBA, GL_UNSIGNED_BYTE, rgba.size(), rgba.data());
             return true;
         }
 
@@ -754,6 +967,7 @@ namespace Phisiks::Render {
             s.texturesResident = 0;
             for (const auto& [path, layer] : g->textureLayer) if (layer >= 0) ++s.texturesResident;
             s.texturesPending = uint32_t(g->textureTickets.size());
+            s.compatTier = g->compat;
             return s;
         }
 
@@ -767,7 +981,16 @@ namespace Phisiks::Render {
             }
             const RenderSettings& settings = g->settings;
             RenderStats stats;
-            EnsureTargetSet(g->window, windowSize, "Window");
+            const bool compat = g->compat;
+            const glm::ivec2 sceneSize = SceneSize(windowSize);   // window views render at this size
+            const bool upscale = sceneSize != windowSize;
+            EnsureTargetSet(g->window, sceneSize, "Window");
+            if (upscale) EnsureUpscaleTargets(g->window, windowSize);
+            g->window.upscaledThisFrame = false;
+            stats.internalWidth = sceneSize.x;
+            stats.internalHeight = sceneSize.y;
+            stats.outputWidth = windowSize.x;
+            stats.outputHeight = windowSize.y;
             EnsureShadowTargets();
             StreamTextures();
 
@@ -832,7 +1055,7 @@ namespace Phisiks::Render {
             for (const Internal::CameraInput& input : g->cameras) {
                 const Camera& cam = input.camera;
                 TargetSet* target = &g->window;
-                glm::ivec2 size = windowSize;
+                glm::ivec2 size = sceneSize;
                 if (!cam.target.empty()) {
                     target = &g->offscreen[cam.target];
                     size = glm::max(cam.targetSize, glm::ivec2(16));
@@ -887,6 +1110,7 @@ namespace Phisiks::Render {
                 gpu.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(o.world)));
                 gpu.scaleMaterial = glm::vec4(glm::length(glm::vec3(o.world[0])), glm::length(glm::vec3(o.world[1])), glm::length(glm::vec3(o.world[2])), float(item.material));
                 gpu.ids = glm::uvec4(o.entityId + 1, 0, 0, 0);
+                if (compat) gpu.ids.x = FloatBits(float(o.entityId + 1));   // texel buffers hold floats
                 gpu.uvScale = glm::vec4(o.renderer.uvScale, 0.0f, 0.0f);
                 instances[i] = gpu;
                 cullObjects[i] = { glm::vec4(item.center, item.radius), glm::uvec4(slotOfMesh[item.mesh], i, 0, 0) };
@@ -900,14 +1124,16 @@ namespace Phisiks::Render {
                 gpu.normalMatrix = glm::mat4(1.0f);
                 gpu.scaleMaterial = glm::vec4(1.0f, 1.0f, 1.0f, float(material));
                 gpu.ids = glm::uvec4(softDraws[k].entityId + 1, 0, 0, 0);
+                if (compat) gpu.ids.x = FloatBits(float(softDraws[k].entityId + 1));
                 gpu.uvScale = glm::vec4(1.0f);
                 instances[softBase + k] = gpu;
             }
             if (itemCount + softDraws.size() == 0) instances[0] = InstanceGpu{};
+            g->ring.Flush();   // 4.1: staging -> buffer
 
             // Remap layout: [shadow casters][view 0][view 1]..., each itemCount long with a slice per mesh.
             // Command layout: [casters: slots][view 0: slots][view 1: slots]...
-            const bool gpuCulling = settings.gpuCulling && itemCount > 0;
+            const bool gpuCulling = settings.gpuCulling && !compat && itemCount > 0;
             std::vector<uint32_t> remap(std::max<size_t>(size_t(itemCount) * (views.size() + 1), 1), 0);
             std::vector<DrawCommand> commands(size_t(slots) * (views.size() + 1));
             auto initCommands = [&](size_t block) {
@@ -944,7 +1170,8 @@ namespace Phisiks::Render {
             }
             stats.views = uint32_t(views.size());
             g->remapBuffer.Upload(remap.data(), remap.size() * sizeof(uint32_t));
-            if (!commands.empty()) g->indirectBuffer.Upload(commands.data(), commands.size() * sizeof(DrawCommand));
+            if (!commands.empty() && !compat) g->indirectBuffer.Upload(commands.data(), commands.size() * sizeof(DrawCommand));
+            if (compat) g->cpuCommands = commands;
 
             // ---------------------------------------------------------- per-view frame data
             glm::mat4 spotMatrices[MAX_SPOT_SHADOWS]{};
@@ -994,11 +1221,24 @@ namespace Phisiks::Render {
             }
             g->frameUbo.Upload(frameBytes.data(), frameBytes.size());
 
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g->lightBuffer.Id());
-            glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, g->ring.Id(), GLintptr(instanceOffset), GLsizeiptr(instanceBytes));
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g->materialBuffer.Id());
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, g->remapBuffer.Id());
-            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, g->indirectBuffer.Id());
+            if (!compat) {
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g->lightBuffer.Id());
+                glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, g->ring.Id(), GLintptr(instanceOffset), GLsizeiptr(instanceBytes));
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g->materialBuffer.Id());
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, g->remapBuffer.Id());
+                glBindBuffer(GL_DRAW_INDIRECT_BUFFER, g->indirectBuffer.Id());
+            }
+            else {
+                g->tboLights.Bind(9, GL_RGBA32F, g->lightBuffer.Id());
+                g->tboInstances.Bind(10, GL_RGBA32F, g->ring.Id());
+                g->tboMaterials.Bind(11, GL_RGBA32F, g->materialBuffer.Id());
+                g->tboRemap.Bind(12, GL_R32UI, g->remapBuffer.Id());
+                const GLint base = GLint(instanceOffset / 16);   // RGBA32F texels
+                for (int p : { Shaders::FORWARD, Shaders::SHADOW, Shaders::SHADOW_POINT, Shaders::SOFTBODY, Shaders::GBUFFER, Shaders::GBUFFER_SOFT }) {
+                    g->programs[p].Use();
+                    glUniform1i(g->programs[p].Uniform("u_instanceBase"), base);
+                }
+            }
             glBindVertexArray(g->meshVao);
             if (!views.empty()) glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->frameUbo.Id(), 0, sizeof(FrameDataGpu));
 
@@ -1007,7 +1247,8 @@ namespace Phisiks::Render {
             stats.gpuCulling = gpuCulling;
             if (gpuCulling && !views.empty()) {
                 const uint32_t zero = 0;
-                glClearNamedBufferData(g->cullStats[statsSlot], GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
+                (void)zero;
+                GL::ClearBufferZero(g->cullStats[statsSlot], 16);
                 const GL::Program& cull = g->programs[Shaders::CULL];
                 cull.Use();
                 glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 4, g->ring.Id(), GLintptr(cullOffset), GLsizeiptr(cullBytes));
@@ -1026,7 +1267,7 @@ namespace Phisiks::Render {
                     // Occlusion needs last frame's pyramid for this same window view.
                     bool occlusion = false;
                     if (v.target == &g->window) {
-                        occlusion = settings.occlusionCulling && g->hizValid && g->hizSize == windowSize &&
+                        occlusion = settings.occlusionCulling && g->hizValid && g->hizSize == sceneSize &&
                                     windowView < g->hizViewProjections.size() && g->hizRects[windowView] == v.rect;
                         if (occlusion) {
                             glUniformMatrix4fv(cull.Uniform("u_prevViewProjection"), 1, GL_FALSE, &g->hizViewProjections[windowView][0][0]);
@@ -1050,16 +1291,16 @@ namespace Phisiks::Render {
                 g->shadowFbo.SetDrawBuffers(0);
                 glBindFramebuffer(GL_FRAMEBUFFER, g->shadowFbo.Id());
                 glViewport(0, 0, size, size);
-                glClearNamedFramebufferfv(g->shadowFbo.Id(), GL_DEPTH, 0, &one);
+                GL::ClearDepth(g->shadowFbo.Id(), one);
+                glBindFramebuffer(GL_FRAMEBUFFER, g->shadowFbo.Id());
                 glUniformMatrix4fv(program.Uniform("u_lightViewProjection"), 1, GL_FALSE, &viewProj[0][0]);
-                DrawCommands(casterFirst, casterCount);
+                DrawCommands(program, casterFirst, casterCount);
                 if (!softDraws.empty() && program.Id() == g->programs[Shaders::SHADOW].Id()) {
                     const GL::Program& softShadow = g->programs[Shaders::SOFTBODY_SHADOW];
                     softShadow.Use();
                     glUniformMatrix4fv(softShadow.Uniform("u_lightViewProjection"), 1, GL_FALSE, &viewProj[0][0]);
                     for (const Advanced::SoftBodyDraw& d : softDraws) {
-                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.positions);
-                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, d.normals);
+                        BindSoftBuffers(d);
                         glBindVertexArray(d.vao);
                         glDrawElements(GL_TRIANGLES, GLsizei(d.indexCount), GL_UNSIGNED_INT, nullptr);
                     }
@@ -1110,7 +1351,7 @@ namespace Phisiks::Render {
                 const glm::ivec3 res = glm::max(g->fieldViz.resolution, glm::ivec3(1));
                 fieldSampleCount = uint32_t(res.x * res.y * res.z);
                 fieldSamples = Advanced::SampleFieldGrid(g->fieldViz.boundsMin, g->fieldViz.boundsMax, res);
-                glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+                if (!compat) glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             }
             if (g->sdf.enabled && !g->sdf.primitives.empty()) {
                 std::vector<SdfPrimitiveGpu> prims;
@@ -1128,14 +1369,15 @@ namespace Phisiks::Render {
             glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
             glDepthMask(GL_TRUE);
             auto clearSet = [&](TargetSet& t) {
-                glClearNamedFramebufferfv(t.mainFbo.Id(), GL_COLOR, 0, &clear[0]);
-                glClearNamedFramebufferuiv(t.mainFbo.Id(), GL_COLOR, 1, noEntity);
-                glClearNamedFramebufferfv(t.mainFbo.Id(), GL_DEPTH, 0, &one);
+                GL::ClearColor(t.mainFbo.Id(), 0, &clear[0]);
+                GL::ClearColorUint(t.mainFbo.Id(), 1, noEntity);
+                GL::ClearDepth(t.mainFbo.Id(), one);
             };
             clearSet(g->window);
             for (auto& [name, set] : g->offscreen) if (set.usedThisFrame) clearSet(set);
 
             // ---------------------------------------------------------- views
+            bool visionDone = false;
             for (size_t i = 0; i < views.size(); ++i) {
                 View& v = views[i];
                 glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->frameUbo.Id(), GLintptr(i * stride), sizeof(FrameDataGpu));
@@ -1155,19 +1397,20 @@ namespace Phisiks::Render {
                 glEnable(GL_SCISSOR_TEST);
                 glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
                 glDepthMask(GL_TRUE);
-                glClearNamedFramebufferfv(fbo, GL_DEPTH, 0, &one);   // views may overlap: each starts with empty depth
+                GL::ClearDepth(fbo, one);   // views may overlap: each starts with empty depth
+                glBindFramebuffer(GL_FRAMEBUFFER, fbo);
                 glEnable(GL_DEPTH_TEST);
                 glDepthFunc(GL_LESS);
                 glEnable(GL_CULL_FACE);
                 glCullFace(GL_BACK);
-                glBindTextureUnit(4, g->dirShadow.Id());
-                glBindTextureUnit(5, g->spotShadows.Id());
-                glBindTextureUnit(6, g->pointShadows.Id());
-                glBindTextureUnit(7, g->fontAtlas.Id());
-                glBindTextureUnit(8, g->albedoArray.Id());
+                g->dirShadow.Bind(4);
+                g->spotShadows.Bind(5);
+                g->pointShadows.Bind(6);
+                g->fontAtlas.Bind(7);
+                g->albedoArray.Bind(8);
                 glBindVertexArray(g->meshVao);
                 g->programs[Shaders::FORWARD].Use();
-                DrawCommands(v.firstCommand, v.commandCount);
+                DrawCommands(g->programs[Shaders::FORWARD], v.firstCommand, v.commandCount);
 
                 // XPBD cloth / soft bodies (two-sided), straight from the solver buffers
                 if (!softDraws.empty()) {
@@ -1177,8 +1420,7 @@ namespace Phisiks::Render {
                     for (size_t k = 0; k < softDraws.size(); ++k) {
                         const Advanced::SoftBodyDraw& d = softDraws[k];
                         glUniform1ui(soft.Uniform("u_instance"), softBase + uint32_t(k));
-                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.positions);
-                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, d.normals);
+                        BindSoftBuffers(d);
                         glBindVertexArray(d.vao);
                         glDrawElements(GL_TRIANGLES, GLsizei(d.indexCount), GL_UNSIGNED_INT, nullptr);
                     }
@@ -1197,7 +1439,8 @@ namespace Phisiks::Render {
                     glBindVertexArray(g->emptyVao);
                     uint32_t drawn = 0;
                     for (const Advanced::SpriteDraw& d : spriteDraws) {
-                        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.buffer);
+                        if (compat) g->tboAux.Bind(13, GL_RGBA32F, d.buffer);
+                        else glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.buffer);
                         glUniform1ui(sprites.Uniform("u_stride"), d.stride);
                         glUniform1f(sprites.Uniform("u_radius"), d.radius);
                         glUniform3fv(sprites.Uniform("u_color"), 1, &d.color[0]);
@@ -1215,7 +1458,8 @@ namespace Phisiks::Render {
                     glDisable(GL_CULL_FACE);
                     const GL::Program& sdf = g->programs[Shaders::SDF];
                     sdf.Use();
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 12, g->sdfBuffer.Id());
+                    if (compat) g->tboAux.Bind(13, GL_RGBA32F, g->sdfBuffer.Id());
+                    else glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 12, g->sdfBuffer.Id());
                     glUniform1i(sdf.Uniform("u_sdfCount"), int(g->sdf.primitives.size()));
                     glUniform3fv(sdf.Uniform("u_boundsMin"), 1, &g->sdf.boundsMin[0]);
                     glUniform3fv(sdf.Uniform("u_boundsMax"), 1, &g->sdf.boundsMax[0]);
@@ -1243,8 +1487,8 @@ namespace Phisiks::Render {
                 if (!g->lines.empty() && v.target == &g->window) {
                     g->lineBuffer.Upload(g->lines.data(), g->lines.size() * sizeof(LineVertex));
                     g->programs[Shaders::LINES].Use();
+                    SetLineBuffer();
                     glBindVertexArray(g->lineVao);
-                    glVertexArrayVertexBuffer(g->lineVao, 0, g->lineBuffer.Id(), 0, sizeof(LineVertex));
                     glDrawArrays(GL_LINES, 0, GLsizei(g->lines.size()));
                 }
                 if (fieldSamples && v.target == &g->window) {
@@ -1256,7 +1500,8 @@ namespace Phisiks::Render {
                     glUniform3fv(arrows.Uniform("u_boundsMax"), 1, &fv.boundsMax[0]);
                     glUniform1f(arrows.Uniform("u_arrowScale"), fv.arrowScale);
                     glUniform1f(arrows.Uniform("u_maxLength"), fv.maxLength);
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 14, fieldSamples);
+                    if (compat) g->tboAux.Bind(13, GL_RGBA32F, fieldSamples);
+                    else glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 14, fieldSamples);
                     glBindVertexArray(g->emptyVao);
                     glDrawArrays(GL_LINES, 0, GLsizei(fieldSampleCount * 6));
                 }
@@ -1264,10 +1509,49 @@ namespace Phisiks::Render {
                 glDepthMask(GL_TRUE);
                 glDepthFunc(GL_LESS);
                 glDisable(GL_SCISSOR_TEST);
+
+                // Synthetic-vision G-buffer of the first window view (export / tests only).
+                if (g->visionRequested && !visionDone && v.target == &g->window) {
+                    visionDone = true;
+                    EnsureAuxTargets(sceneSize);
+                    const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                    const GLuint noId[4] = { 0, 0, 0, 0 };
+                    GL::ClearColor(g->auxFbo.Id(), 0, zero4);
+                    GL::ClearColor(g->auxFbo.Id(), 1, zero4);
+                    GL::ClearColorUint(g->auxFbo.Id(), 2, noId);
+                    GL::ClearDepth(g->auxFbo.Id(), one);
+                    glBindFramebuffer(GL_FRAMEBUFFER, g->auxFbo.Id());
+                    glViewport(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                    glEnable(GL_DEPTH_TEST);
+                    glDepthFunc(GL_LESS);
+                    glEnable(GL_CULL_FACE);
+                    glBindVertexArray(g->meshVao);
+                    const GL::Program& gbuffer = g->programs[Shaders::GBUFFER];
+                    gbuffer.Use();
+                    DrawCommands(gbuffer, v.firstCommand, v.commandCount);
+                    if (!softDraws.empty()) {
+                        glDisable(GL_CULL_FACE);
+                        const GL::Program& soft = g->programs[Shaders::GBUFFER_SOFT];
+                        soft.Use();
+                        for (size_t k = 0; k < softDraws.size(); ++k) {
+                            glUniform1ui(soft.Uniform("u_instance"), softBase + uint32_t(k));
+                            BindSoftBuffers(softDraws[k]);
+                            glBindVertexArray(softDraws[k].vao);
+                            glDrawElements(GL_TRIANGLES, GLsizei(softDraws[k].indexCount), GL_UNSIGNED_INT, nullptr);
+                        }
+                    }
+                    glEnable(GL_CULL_FACE);
+                    g->vision.view = v.input->view;
+                    g->vision.projection = v.projection;
+                    g->vision.nearPlane = v.input->camera.nearPlane;
+                    g->vision.farPlane = v.input->camera.farPlane;
+                    g->vision.orthographic = v.input->camera.projection == Projection::Orthographic;
+                }
             }
 
             // ---------------------------------------------------------- Hi-Z pyramid for next frame's occlusion culling
-            if (settings.gpuCulling && settings.occlusionCulling && !views.empty()) {
+            if (settings.gpuCulling && settings.occlusionCulling && !compat && !views.empty()) {
+                const glm::ivec2 windowSize = sceneSize;   // the pyramid follows the scene resolution
                 if (g->hizSize != windowSize) {
                     g->hizSize = windowSize;
                     g->hizLevels = 1 + int(std::floor(std::log2(float(std::max(windowSize.x, windowSize.y)))));
@@ -1322,16 +1606,17 @@ namespace Phisiks::Render {
             auto finish = [&](TargetSet& t) {
                 const GLuint fbo = t.mainFbo.Id();
                 const glm::ivec2 s = t.size;
-                glNamedFramebufferReadBuffer(fbo, GL_COLOR_ATTACHMENT0);
-                glBlitNamedFramebuffer(fbo, t.resolveColorFbo.Id(), 0, 0, s.x, s.y, 0, 0, s.x, s.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-                glNamedFramebufferReadBuffer(fbo, GL_COLOR_ATTACHMENT1);
-                glBlitNamedFramebuffer(fbo, t.resolveIdFbo.Id(), 0, 0, s.x, s.y, 0, 0, s.x, s.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-                glNamedFramebufferReadBuffer(fbo, GL_COLOR_ATTACHMENT0);
+                glDisable(GL_SCISSOR_TEST);
+                GL::ReadBuffer(fbo, GL_COLOR_ATTACHMENT0);
+                GL::Blit(fbo, t.resolveColorFbo.Id(), s.x, s.y, s.x, s.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                GL::ReadBuffer(fbo, GL_COLOR_ATTACHMENT1);
+                GL::Blit(fbo, t.resolveIdFbo.Id(), s.x, s.y, s.x, s.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                GL::ReadBuffer(fbo, GL_COLOR_ATTACHMENT0);
                 glBindFramebuffer(GL_FRAMEBUFFER, t.ldrFbo.Id());
                 glViewport(0, 0, s.x, s.y);
                 glDisable(GL_DEPTH_TEST);
                 g->programs[Shaders::TONEMAP].Use();
-                glBindTextureUnit(0, t.hdrResolved.Id());
+                t.hdrResolved.Bind(0);
                 glBindVertexArray(g->emptyVao);
                 glDrawArrays(GL_TRIANGLES, 0, 3);
                 t.rendered = true;
@@ -1340,11 +1625,46 @@ namespace Phisiks::Render {
             for (auto& [name, set] : g->offscreen) if (set.usedThisFrame) finish(set);
             finish(g->window);
 
+            // Vision readback (internal resolution, aligned with the tonemapped colour).
+            if (visionDone) {
+                VisionCapture& vc = g->vision;
+                vc.width = sceneSize.x;
+                vc.height = sceneSize.y;
+                const size_t pixels = size_t(vc.width) * vc.height;
+                vc.rgba.resize(pixels * 4);
+                g->window.ldr.Read(GL_RGBA, GL_UNSIGNED_BYTE, vc.rgba.size(), vc.rgba.data());
+                vc.linearDepth.resize(pixels);
+                g->auxZ.Read(GL_RED, GL_FLOAT, pixels * 4, vc.linearDepth.data());
+                vc.entityIds.resize(pixels);
+                g->auxId.Read(GL_RED_INTEGER, GL_UNSIGNED_INT, pixels * 4, vc.entityIds.data());
+                std::vector<glm::vec4> normals(pixels);
+                g->auxNormal.Read(GL_RGBA, GL_FLOAT, pixels * 16, normals.data());
+                vc.normals.resize(pixels);
+                for (size_t p = 0; p < pixels; ++p) vc.normals[p] = glm::vec3(normals[p]);
+                g->visionReady = true;
+            }
+            g->visionRequested = false;
+
+            // Upscale the window image (EASU + RCAS or bilinear) to the window size.
+            TargetSet& w = g->window;
+            GLuint shown = w.ldrFbo.Id();
+            if (upscale && !views.empty()) {
+                RunUpscaler(w.ldr.Id(), sceneSize, w.upscaledFbo.Id(), w.upscaled.Id(), w.outputFbo.Id(), windowSize, settings.upscaler, settings.sharpness, w.ldrFbo.Id());
+                shown = w.outputFbo.Id();
+                w.upscaledThisFrame = true;
+                stats.upscaled = true;
+            }
+            else if (upscale) {   // nothing rendered: show the clear colour at the window size
+                GL::Blit(w.ldrFbo.Id(), w.outputFbo.Id(), sceneSize.x, sceneSize.y, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+                shown = w.outputFbo.Id();
+                w.upscaledThisFrame = true;
+            }
+
             // Compose the presented image (scene + overlay text) in a renderer-owned texture, then show it.
-            const GLuint present = g->window.presentFbo.Id();
-            glBlitNamedFramebuffer(g->window.ldrFbo.Id(), present, 0, 0, windowSize.x, windowSize.y, 0, 0, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            const GLuint present = w.presentFbo.Id();
+            GL::Blit(shown, present, windowSize.x, windowSize.y, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
             DrawTextPass(present, windowSize);
-            glBlitNamedFramebuffer(present, 0, 0, 0, windowSize.x, windowSize.y, 0, 0, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            GL::Blit(present, 0, windowSize.x, windowSize.y, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
             glBindVertexArray(0);
             glEnable(GL_DEPTH_TEST);
@@ -1361,7 +1681,7 @@ namespace Phisiks::Render {
                     const GLenum status = glClientWaitSync(fence, 0, 0);
                     if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED) continue;
                     uint32_t counters[4] = {};
-                    glGetNamedBufferSubData(g->cullStats[slot], 0, sizeof(counters), counters);
+                    GL::GetBufferSubData(g->cullStats[slot], 0, sizeof(counters), counters);
                     g->gpuVisible = counters[0];
                     g->gpuFrustumCulled = counters[1];
                     g->gpuOcclusionCulled = counters[2];
@@ -1371,6 +1691,10 @@ namespace Phisiks::Render {
                 ++g->cullFrame;
             }
             stats.ringBlockedWaits = g->ring.BlockedWaits();
+            if (compat) for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {   // no debug output on 4.1
+                if (g->loggedDebugMessages++ < 20) Log::Error() << "OpenGL error 0x" << std::hex << e << std::dec;
+                ++g->glErrors;
+            }
             g->lines.clear();
             g->text.clear();
             g->frameStats = stats;

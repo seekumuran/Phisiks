@@ -40,6 +40,10 @@ if(firstState STREQUAL lastState)
     message(FATAL_ERROR "Tower_15 did not move between frame 1 and frame 599")
 endif()
 
+if(SKIP_RENDER)
+    message(STATUS "hidden-window recording skipped (SKIP_RENDER)")
+    return()
+endif()
 execute_process(
     COMMAND "${LAB}" --scene PhysicsTower --hidden --deterministic --max-frames 31
             --run-dir "${WORK}/frames" --export-dir "${WORK}/frames/export" --export-frames --export-every 10

@@ -1,12 +1,19 @@
 #pragma once
-// Phisiks::Physics::Advanced: GPU simulations on OpenGL 4.6 compute (needs the renderer).
+// Phisiks::Physics::Advanced: particle and XPBD simulations. Backends (same results within float
+// tolerance, same API):
+//   GPU  OpenGL 4.6 compute (the renderer's 4.6 tier)
+//   CPU  worker thread pool (OpenGL 4.1 tier, e.g. macOS, older iGPUs; headless runs)
 //
 // Scene components (attach to an entity; the entity's world position places the system):
 //   ForceField      (Phisiks/Physics/Fields.h) uniform / planetary / vortex / n-body fields. They act
 //                   on rigid bodies (CPU, every fixed step), GPU particles and XPBD nodes.
-//   ParticleSystem  GPU particles with a spatial hash grid for neighbour collisions, scene
-//                   colliders, force fields and (with an NBody field) O(N^2) mutual gravity.
-//   SoftBody        GPU XPBD rope, cloth or soft box colliding with the scene's colliders.
+//   ParticleSystem  particles with a spatial hash grid for neighbour collisions, scene colliders,
+//                   force fields and (with an NBody field) O(N^2) mutual gravity. Either a block
+//                   spawned at once, or an emitter (emissionRate > 0) with optional lifetime.
+//   SoftBody        XPBD rope, cloth or soft box colliding with the scene's colliders.
+// Two-way coupling: particles and soft-body nodes that collide with the collider of a dynamic
+// rigid body push it (reaction impulse = -m * push-out / dt, applied to the body; one fixed step
+// later on the CPU backend, up to three on the GPU backend, whose results are read without stalling).
 // Colliders: every Collider component with a box or sphere shape, plus the ground plane y = 0
 // when the scene has an entity named "Ground".
 
@@ -38,6 +45,16 @@ namespace Phisiks::Physics::Advanced {
         glm::vec3 fastColor{ 1.0f, 0.55f, 0.2f };  // tint at fastSpeed
         float fastSpeed = 6.0f;
         uint32_t seed = 1;
+        // Emitter: `count` is the pool size. emissionRate > 0 spawns particles over time inside
+        // spawnSize around the entity, moving along the entity's local emitDirection at emitSpeed
+        // (+ initialVelocity) within a cone of emitSpread radians; lifetime > 0 retires them (else
+        // the oldest are recycled when the pool is full).
+        float emissionRate = 0.0f;                 // particles / s (0 = the whole pool at once)
+        float lifetime = 0.0f;                     // s (0 = unlimited)
+        glm::vec3 emitDirection{ 0.0f, 1.0f, 0.0f };
+        float emitSpeed = 0.0f;
+        float emitSpread = 0.25f;
+        bool pushRigidBodies = true;               // two-way coupling with dynamic rigid bodies
     };
 
     enum class SoftBodyKind { Rope, Cloth, Box };
@@ -54,6 +71,7 @@ namespace Phisiks::Physics::Advanced {
         float damping = 0.5f;
         float friction = 0.4f;
         std::string material;                 // cloth / box surface material
+        bool pushRigidBodies = true;          // two-way coupling with dynamic rigid bodies
     };
 
     struct Stats {
@@ -67,12 +85,19 @@ namespace Phisiks::Physics::Advanced {
         uint32_t colliders = 0;
         uint64_t steps = 0;
         uint32_t dispatchesLastStep = 0;   // compute dispatches of the last Step (fused solver: ~2 per soft body)
-        float cpuMsLastStep = 0.0f;        // CPU time to record the last Step (driver overhead; GPU work is async)
-        bool gpuAvailable = false;
+        float cpuMsLastStep = 0.0f;        // CPU time of the last Step (GPU: recording; CPU backend: the simulation)
+        bool gpuAvailable = false;         // GPU compute backend in use
+        bool cpuBackend = false;           // CPU worker-pool backend in use
+        uint32_t particlesAlive = 0;       // emitters: live particles
+        uint64_t particlesEmitted = 0;
+        uint32_t coupledBodies = 0;        // dynamic bodies that received an impulse in the last applied step
+        float coupledImpulse = 0.0f;       // sum of |J| (N*s) applied in the last applied step
+        uint64_t coupledImpulsesApplied = 0;
     };
     Stats GetStats();
 
-    // Verification / tooling readbacks (synchronise with the GPU; not for per-frame use).
+    // Verification / tooling readbacks (synchronise with the GPU; not for per-frame use). Work on
+    // both backends; the Gpu* reference helpers below need the GPU backend.
     bool ReadSoftBody(Entity entity, std::vector<glm::vec4>& positions);   // xyz, w inverse mass
     bool ReadParticles(Entity entity, std::vector<glm::vec4>& positionRadius);
     // Builds the spatial hash for `positions` on the GPU and returns, per point, the number of other

@@ -1,5 +1,7 @@
 #pragma once
-// Application window + OpenGL 4.6 core context (GLFW backend, hidden from users of this header).
+// Application window + OpenGL core context (GLFW backend, hidden from users of this header):
+// 4.6 where available, down to 4.1 (macOS, older iGPUs). The renderer picks its feature tier from
+// GetRequestedGLVersion().
 // Window events feed Phisiks::GetInputState() and Phisiks::GlobalEvents().
 
 #include <glm/vec2.hpp>
@@ -20,6 +22,7 @@ namespace Phisiks::Platform {
         bool vsync = false;
         bool debugContext = true;    // OpenGL debug output (KHR_debug)
         bool startVisible = false;   // engines usually show the window after the first frame is ready
+        int maxGLVersion = 46;       // 46 / 45 / 43 / 41: cap the context (41 = the macOS feature tier)
     };
 
     bool CreateMainWindow(const WindowDesc& desc);
@@ -57,5 +60,7 @@ namespace Phisiks::Platform {
     GLProcLoader GetGLProcLoader();      // pass to gladLoadGL
 
     void* GetNativeHandle();             // GLFWwindow*
-    void* GetWin32Handle();              // HWND
+    void* GetWin32Handle();              // HWND (nullptr elsewhere)
+    int GetGLContextVersion();           // e.g. 46 (what the driver created)
+    int GetRequestedGLVersion();         // the version the window asked for (<= maxGLVersion): the renderer's tier
 }

@@ -1,9 +1,14 @@
 #pragma once
 // Phisiks::Compute: backend-neutral GPU compute interface.
 //
-// The OpenGL 4.6 backend (compute shaders + SSBOs) is implemented and is what the engine's own GPU
-// systems use (culling, Hi-Z, particles, spatial hash, XPBD, field sampling). OpenCL and SYCL are
-// interface hooks: GetBackend() returns nullptr for them until a backend is built.
+// Backends:
+//   OpenGL  compute shaders + SSBOs (OpenGL 4.6 tier): what the engine's GPU systems use (culling,
+//           Hi-Z, particles, spatial hash, XPBD, field sampling) when the GPU supports it.
+//   CPU     multi-threaded C++ kernels on a worker pool, always available (also headless). On the
+//           OpenGL 4.1 tier (macOS, older iGPUs) the engine runs particles, XPBD and field sampling
+//           on it. Kernels are C++ functions registered by name (RegisterCpuKernel); the rest of the
+//           API (buffers, bindings, uniforms, Dispatch in work groups) is identical.
+//   OpenCL, SYCL  interface hooks: GetBackend() returns nullptr until a backend is built.
 //
 //   auto* gpu = Compute::GetBackend(Compute::BackendType::OpenGL);
 //   auto x = gpu->CreateBuffer(n * sizeof(float));
@@ -16,11 +21,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace Phisiks::Compute {
-    enum class BackendType { OpenGL, OpenCL, SYCL };
+    enum class BackendType { OpenGL, OpenCL, SYCL, CPU };
     const char* ToString(BackendType type);
 
     using BufferId = uint32_t;   // 0 = invalid
@@ -45,6 +51,7 @@ namespace Phisiks::Compute {
         virtual void Upload(BufferId buffer, const void* data, size_t bytes, size_t offset = 0) = 0;
         virtual void Download(BufferId buffer, void* data, size_t bytes, size_t offset = 0) = 0;   // synchronises
         // OpenGL: `source` is a GLSL 4.60 compute shader (it is cached on disk like engine shaders).
+        // CPU: `name` selects a kernel registered with RegisterCpuKernel (`source` is ignored).
         virtual KernelId CreateKernel(const std::string& name, const std::string& source) = 0;
         virtual void SetBuffer(KernelId kernel, uint32_t binding, BufferId buffer) = 0;
         virtual void SetUniform(KernelId kernel, const char* name, float value) = 0;
@@ -54,7 +61,22 @@ namespace Phisiks::Compute {
         virtual void Finish() = 0;
     };
 
-    // OpenGL is available once the renderer is initialised (it shares the GL context).
+    // OpenGL is available once the renderer is initialised on the 4.6 tier (it shares the GL
+    // context); CPU is always available.
     IComputeBackend* GetBackend(BackendType type);
-    std::vector<DeviceInfo> EnumerateBackends();
+    std::vector<DeviceInfo> EnumerateBackends();   // OpenGL, OpenCL, SYCL, CPU
+
+    // CPU kernels: invoked once per invocation (work group size x groups), in parallel.
+    struct CpuInvocation {
+        uint32_t globalId[3] = { 0, 0, 0 };
+        std::vector<void*>* buffers = nullptr;              // by binding (nullptr if unbound)
+        std::vector<size_t>* bufferSizes = nullptr;
+        const std::function<float(const char*)>* uniformF = nullptr;
+        const std::function<uint32_t(const char*)>* uniformU = nullptr;
+        template<class T> T* Buffer(uint32_t binding) const { return binding < buffers->size() ? static_cast<T*>((*buffers)[binding]) : nullptr; }
+        float F(const char* name) const { return (*uniformF)(name); }
+        uint32_t U(const char* name) const { return (*uniformU)(name); }
+    };
+    using CpuKernelFunction = std::function<void(const CpuInvocation&)>;
+    void RegisterCpuKernel(const std::string& name, uint32_t workGroupSize, CpuKernelFunction kernel);
 }

@@ -14,6 +14,7 @@
 #include "compute/AdvancedWorld.h"
 #include "Phisiks/Assets/Assets.h"
 #include "Phisiks/Audio/Audio.h"
+#include "Phisiks/UI/ImGuiLayer.h"
 
 namespace Phisiks {
     namespace {
@@ -43,6 +44,7 @@ namespace Phisiks {
             Platform::WindowDesc window;
             window.title = options.windowTitle + (m_harness ? " [AUTOTEST]" : "");
             window.fullscreen = options.fullscreen;
+            window.maxGLVersion = options.maxGLVersion;
             if (!Platform::CreateMainWindow(window)) {
                 Log::Error() << "Window / OpenGL context creation failed; aborting";
                 return false;
@@ -52,6 +54,7 @@ namespace Phisiks {
                 return false;
             }
             m_rendererReady = true;
+            if (options.enableUI && !UI::Init()) Log::Warning() << "UI unavailable; continuing without the studio panels";
         }
         if (!Physics::Init()) {
             Log::Error() << "Physics initialization failed; aborting";
@@ -62,9 +65,12 @@ namespace Phisiks {
         audio.useDevice = !options.headless && !options.deterministic;
         Audio::Init(audio);
         Presentation::Install(m_rendererReady);
+        if (!m_rendererReady) Advanced::Init();   // headless: particles / XPBD on the CPU backend
+        m_ctx.replay.SetCapacity(options.replayCapacity);
+        m_ctx.replay.SetEnabled(options.recordReplay);
         if (!options.exportDirectory.empty()) {
             m_recorder = std::make_unique<Recorder>();
-            m_recorder->Begin(options.exportDirectory, options.exportFrames, options.exportData, options.exportEvery);
+            m_recorder->Begin(options.exportDirectory, options.exportFrames, options.exportData, options.exportEvery, options.exportVision);
         }
         if (Platform::HasWindow() && !options.hiddenWindow) Platform::Show();
         Log::Info() << "Engine initialized (" << (options.headless ? "headless" : options.hiddenWindow ? "hidden window" : "window")
@@ -200,6 +206,8 @@ namespace Phisiks {
             PHISIKS_PROFILE_SCOPE("Update");
             // 1. Input (tests inject synthetic input before it is sampled)
             if (m_harness) m_harness->BeforeInput(m_ctx);
+            // The studio UI owns the mouse / keyboard while it is hovered or typed into.
+            if (!m_harness && UI::IsActive()) m_ctx.input.SetHardwareEnabled(!UI::WantsMouse() && !UI::WantsKeyboard());
             m_ctx.input.Update(Platform::HasWindow() && Platform::HasFocus());
             HandleGlobalActions();
 
@@ -237,8 +245,12 @@ namespace Phisiks {
                 m_ctx.player.FixedUpdate(m_ctx.camera.GetYaw(), fixedDt);
                 if (scene) scene->ApplyForceFields(fixedDt);      // force fields -> rigid bodies
                 Physics::Step(fixedDt);
-                if (scene && m_rendererReady) Advanced::Step(*scene, fixedDt);   // GPU particles + XPBD
+                if (scene && Advanced::Available()) Advanced::Step(*scene, fixedDt);   // particles + XPBD (GPU or CPU backend)
                 ++steps;
+                if (scene && m_ctx.replay.Enabled()) {
+                    scene->PullPhysicsPoses();
+                    m_ctx.replay.Record(*scene, m_ctx.stats.totalFixedSteps + steps, m_ctx.stats.simulationTime + steps * double(fixedDt), &m_ctx.input, &m_ctx.camera);
+                }
             }
             if (scene) scene->PullPhysicsPoses();         // dynamic bodies -> transforms
             m_ctx.stats.fixedStepsThisFrame = steps;
@@ -266,11 +278,17 @@ namespace Phisiks {
             DebugOverlay::Draw(m_ctx);
             if (scene) scene->DrawUI(m_ctx);
             if (m_rendererReady) {
+                if (m_recorder && m_recorder->WantsVision(m_ctx.stats.frameIndex)) Render::RequestVisionCapture();
                 GpuTimer::Get().Begin("Frame");
                 Render::Internal::RenderFrame();
                 GpuTimer::Get().End("Frame");
             }
             if (m_recorder) m_recorder->Capture(scene, m_ctx.stats.frameIndex, m_ctx.stats.totalFixedSteps, m_ctx.stats.simulationTime, m_rendererReady);
+            if (UI::IsActive()) {   // studio panels on top of the presented frame (not part of captures)
+                UI::BeginFrame();
+                m_game->OnGui(m_ctx);
+                UI::EndFrame();
+            }
             if (m_harness) m_harness->AfterRender(m_ctx);
         }
     }
@@ -311,6 +329,8 @@ namespace Phisiks {
         Presentation::Uninstall();
         Audio::Shutdown();
         Assets::Shutdown();
+        UI::Shutdown();
+        if (!m_rendererReady) Advanced::Shutdown();
         if (m_rendererReady) {
             GpuTimer::Get().Shutdown();
             Render::Internal::Shutdown();

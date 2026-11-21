@@ -18,8 +18,8 @@ layout(location = 0) out vec4 o_color;
 layout(location = 1) out uint o_entity;
 
 void main() {
-    Instance inst = u_instances[v_instance];
-    Material m = u_materials[uint(inst.scaleMaterial.w + 0.5)];
+    Instance inst = LoadInstance(v_instance);
+    Material m = LoadMaterial(uint(inst.scaleMaterial.w + 0.5));
 
     vec3 N = normalize(v_normal);
     if (!gl_FrontFacing) N = -N;
@@ -47,7 +47,7 @@ void main() {
     int lightCount = int(u_groundColor.w + 0.5);
     bool shadows = u_fogParams2.y > 0.5;
     for (int i = 0; i < lightCount; ++i) {
-        Light light = u_lights[i];
+        Light light = LoadLight(uint(i));
         int type = int(light.directionType.w + 0.5);
         int shadowIndex = light.params.z < 0.0 ? -1 : int(light.params.z + 0.5);
         vec3 L;

@@ -1,15 +1,22 @@
-// PhisiksLab entry point: a sample game built on Phisiks.
+// PhisiksLab entry point: the interactive studio + sample scenes built on Phisiks.
 //
 // Usage: PhisiksLab [--scene <name>] [--fullscreen] [--autotest] [--run-dir <dir>] [--max-frames <n>]
 //        [--deterministic] [--steps-per-frame <n>] [--headless | --hidden]
-//        [--export-dir <dir> [--export-frames] [--export-data] [--export-every <n>]]
+//        [--export-dir <dir> [--export-frames] [--export-data] [--export-vision] [--export-every <n>]]
+//        [--gl41] [--quality low|medium|high] [--no-studio]
+//   --gl41       force the OpenGL 4.1 feature tier (the macOS path: CPU culling + CPU compute)
+//   --quality    scalability preset (Low = 720p internal -> FSR 1 upscale, for i3 / UHD laptops)
+//   --no-studio  hide the Dear ImGui studio panels (on by default whenever a window exists)
 // Run from the repository root (asset paths are relative to it).
 
 #include "Phisiks/Framework/GameContext.h"
+#include "Phisiks/Render/Renderer.h"
 #include "Phisiks/Runtime/Application.h"
 
 #include "AutoTest.h"
+#include "LessonScenes.h"
 #include "SandboxScenes.h"
+#include "Studio.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -17,17 +24,40 @@
 #include <string>
 
 namespace {
-    // The sample game: registers its scenes; all gameplay lives in the scenes (SandboxScenes.cpp).
+    // The sample game: registers its scenes; gameplay lives in the scenes, the studio in Studio.cpp.
     class PhisiksLab : public Phisiks::IGame {
     public:
-        void RegisterScenes(Phisiks::SceneManager& scenes) override { Lab::RegisterScenes(scenes); }
-        void OnStart(Phisiks::GameContext&) override { Lab::RegisterMaterials(); }
+        int quality = -1;
+        void RegisterScenes(Phisiks::SceneManager& scenes) override {
+            Lab::RegisterScenes(scenes);
+            Lab::RegisterLessonScenes(scenes);
+        }
+        void OnStart(Phisiks::GameContext&) override {
+            Lab::RegisterMaterials();
+            Lab::RegisterLessonMaterials();
+            if (quality >= 0) Phisiks::Render::ApplyQualityPreset(Phisiks::Render::QualityPreset(quality));
+        }
         void OnUpdate(Phisiks::GameContext& ctx, float) override {
+            if (ctx.CurrentScene() != m_lastScene) {
+                m_lastScene = ctx.CurrentScene();
+                Lab::Studio::OnSceneLoaded(ctx);
+            }
             if (ctx.input.Pressed(Phisiks::Action::ToggleViewLayout) && ctx.CurrentScene()) {
                 Lab::SetQuadView(*ctx.CurrentScene(), !Lab::IsQuadView(*ctx.CurrentScene()));
             }
         }
+        void OnGui(Phisiks::GameContext& ctx) override { Lab::Studio::Draw(ctx); }
+
+    private:
+        Phisiks::Scene* m_lastScene = nullptr;
     };
+
+    void Usage() {
+        std::cerr << "Usage: PhisiksLab [--scene <name>] [--fullscreen] [--autotest] [--run-dir <dir>] [--max-frames <n>]\n"
+                  << "       [--deterministic] [--steps-per-frame <n>] [--headless | --hidden]\n"
+                  << "       [--export-dir <dir> [--export-frames] [--export-data] [--export-vision] [--export-every <n>]]\n"
+                  << "       [--gl41] [--quality low|medium|high] [--no-studio]\n";
+    }
 }
 
 int main(int argc, char** argv) {
@@ -35,6 +65,8 @@ int main(int argc, char** argv) {
     options.windowTitle = "PhisiksLab";
     options.initialScene = "Sandbox";
     bool autotest = false;
+    bool studio = true;
+    int quality = -1;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -51,17 +83,26 @@ int main(int argc, char** argv) {
         else if (arg == "--export-dir" && hasValue) options.exportDirectory = argv[++i];
         else if (arg == "--export-frames") options.exportFrames = true;
         else if (arg == "--export-data") options.exportData = true;
+        else if (arg == "--export-vision") options.exportVision = true;
         else if (arg == "--export-every" && hasValue) options.exportEvery = std::atoi(argv[++i]);
+        else if (arg == "--gl41") options.maxGLVersion = 41;
+        else if (arg == "--no-studio") studio = false;
+        else if (arg == "--quality" && hasValue) {
+            const std::string q = argv[++i];
+            quality = q == "low" ? 0 : q == "medium" ? 1 : q == "high" ? 2 : -1;
+            if (quality < 0) { Usage(); return 64; }
+        }
         else {
-            std::cerr << "Unknown argument '" << arg << "'\n"
-                      << "Usage: PhisiksLab [--scene <name>] [--fullscreen] [--autotest] [--run-dir <dir>] [--max-frames <n>]\n"
-                      << "       [--deterministic] [--steps-per-frame <n>] [--headless | --hidden]\n"
-                      << "       [--export-dir <dir> [--export-frames] [--export-data] [--export-every <n>]]\n";
+            std::cerr << "Unknown argument '" << arg << "'\n";
+            Usage();
             return 64;
         }
     }
+    options.enableUI = studio && !options.headless;
+    options.recordReplay = studio && !options.headless && !options.deterministic;
 
     PhisiksLab game;
+    game.quality = quality;
     std::unique_ptr<Phisiks::ITestHarness> harness;
     if (autotest) harness = std::make_unique<Phisiks::AutoTest>(options.runDirectory);
 

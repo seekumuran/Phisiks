@@ -34,7 +34,20 @@ struct SdfPrimitive {
                             // torus: x ring, y tube; capsule: x half length (local Y), y radius; cylinder: x half height, y radius
     vec4 op;                // x operation (0 union, 1 subtraction, 2 intersection), y smoothness k
 };
+#ifdef PHISIKS_GL41
+layout(binding = 13) uniform samplerBuffer u_sdfTexels;   // 4 texels per primitive
+SdfPrimitive LoadSdf(int i) {
+    SdfPrimitive s;
+    s.positionShape = texelFetch(u_sdfTexels, i * 4);
+    s.rotation = texelFetch(u_sdfTexels, i * 4 + 1);
+    s.params = texelFetch(u_sdfTexels, i * 4 + 2);
+    s.op = texelFetch(u_sdfTexels, i * 4 + 3);
+    return s;
+}
+#else
 layout(std430, binding = 12) readonly buffer SdfBuffer { SdfPrimitive u_sdf[]; };
+SdfPrimitive LoadSdf(int i) { return u_sdf[i]; }
+#endif
 uniform int u_sdfCount;
 
 vec3 SdfRotateInverse(vec4 q, vec3 v) {
@@ -57,7 +70,7 @@ float SdfPrimitiveDistance(SdfPrimitive s, vec3 p) {
 float SceneSdf(vec3 p) {
     float d = 1e9;
     for (int i = 0; i < u_sdfCount; ++i) {
-        SdfPrimitive s = u_sdf[i];
+        SdfPrimitive s = LoadSdf(i);
         float di = SdfPrimitiveDistance(s, p);
         int op = int(s.op.x + 0.5);
         if (i == 0) d = di;

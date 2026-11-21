@@ -121,7 +121,8 @@ namespace Phisiks {
 
         void UpdatePlayerBody(GameContext& ctx) {
             Entity body = ctx.player.GetBodyEntity();
-            if (!body.Valid() || !ctx.player.IsSpawned()) return;
+            // The handle may belong to a scene that was already unloaded: never touch it then.
+            if (!ctx.player.IsSpawned() || body.GetScene() != ctx.CurrentScene() || !body.Valid()) return;
             const PlayerSettings& s = ctx.player.GetSettings();
             const float height = s.capsuleHeight + 2.0f * s.capsuleRadius;
             body.SetWorldPose(ctx.player.GetFeetPosition() + glm::vec3(0.0f, height * 0.5f, 0.0f),

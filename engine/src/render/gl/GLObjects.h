@@ -1,20 +1,52 @@
 #pragma once
-// Thin RAII wrappers over OpenGL 4.6 objects (direct state access). Move-only.
+// Thin RAII wrappers over OpenGL objects plus the state helpers the renderer uses, for two feature
+// tiers selected once at startup (SetTier):
+//   GL46  OpenGL 4.6 core: direct state access, compute, SSBOs, indirect multi-draw (default)
+//   GL41  OpenGL 4.1 core (macOS, older iGPUs): bind-to-edit, texture buffers instead of SSBOs,
+//         no compute (the engine's GPU systems run on the CPU compute backend)
+// Every helper takes the object name and does the right thing for the active tier. Move-only types.
+
+#include "render/ShaderPreprocessor.h"
 
 #include <glad/gl.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace Phisiks::Render::GL {
 
-    void Label(GLenum identifier, GLuint name, const std::string& label);   // KHR_debug object label
+    enum class Tier { GL46, GL41 };
+    void SetTier(Tier tier);
+    Tier GetTier();
+    inline bool Compat() { return GetTier() == Tier::GL41; }
+
+    void Label(GLenum identifier, GLuint name, const std::string& label);   // KHR_debug object label (4.6 tier)
+
+    // ------------------------------------------------------------------ state helpers
+    GLuint CreateBufferObject(size_t size, const void* data, GLenum usageHint = GL_DYNAMIC_DRAW);
+    void BufferSubData(GLuint buffer, size_t offset, size_t size, const void* data);
+    void GetBufferSubData(GLuint buffer, size_t offset, size_t size, void* data);
+    void ClearBufferZero(GLuint buffer, size_t size);
+
+    void BindTexture(GLuint unit, GLenum target, GLuint texture);
+    void ClearColor(GLuint framebuffer, int drawBuffer, const float* rgba);
+    void ClearColorUint(GLuint framebuffer, int drawBuffer, const GLuint* value);
+    void ClearDepth(GLuint framebuffer, float depth);
+    void ReadBuffer(GLuint framebuffer, GLenum attachment);
+    void Blit(GLuint source, GLuint destination, int srcW, int srcH, int dstW, int dstH, GLbitfield mask, GLenum filter);
+
+    struct VertexAttrib { GLuint index; GLint size; GLenum type; size_t offset; };
+    GLuint CreateVertexArray();
+    // Sets the vertex buffer and attribute layout of `vao` (binding 0). Leaves the bound VAO unchanged.
+    void SetVertexBuffer(GLuint vao, GLuint buffer, GLsizei stride, std::initializer_list<VertexAttrib> attribs);
+    void SetElementBuffer(GLuint vao, GLuint buffer);
 
     // ------------------------------------------------------------------ buffer
-    // Dynamic storage buffer that grows on demand (contents are discarded when it grows).
+    // Dynamic buffer that grows on demand (contents are discarded when it grows).
     class Buffer {
     public:
         Buffer() = default;
@@ -61,6 +93,11 @@ namespace Phisiks::Render::GL {
 
         void Create(const std::string& label, const TextureDesc& desc);
         void Upload2D(GLenum format, GLenum type, const void* pixels);   // level 0, whole image
+        void UploadLayer(int layer, GLenum format, GLenum type, const void* pixels);   // array textures, level 0
+        void GenerateMipmaps();
+        void SetParameter(GLenum name, float value);
+        void Read(GLenum format, GLenum type, size_t bytes, void* out) const;   // level 0 (synchronous)
+        void Bind(GLuint unit) const { BindTexture(unit, m_desc.target, m_id); }
         void Release();
         GLuint Id() const { return m_id; }
         const TextureDesc& Desc() const { return m_desc; }
@@ -68,6 +105,16 @@ namespace Phisiks::Render::GL {
     private:
         GLuint m_id = 0;
         TextureDesc m_desc;
+    };
+
+    // Texture-buffer view (4.1 tier storage access): re-pointed at a buffer before each use.
+    class TextureBuffer {
+    public:
+        ~TextureBuffer() { Release(); }
+        void Bind(GLuint unit, GLenum format, GLuint buffer);
+        void Release();
+    private:
+        GLuint m_id = 0;
     };
 
     // ------------------------------------------------------------------ framebuffer
@@ -123,4 +170,7 @@ namespace Phisiks::Render::GL {
     // Compiles + links from source. `retrievable` asks the driver to keep the binary for the cache.
     // Returns 0 on failure (errors are logged with the program name and stage).
     GLuint BuildProgram(const std::string& name, const std::vector<StageSource>& stages, bool retrievable);
+
+    // 4.1 tier: sets the sampler units / block bindings recorded by ShaderPreprocessor::RewriteForGL41.
+    void ApplyBindings(GLuint program, const ShaderPreprocessor::ResourceBindings& bindings);
 }

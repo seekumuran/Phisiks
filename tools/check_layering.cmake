@@ -34,6 +34,8 @@ function(phisiks_check_includes dirs allow_local out_count)
                     set(ok TRUE)
                 elseif(line MATCHES "#[ \t]*include[ \t]*<entt\\.hpp>")
                     set(ok TRUE)
+                elseif(allow_local AND line MATCHES "#[ \t]*include[ \t]*<(imgui|ImGuizmo)\\.h>")
+                    set(ok TRUE)                                   # studio UI (Dear ImGui / ImGuizmo, linked with the engine)
                 elseif(line MATCHES "#[ \t]*include[ \t]*<[a-z_0-9]+>")
                     set(ok TRUE)                                   # C++ standard library
                 endif()

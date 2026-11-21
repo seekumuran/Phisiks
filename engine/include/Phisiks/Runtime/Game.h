@@ -22,5 +22,6 @@ namespace Phisiks {
         virtual void OnUpdate(GameContext& /*ctx*/, float /*deltaTime*/) {}
         virtual void OnFixedUpdate(GameContext& /*ctx*/, float /*fixedDeltaTime*/) {}
         virtual void OnShutdown(GameContext& /*ctx*/) {}
+        virtual void OnGui(GameContext& /*ctx*/) {}   // Dear ImGui windows (AppOptions::enableUI), after the frame was rendered
     };
 }

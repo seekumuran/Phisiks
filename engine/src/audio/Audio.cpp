@@ -1,5 +1,6 @@
-// Phisiks::Audio: clip cache + mixer + output device (WASAPI, event-driven shared mode).
-// Written against the public Windows Core Audio documentation.
+// Phisiks::Audio: clip cache + mixer + output device. Device backends (chosen at build time):
+//   WASAPI     Windows default, event-driven shared mode (written against the Windows Core Audio docs)
+//   miniaudio  macOS / Linux (CoreAudio, PulseAudio, ALSA, JACK), optional on Windows; audio/MiniaudioDevice.cpp
 #include "Phisiks/Audio/Audio.h"
 #include "Phisiks/Assets/Assets.h"
 #include "Phisiks/Core/Log.h"
@@ -11,7 +12,10 @@
 #include <thread>
 #include <unordered_map>
 
-#ifdef _WIN32
+#if defined(PHISIKS_AUDIO_MINIAUDIO)
+#include "audio/MiniaudioDevice.h"
+#elif defined(_WIN32)
+#define PHISIKS_AUDIO_WASAPI 1
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -23,7 +27,9 @@
 
 namespace Phisiks::Audio {
     namespace {
-#ifdef _WIN32
+#if defined(PHISIKS_AUDIO_MINIAUDIO)
+        using Device = MiniaudioDevice;
+#elif defined(PHISIKS_AUDIO_WASAPI)
         // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, spelled out to avoid linking ksuser.
         const GUID SUBTYPE_IEEE_FLOAT = { 0x00000003, 0x0000, 0x0010, { 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71 } };
 

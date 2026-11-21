@@ -1,9 +1,17 @@
 #version 460 core
-// Mesh vertex shader for indirect multi-draw: per-object data comes from the instance buffer,
-// through the remap list at gl_BaseInstance (set per draw command) + gl_InstanceID.
+// Mesh vertex shader: per-object data comes from the instance buffer, through the remap list at
+// the draw's base instance + gl_InstanceID. 4.6: indirect multi-draw, gl_BaseInstance per command;
+// 4.1: one instanced draw per command with u_baseInstance.
 #include "common.glsl"
 
+#ifdef PHISIKS_GL41
+layout(binding = 12) uniform usamplerBuffer u_remapTexels;
+uniform uint u_baseInstance;
+uint LoadRemap() { return texelFetch(u_remapTexels, int(u_baseInstance) + gl_InstanceID).r; }
+#else
 layout(std430, binding = 9) readonly buffer RemapBuffer { uint u_remap[]; };
+uint LoadRemap() { return u_remap[uint(gl_BaseInstance + gl_InstanceID)]; }
+#endif
 
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
@@ -22,16 +30,17 @@ flat out uint v_instance;
 
 void main() {
     // Draw commands index a remap list (written by CPU or GPU culling) that holds the instances.
-    uint instance = u_remap[uint(gl_BaseInstance + gl_InstanceID)];
-    vec4 world = u_instances[instance].model * vec4(a_position, 1.0);
+    uint instance = LoadRemap();
+    Instance inst = LoadInstance(instance);
+    vec4 world = inst.model * vec4(a_position, 1.0);
     v_worldPos = world.xyz;
 #ifdef SHADOW_PASS
     gl_Position = u_lightViewProjection * world;
 #else
-    v_normal = mat3(u_instances[instance].normalMatrix) * a_normal;
-    v_patternPos = a_position * u_instances[instance].scaleMaterial.xyz;
+    v_normal = mat3(inst.normalMatrix) * a_normal;
+    v_patternPos = a_position * inst.scaleMaterial.xyz;
     v_objectNormal = a_normal;
-    v_uv = a_uv * u_instances[instance].uvScale.xy;
+    v_uv = a_uv * inst.uvScale.xy;
     v_instance = instance;
     gl_Position = u_viewProjection * world;
 #endif

@@ -1,5 +1,6 @@
 #pragma once
-// Phisiks::Render: forward PBR renderer (OpenGL 4.6).
+// Phisiks::Render: forward PBR renderer. OpenGL 4.6 tier (GPU-driven culling, compute) or the
+// OpenGL 4.1 tier (macOS / older iGPUs: CPU culling, CPU compute fallback, same features otherwise).
 //
 // Scenes feed it automatically (MeshRenderer, Light, Camera components). Games use this header to
 // register meshes and materials, tune the environment (exposure, ambient, fog, shadows) and draw
@@ -32,8 +33,14 @@ namespace Phisiks::Render {
         float maxOpacity = 0.97f;
     };
 
+    // Spatial upscaling of the window image from renderScale x the window size.
+    enum class Upscaler : uint32_t { Bilinear = 0, FSR1 = 1 };   // FSR1: edge-adaptive EASU + RCAS sharpening
+
     struct RenderSettings {
         float exposure = 1.0f;
+        float renderScale = 1.0f;          // window views render at this fraction of the window (0.5 .. 1)
+        Upscaler upscaler = Upscaler::FSR1;
+        float sharpness = 0.25f;           // RCAS strength in stops (0 = strongest, 2 = mild)
         glm::vec3 skyColorZenith{ 0.010f, 0.011f, 0.016f };   // backdrop (linear)
         glm::vec3 skyColorHorizon{ 0.040f, 0.044f, 0.055f };
         glm::vec3 groundColor{ 0.015f, 0.015f, 0.018f };      // backdrop below the horizon
@@ -53,6 +60,22 @@ namespace Phisiks::Render {
         glm::vec4 clearColor{ 0.012f, 0.013f, 0.018f, 1.0f };
     };
     RenderSettings& Settings();
+
+    // Scalability presets for integrated GPUs (tuned on a Core i3 / 8 GB / Intel UHD laptop):
+    //   Low     renderScale 0.667 (720p -> 1080p) FSR1, no MSAA, 1024 shadows over 25 m, no occlusion pass
+    //   Medium  renderScale 0.77 FSR1, 2x MSAA, 2048 shadows over 35 m
+    //   High    native resolution, 4x MSAA, 2048 shadows over 40 m, Hi-Z occlusion
+    enum class QualityPreset { Low, Medium, High };
+    void ApplyQualityPreset(QualityPreset preset);
+    const char* ToString(QualityPreset preset);
+
+    struct RendererInfo {
+        int contextVersion = 0;            // e.g. 46 (driver)
+        bool compatTier = false;           // 4.1 feature tier in use
+        bool gpuCompute = false;           // compute shaders available to the engine
+        std::string renderer, vendor;
+    };
+    RendererInfo GetRendererInfo();
 
     // ---------------------------------------------------------------- materials
     // Parametric PBR materials with optional procedural surface patterns and an optional albedo
@@ -121,6 +144,28 @@ namespace Phisiks::Render {
         std::vector<uint32_t> entityIds;
     };
     bool CaptureFrame(FrameCapture& out);
+
+    // Multi-pass synthetic vision: aligned colour, linear depth, world normals and entity ids of the
+    // first window view at the internal (scene) resolution. RequestVisionCapture() before a frame;
+    // GetVisionCapture() after it (stalls the GPU: export / tests only). Covers meshes and soft
+    // bodies; particles sprites and the SDF visualiser are colour-only.
+    struct VisionCapture {
+        int width = 0, height = 0;
+        std::vector<uint8_t> rgba;           // tonemapped, rows bottom-up
+        std::vector<float> linearDepth;      // metres along the view axis, 0 = background
+        std::vector<glm::vec3> normals;      // world space unit normals, 0 = background
+        std::vector<uint32_t> entityIds;     // Entity::Id() + 1, 0 = background
+        glm::mat4 view{ 1.0f }, projection{ 1.0f };
+        float nearPlane = 0.0f, farPlane = 0.0f;
+        bool orthographic = false;
+    };
+    void RequestVisionCapture();
+    bool GetVisionCapture(VisionCapture& out);
+
+    // Runs the upscaler (EASU + RCAS with `sharpness` stops, or bilinear) on an RGBA8 image on the
+    // GPU (tests/tools; synchronous). Rows bottom-up.
+    bool UpscaleImage(const std::vector<uint8_t>& rgba, int width, int height, int outWidth, int outHeight,
+                      Upscaler upscaler, float sharpness, std::vector<uint8_t>& out);
 
     struct ShaderCacheStats {
         uint32_t programs = 0;       // programs the renderer uses

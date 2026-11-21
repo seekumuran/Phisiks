@@ -1,5 +1,7 @@
 #include "render/ShaderPreprocessor.h"
 
+#include <regex>
+
 #include <set>
 #include <sstream>
 
@@ -66,4 +68,30 @@ namespace Phisiks::Render::ShaderPreprocessor {
         result.ok = true;
         return result;
     }
+    std::string RewriteForGL41(const std::string& source, ResourceBindings& bindings) {
+        std::string s = source;
+        const size_t version = s.find("#version 460 core");
+        if (version != std::string::npos) s.replace(version, 17, "#version 410 core\n#define PHISIKS_GL41 1");
+        static const std::regex sampler(R"(layout\s*\(\s*binding\s*=\s*(\d+)\s*\)\s*uniform\s+(\w+)\s+(\w+)\s*;)");
+        static const std::regex block(R"(layout\s*\(\s*(std140)\s*,\s*binding\s*=\s*(\d+)\s*\)\s*uniform\s+(\w+))");
+        std::string out;
+        std::smatch m;
+        std::string rest = s;
+        while (std::regex_search(rest, m, sampler)) {
+            bindings.samplers.emplace_back(m[3].str(), std::stoi(m[1].str()));
+            out += m.prefix().str() + "uniform " + m[2].str() + " " + m[3].str() + ";";
+            rest = m.suffix().str();
+        }
+        out += rest;
+        rest = out;
+        out.clear();
+        while (std::regex_search(rest, m, block)) {
+            bindings.blocks.emplace_back(m[3].str(), std::stoi(m[2].str()));
+            out += m.prefix().str() + "layout(" + m[1].str() + ") uniform " + m[3].str();
+            rest = m.suffix().str();
+        }
+        out += rest;
+        return out;
+    }
+
 }

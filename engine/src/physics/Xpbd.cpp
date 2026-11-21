@@ -30,7 +30,7 @@ namespace Phisiks::Physics::Xpbd {
 
         // Push a particle of radius r out of a collider; friction removes part of the tangential
         // motion of this substep (prev -> x).
-        void Collide(glm::vec3& x, const glm::vec3& prev, float r, float friction, const Collider& c) {
+        bool Collide(glm::vec3& x, const glm::vec3& prev, float r, float friction, const Collider& c) {
             glm::vec3 n(0.0f);
             float penetration = 0.0f;
             if (c.type == Plane) {
@@ -40,7 +40,7 @@ namespace Phisiks::Physics::Xpbd {
             else if (c.type == Sphere) {
                 const glm::vec3 d = x - c.center;
                 const float dist = glm::length(d);
-                if (dist < 1e-9f) return;
+                if (dist < 1e-9f) return false;
                 n = d / dist;
                 penetration = c.radius + r - dist;
             }
@@ -65,13 +65,16 @@ namespace Phisiks::Physics::Xpbd {
                 }
                 n = c.rotation * localNormal;
             }
-            if (penetration <= 0.0f) return;
+            if (penetration <= 0.0f) return false;
             x += n * penetration;
             const glm::vec3 motion = x - prev;
             const glm::vec3 tangential = motion - n * glm::dot(motion, n);
             x -= tangential * friction;
+            return true;
         }
     }
+
+    bool CollideParticle(glm::vec3& x, const glm::vec3& prev, float r, float friction, const Collider& c) { return Collide(x, prev, r, friction, c); }
 
     float TetVolume(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d) {
         return glm::dot(glm::cross(b - a, c - a), d - a) / 6.0f;
@@ -271,7 +274,13 @@ namespace Phisiks::Physics::Xpbd {
             for (size_t i = 0; i < m.x.size(); ++i) {
                 if (m.x[i].w == 0.0f) continue;
                 glm::vec3 x = glm::vec3(m.x[i]);
-                for (size_t k = 0; k < params.colliderCount; ++k) Collide(x, prev[i], m.particleRadius, m.friction, params.colliders[k]);
+                for (size_t k = 0; k < params.colliderCount; ++k) {
+                    const glm::vec3 before = x;
+                    if (!Collide(x, prev[i], m.particleRadius, m.friction, params.colliders[k]) || !params.colliderImpulses) continue;
+                    const glm::vec3 J = -(x - before) / (m.x[i].w * h);
+                    params.colliderImpulses[k * 2] += J;
+                    params.colliderImpulses[k * 2 + 1] += glm::cross(x - params.colliders[k].center, J);
+                }
                 m.x[i] = glm::vec4(x, m.x[i].w);
                 m.v[i] = (x - prev[i]) / h * std::max(0.0f, 1.0f - m.damping * h);
             }

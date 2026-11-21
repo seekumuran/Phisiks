@@ -38,7 +38,14 @@ namespace Phisiks {
         std::string exportDirectory;   // empty = no export
         bool exportFrames = false;     // PNG per exported frame (needs rendering)
         bool exportData = false;       // CSV of dynamic bodies per exported frame
+        bool exportVision = false;     // synthetic vision: aligned RGB + linear depth + normals + entity-id mask + camera CSV
         int exportEvery = 1;
+
+        // Studio / platform
+        bool enableUI = false;         // Dear ImGui (IGame::OnGui)
+        int maxGLVersion = 46;         // 41 = force the OpenGL 4.1 feature tier (macOS path) on any GPU
+        bool recordReplay = false;     // GameContext::replay records every fixed step
+        size_t replayCapacity = 1800;
     };
 
     class Application {

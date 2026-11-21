@@ -21,6 +21,7 @@ namespace Phisiks::Render::Shaders {
         // graphics
         FORWARD, SHADOW, SHADOW_POINT, SKY, TONEMAP, LINES, TEXT,
         SPRITES, SOFTBODY, SOFTBODY_SHADOW, SDF, ARROWS,
+        EASU, RCAS, GBUFFER, GBUFFER_SOFT,
         // compute
         CULL, HIZ_INIT, HIZ_DOWNSAMPLE,
         HASH_COUNT, HASH_SCATTER, HASH_QUERY, SCAN_LOCAL, SCAN_BLOCKS, SCAN_ADD,
@@ -30,4 +31,5 @@ namespace Phisiks::Render::Shaders {
         PROGRAM_COUNT
     };
     const std::vector<ProgramDef>& Programs();   // indexed by ProgramId
+    inline bool IsCompute(int id) { return id >= CULL && id < PROGRAM_COUNT; }   // not built on the 4.1 tier
 }

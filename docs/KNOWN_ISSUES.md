@@ -39,3 +39,12 @@ No crash has been observed with the Phisiks shaders: more than 10 cold compiles 
 
 ## Input focus
 Keyboard state comes from GLFW, so the focused window receives keys. When PhisiksLab's window appears it takes focus. The autotest disables hardware input, so stray keystrokes can't affect a run.
+
+## P8 (cross-platform, studio)
+- **Linux / macOS not yet built:** the platform code, presets and CI workflow are written, and the portable configuration (native physics, miniaudio, FetchContent GLFW, fetched dependencies, OpenGL 4.1 tier) passes every test on Windows. No GCC or Apple Clang compile has happened yet; expect fixes on the first CI run.
+- **CPU compute cost:** on the 4.1 tier the FieldLab simulation (4096 particles with N-body + 4 XPBD bodies) takes about 7 ms per fixed step on 12 threads, against 0.7 ms of command recording on the GPU path. Dual-core laptops will be slower.
+- **FSR GPU vs CPU:** the GPU EASU + RCAS output differs from the C++ reference by at most 4/255 in 0.3% of values (float rounding on the GPU); the runtime check allows up to 6/255 in 1%.
+- **RCAS overshoot:** like the reference algorithm, RCAS limits its negative lobe only to avoid clipping; it can overshoot an edge's local min/max a little (bounded at 25% of the step in the unit test). EASU itself never rings.
+- **Two-way coupling latency:** the CPU backend applies particle / node reaction impulses on the next fixed step. The GPU backend reads them back without stalling, 1–3 steps later.
+- **Native backend vs PhysX:** stacks are less stable and friction slightly different (each passes the analytic unit tests within their tolerances); there is no CCD sweep beyond speculative contacts.
+- **4.1 tier shader compile:** cold compile of the 16 graphics programs took 2.9 s on Intel UHD (warm, from the binary cache: 30 ms).

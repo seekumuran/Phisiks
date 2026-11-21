@@ -25,10 +25,11 @@ void main() {
 
     int lightCount = int(u_groundColor.w + 0.5);
     for (int i = 0; i < lightCount; ++i) {
-        if (int(u_lights[i].directionType.w + 0.5) != 0) continue;
-        vec3 toSun = -normalize(u_lights[i].directionType.xyz);
+        Light light = LoadLight(uint(i));
+        if (int(light.directionType.w + 0.5) != 0) continue;
+        vec3 toSun = -normalize(light.directionType.xyz);
         float c = max(dot(dir, toSun), 0.0);
-        vec3 sun = u_lights[i].colorIntensity.rgb * u_lights[i].colorIntensity.w;
+        vec3 sun = light.colorIntensity.rgb * light.colorIntensity.w;
         sky += sun * (0.02 * pow(c, 8.0) + 6.0 * smoothstep(0.9995, 0.9998, c));
     }
 

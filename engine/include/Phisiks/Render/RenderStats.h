@@ -26,6 +26,10 @@ namespace Phisiks {
         uint64_t ringBlockedWaits = 0;  // persistent upload ring: times the CPU had to wait for the GPU
         uint32_t particlesDrawn = 0;    // GPU particles + rope nodes
         uint32_t softBodiesDrawn = 0;
+        int internalWidth = 0, internalHeight = 0;   // scene resolution (window x renderScale)
+        int outputWidth = 0, outputHeight = 0;
+        bool upscaled = false;          // internal < output: EASU + RCAS (or bilinear) ran
+        bool compatTier = false;        // OpenGL 4.1 feature tier (CPU culling, CPU compute)
     };
 
     RenderStats GetRenderStats();    // zeros when no renderer is running (e.g. headless)

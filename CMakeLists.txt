@@ -1,40 +1,138 @@
-# Phisiks — CMake build (Windows / MSVC x64).
+# Phisiks: CMake build (Windows / Linux / macOS).
 #
 # Targets
 #   PhisiksCore        static library: the engine (engine/include public API, engine/src private)
-#   PhisiksLab         interactive sample app (apps/lab) + runtime verification harness (tests/runtime)
+#   PhisiksImGui       static library: Dear ImGui + GLFW/OpenGL3 backends + ImGuizmo (vendor/)
+#   PhisiksLab         interactive studio app (apps/lab) + runtime verification harness (tests/runtime)
 #   PhisiksUnitTests   headless unit tests (tests/unit)
 #   assetgen           regenerates the CC0 sample assets in assets/
-#   glprobe, stacksample, check_layering   tools
+#   glprobe, stacksample (Windows), check_layering   tools
+#
+# Backends (cache options)
+#   PHISIKS_PHYSICS_BACKEND  PhysX | Native   PhysX: Windows default (vendored MSVC binaries), or any
+#                                             platform with the vcpkg "physx" port; Native: the
+#                                             built-in solver (macOS and Linux default)
+#   PHISIKS_AUDIO_BACKEND    WASAPI | miniaudio
+#   PHISIKS_OUTPUT_DIR       executables go to <dir>/<config> (default Build/bin)
+# Dependencies: vendor/ (python tools/fetch_deps.py downloads the portable ones; see docs/BUILD.md).
 
 cmake_minimum_required(VERSION 3.25)
 project(Phisiks LANGUAGES C CXX)
 
-if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "Phisiks currently requires MSVC targeting x64 (prebuilt vendor libraries are MSVC x64).")
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-# The prebuilt PhysX libraries use the dynamic CRT.
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 
 set(PHISIKS_ROOT   ${CMAKE_CURRENT_SOURCE_DIR})
-set(PHISIKS_VENDOR ${PHISIKS_ROOT}/vendor)
+set(PHISIKS_VENDOR ${PHISIKS_ROOT}/vendor CACHE PATH "Third-party dependency folder (tools/fetch_deps.py)")
 set(PHISIKS_LIBCFG $<IF:$<CONFIG:Debug>,debug,release>)
 
-# Third-party code (see THIRD_PARTY_NOTICES.md): glad (GL loader), GLFW (window), glm (math),
-# EnTT (ECS), stb_image / stb_image_write (image codecs), NVIDIA PhysX 5 (physics).
+if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(PHISIKS_DEFAULT_PHYSICS PhysX)
+    set(PHISIKS_DEFAULT_AUDIO WASAPI)
+else()
+    set(PHISIKS_DEFAULT_PHYSICS Native)
+    set(PHISIKS_DEFAULT_AUDIO miniaudio)
+endif()
+set(PHISIKS_PHYSICS_BACKEND ${PHISIKS_DEFAULT_PHYSICS} CACHE STRING "Rigid-body backend: PhysX or Native")
+set_property(CACHE PHISIKS_PHYSICS_BACKEND PROPERTY STRINGS PhysX Native)
+set(PHISIKS_AUDIO_BACKEND ${PHISIKS_DEFAULT_AUDIO} CACHE STRING "Audio device backend: WASAPI or miniaudio")
+set_property(CACHE PHISIKS_AUDIO_BACKEND PROPERTY STRINGS WASAPI miniaudio)
+set(PHISIKS_OUTPUT_DIR ${PHISIKS_ROOT}/Build/bin CACHE PATH "Executable output root")
+if(PHISIKS_AUDIO_BACKEND STREQUAL "WASAPI" AND NOT WIN32)
+    message(FATAL_ERROR "WASAPI is Windows-only; use -DPHISIKS_AUDIO_BACKEND=miniaudio")
+endif()
+message(STATUS "Phisiks: physics ${PHISIKS_PHYSICS_BACKEND}, audio ${PHISIKS_AUDIO_BACKEND}, output ${PHISIKS_OUTPUT_DIR}")
+
+# The vendored PhysX libraries use the dynamic CRT.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+
+find_package(Threads REQUIRED)
+
+# ---------------------------------------------------------------------------------------------
+# Third-party (see THIRD_PARTY_NOTICES.md): glad, GLFW, glm, EnTT, stb_image(_write), Dear ImGui,
+# ImGuizmo, miniaudio, nlohmann/json, NVIDIA PhysX 5 (optional backend).
+# ---------------------------------------------------------------------------------------------
+foreach(dep glad/src/gl.c glm/glm/glm.hpp entt/entt.hpp stb_image/stb_image.h imgui/imgui.h imguizmo/ImGuizmo.h nlohmann/json.hpp miniaudio/miniaudio.h)
+    if(NOT EXISTS ${PHISIKS_VENDOR}/${dep})
+        message(FATAL_ERROR "vendor/${dep} is missing: run 'python tools/fetch_deps.py' (see docs/BUILD.md)")
+    endif()
+endforeach()
+
+# GLFW: vendored prebuilt on Windows; a system / package-manager install elsewhere, else fetched.
+add_library(phisiks_glfw INTERFACE)
+if(WIN32 AND EXISTS ${PHISIKS_VENDOR}/GLFW/lib)
+    target_include_directories(phisiks_glfw INTERFACE ${PHISIKS_VENDOR}/GLFW/include)
+    target_link_directories(phisiks_glfw INTERFACE ${PHISIKS_VENDOR}/GLFW/lib/${PHISIKS_LIBCFG})
+    target_link_libraries(phisiks_glfw INTERFACE glfw3 opengl32 user32 gdi32 shell32)
+else()
+    find_package(glfw3 3.3 QUIET)
+    if(NOT glfw3_FOUND)
+        include(FetchContent)
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(glfw GIT_REPOSITORY https://github.com/glfw/glfw.git GIT_TAG 3.4 GIT_SHALLOW TRUE)
+        FetchContent_MakeAvailable(glfw)
+    endif()
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(phisiks_glfw INTERFACE glfw OpenGL::GL)
+endif()
+
+# PhysX
+set(PHISIKS_RUNTIME_DLLS)
+if(PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
+    add_library(phisiks_physx INTERFACE)
+    if(WIN32 AND EXISTS ${PHISIKS_VENDOR}/physx/lib)
+        target_include_directories(phisiks_physx INTERFACE ${PHISIKS_VENDOR}/physx/include ${PHISIKS_VENDOR}/physx/include/physx)
+        target_link_directories(phisiks_physx INTERFACE ${PHISIKS_VENDOR}/physx/lib/${PHISIKS_LIBCFG})
+        target_link_libraries(phisiks_physx INTERFACE
+            PhysX_64 PhysXCommon_64 PhysXCooking_64 PhysXFoundation_64
+            PhysXExtensions_static_64 PhysXPvdSDK_static_64 PhysXCharacterKinematic_static_64)
+        file(GLOB PHISIKS_RUNTIME_DLLS ${PHISIKS_VENDOR}/DLLs/*.dll)
+    else()
+        # vcpkg: `vcpkg install physx`, configure with CMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
+        find_package(unofficial-omniverse-physx-sdk CONFIG REQUIRED)
+        target_link_libraries(phisiks_physx INTERFACE unofficial::omniverse-physx-sdk::sdk)
+    endif()
+endif()
+
+# Dear ImGui + backends + ImGuizmo (warnings off: third-party code).
+add_library(PhisiksImGui STATIC
+    ${PHISIKS_VENDOR}/imgui/imgui.cpp ${PHISIKS_VENDOR}/imgui/imgui_draw.cpp
+    ${PHISIKS_VENDOR}/imgui/imgui_tables.cpp ${PHISIKS_VENDOR}/imgui/imgui_widgets.cpp
+    ${PHISIKS_VENDOR}/imgui/backends/imgui_impl_glfw.cpp ${PHISIKS_VENDOR}/imgui/backends/imgui_impl_opengl3.cpp
+    ${PHISIKS_VENDOR}/imguizmo/ImGuizmo.cpp)
+target_include_directories(PhisiksImGui PUBLIC ${PHISIKS_VENDOR}/imgui ${PHISIKS_VENDOR}/imguizmo)
+target_include_directories(PhisiksImGui PRIVATE ${PHISIKS_VENDOR}/imgui/backends)
+target_link_libraries(PhisiksImGui PRIVATE phisiks_glfw)
+if(MSVC)
+    target_compile_options(PhisiksImGui PRIVATE /W0 /utf-8)
+    target_compile_definitions(PhisiksImGui PRIVATE IMGUI_DEFINE_MATH_OPERATORS)
+else()
+    target_compile_options(PhisiksImGui PRIVATE -w)
+    target_compile_definitions(PhisiksImGui PRIVATE IMGUI_DEFINE_MATH_OPERATORS)
+endif()
 
 # ---------------------------------------------------------------------------------------------
 # PhisiksCore
 # ---------------------------------------------------------------------------------------------
 file(GLOB_RECURSE PHISIKS_ENGINE_SOURCES CONFIGURE_DEPENDS
     ${PHISIKS_ROOT}/engine/src/*.cpp ${PHISIKS_ROOT}/engine/src/*.h ${PHISIKS_ROOT}/engine/include/*.h)
-set(PHISIKS_VENDOR_SOURCES
-    ${PHISIKS_VENDOR}/glad/src/gl.c
-    ${PHISIKS_VENDOR}/stb_image/stb_image.cpp)
+if(PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
+    list(FILTER PHISIKS_ENGINE_SOURCES EXCLUDE REGEX "/physics/native/NativePhysics\\.cpp$")
+else()
+    list(FILTER PHISIKS_ENGINE_SOURCES EXCLUDE REGEX "/physics/physx/")
+endif()
+if(NOT PHISIKS_AUDIO_BACKEND STREQUAL "miniaudio")
+    list(FILTER PHISIKS_ENGINE_SOURCES EXCLUDE REGEX "/audio/MiniaudioDevice\\.cpp$")
+endif()
 
 # Engine GLSL sources are embedded into the library at build time (no runtime shader paths).
 file(GLOB PHISIKS_ENGINE_SHADERS CONFIGURE_DEPENDS ${PHISIKS_ROOT}/engine/shaders/*.glsl)
@@ -47,10 +145,10 @@ add_custom_command(
     COMMENT "Embedding engine shaders"
     VERBATIM)
 
-add_library(PhisiksCore STATIC ${PHISIKS_ENGINE_SOURCES} ${PHISIKS_ENGINE_SHADERS} ${PHISIKS_EMBEDDED_SHADERS} ${PHISIKS_VENDOR_SOURCES})
+add_library(PhisiksCore STATIC ${PHISIKS_ENGINE_SOURCES} ${PHISIKS_ENGINE_SHADERS} ${PHISIKS_EMBEDDED_SHADERS} ${PHISIKS_VENDOR}/glad/src/gl.c)
 source_group(TREE ${PHISIKS_ROOT}/engine PREFIX "engine" FILES ${PHISIKS_ENGINE_SOURCES} ${PHISIKS_ENGINE_SHADERS})
 
-# Public API: engine headers + glm and EnTT (used by public headers and templates).
+# Public API: engine headers + glm and EnTT (public headers/templates); Dear ImGui comes with PhisiksImGui.
 target_include_directories(PhisiksCore PUBLIC
     ${PHISIKS_ROOT}/engine/include
     ${PHISIKS_VENDOR}/glm
@@ -60,32 +158,53 @@ target_include_directories(PhisiksCore PRIVATE
     ${PHISIKS_ROOT}/engine/src
     ${PHISIKS_GENERATED_DIR}
     ${PHISIKS_VENDOR}/glad/include
-    ${PHISIKS_VENDOR}/GLFW/include
-    ${PHISIKS_VENDOR}/physx/include
-    ${PHISIKS_VENDOR}/physx/include/physx
-    ${PHISIKS_VENDOR}/stb_image)
+    ${PHISIKS_VENDOR}/stb_image
+    ${PHISIKS_VENDOR}/nlohmann
+    ${PHISIKS_VENDOR}/miniaudio
+    ${PHISIKS_VENDOR}/imgui/backends)
+target_link_libraries(PhisiksCore PUBLIC PhisiksImGui Threads::Threads)
+target_link_libraries(PhisiksCore PRIVATE phisiks_glfw ${CMAKE_DL_LIBS})
+if(PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
+    target_link_libraries(PhisiksCore PRIVATE phisiks_physx)
+    target_compile_definitions(PhisiksCore PUBLIC PHISIKS_PHYSICS_PHYSX=1)
+else()
+    target_compile_definitions(PhisiksCore PUBLIC PHISIKS_PHYSICS_NATIVE=1)
+endif()
+if(PHISIKS_AUDIO_BACKEND STREQUAL "miniaudio")
+    target_compile_definitions(PhisiksCore PRIVATE PHISIKS_AUDIO_MINIAUDIO=1)
+endif()
 
-target_compile_definitions(PhisiksCore PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS)
-target_compile_options(PhisiksCore PUBLIC /utf-8 /bigobj /Zc:__cplusplus /W3)
-target_compile_options(PhisiksCore PRIVATE /MP)
+if(MSVC)
+    target_compile_definitions(PhisiksCore PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(PhisiksCore PUBLIC /utf-8 /bigobj /Zc:__cplusplus /W3)
+    target_compile_options(PhisiksCore PRIVATE /MP)
+    target_link_libraries(PhisiksCore PUBLIC dbghelp ole32 psapi)
+else()
+    target_compile_options(PhisiksCore PUBLIC -Wall)
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(PhisiksCore PUBLIC m)
+    endif()
+    if(APPLE)
+        target_link_libraries(PhisiksCore PUBLIC "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")
+        target_compile_definitions(PhisiksCore PUBLIC GL_SILENCE_DEPRECATION)
+    endif()
+endif()
 
-target_link_directories(PhisiksCore PUBLIC
-    ${PHISIKS_VENDOR}/GLFW/lib/${PHISIKS_LIBCFG}
-    ${PHISIKS_VENDOR}/physx/lib/${PHISIKS_LIBCFG})
-target_link_libraries(PhisiksCore PUBLIC
-    opengl32 glfw3 user32 gdi32 shell32 dbghelp ole32
-    PhysX_64 PhysXCommon_64 PhysXCooking_64 PhysXFoundation_64
-    PhysXExtensions_static_64 PhysXPvdSDK_static_64 PhysXCharacterKinematic_static_64)
+function(phisiks_output target)
+    if(CMAKE_CONFIGURATION_TYPES)
+        foreach(cfg Debug Release RelWithDebInfo)
+            string(TOUPPER ${cfg} CFG)
+            set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${CFG} ${PHISIKS_OUTPUT_DIR}/${cfg})
+        endforeach()
+    else()
+        set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PHISIKS_OUTPUT_DIR}/${CMAKE_BUILD_TYPE})
+    endif()
+endfunction()
 
-# Runtime DLLs (PhysX), copied next to every executable.
-file(GLOB PHISIKS_RUNTIME_DLLS ${PHISIKS_VENDOR}/DLLs/*.dll)
 function(phisiks_executable target)
     target_link_libraries(${target} PRIVATE PhisiksCore)
-    set_target_properties(${target} PROPERTIES
-        VS_DEBUGGER_WORKING_DIRECTORY ${PHISIKS_ROOT}
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG          ${PHISIKS_ROOT}/Build/bin/Debug
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE        ${PHISIKS_ROOT}/Build/bin/Release
-        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${PHISIKS_ROOT}/Build/bin/RelWithDebInfo)
+    phisiks_output(${target})
+    set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${PHISIKS_ROOT})
     foreach(dll ${PHISIKS_RUNTIME_DLLS})
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${dll} $<TARGET_FILE_DIR:${target}>)
@@ -119,22 +238,23 @@ add_dependencies(PhisiksCore check_layering)
 # assetgen: regenerates the CC0 sample assets in assets/ (deterministic; outputs are committed).
 add_executable(assetgen ${PHISIKS_ROOT}/tools/assetgen/assetgen.cpp)
 target_include_directories(assetgen PRIVATE ${PHISIKS_VENDOR}/stb_image)
-set_target_properties(assetgen PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PHISIKS_ROOT}/Build/bin/Release)
+phisiks_output(assetgen)
 
 # glprobe: checks whether the current GPU/driver meets the renderer's requirements.
 add_executable(glprobe ${PHISIKS_ROOT}/tools/glprobe/glprobe.cpp ${PHISIKS_VENDOR}/glad/src/gl.c)
-target_include_directories(glprobe PRIVATE ${PHISIKS_VENDOR}/glad/include ${PHISIKS_VENDOR}/GLFW/include)
-target_link_directories(glprobe PRIVATE ${PHISIKS_VENDOR}/GLFW/lib/${PHISIKS_LIBCFG})
-target_link_libraries(glprobe PRIVATE opengl32 glfw3 user32 gdi32 shell32)
-set_target_properties(glprobe PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PHISIKS_ROOT}/Build/bin/Release)
+target_include_directories(glprobe PRIVATE ${PHISIKS_VENDOR}/glad/include)
+target_link_libraries(glprobe PRIVATE phisiks_glfw)
+phisiks_output(glprobe)
 
-# stacksample: symbolized stack sampler for diagnosing hangs without a debugger.
-add_executable(stacksample ${PHISIKS_ROOT}/tools/stacksample/stacksample.cpp)
-target_link_libraries(stacksample PRIVATE dbghelp)
-set_target_properties(stacksample PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PHISIKS_ROOT}/Build/bin/Release)
+# stacksample: symbolized stack sampler for diagnosing hangs without a debugger (Windows).
+if(WIN32)
+    add_executable(stacksample ${PHISIKS_ROOT}/tools/stacksample/stacksample.cpp)
+    target_link_libraries(stacksample PRIVATE dbghelp)
+    phisiks_output(stacksample)
+endif()
 
 # ---------------------------------------------------------------------------------------------
-# Tests (ctest -C Release --test-dir Build/vs2026)
+# Tests (ctest --preset <preset>, or ctest -C Release --test-dir Build/vs2026)
 # ---------------------------------------------------------------------------------------------
 enable_testing()
 file(GLOB PHISIKS_UNIT_TEST_SOURCES CONFIGURE_DEPENDS ${PHISIKS_ROOT}/tests/unit/*.cpp ${PHISIKS_ROOT}/tests/unit/*.h)
@@ -143,11 +263,13 @@ add_executable(PhisiksUnitTests ${PHISIKS_UNIT_TEST_SOURCES})
 target_include_directories(PhisiksUnitTests PRIVATE ${PHISIKS_ROOT}/engine/src)
 phisiks_executable(PhisiksUnitTests)
 
-add_test(NAME PhisiksUnitTests COMMAND PhisiksUnitTests)
+add_test(NAME PhisiksUnitTests COMMAND PhisiksUnitTests WORKING_DIRECTORY ${PHISIKS_ROOT})
 add_test(NAME Layering COMMAND ${CMAKE_COMMAND} -DPHISIKS_ROOT=${PHISIKS_ROOT} -P ${PHISIKS_ROOT}/tools/check_layering.cmake)
 # Deterministic simulation: two headless runs must export byte-identical data; a hidden-window
-# run must export PNG frames.
+# run must export PNG frames (skipped with -DSKIP_RENDER=ON where no display is available).
+option(PHISIKS_TEST_SKIP_RENDER "Skip the rendered part of the DeterministicReplay test (no display)" OFF)
 add_test(NAME DeterministicReplay
     COMMAND ${CMAKE_COMMAND} -DLAB=$<TARGET_FILE:PhisiksLab> -DWORK=${CMAKE_BINARY_DIR}/replay_test
+            -DSKIP_RENDER=${PHISIKS_TEST_SKIP_RENDER}
             -P ${PHISIKS_ROOT}/tools/test_deterministic_replay.cmake
     WORKING_DIRECTORY ${PHISIKS_ROOT})

@@ -1,8 +1,9 @@
 #include "Phisiks/Assets/Assets.h"
 #include "Phisiks/Core/Log.h"
+#include "platform/Paths.h"
 
 #include <stb_image.h>
-#include <stb_image_write.h>   // implementations compiled in vendor/stb_image/stb_image.cpp
+#include <stb_image_write.h>   // implementations compiled in assets/StbImplementation.cpp
 
 #include <glm/geometric.hpp>
 
@@ -19,13 +20,6 @@
 #include <thread>
 #include <unordered_map>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
 
 namespace Phisiks::Assets {
     namespace fs = std::filesystem;
@@ -56,14 +50,7 @@ namespace Phisiks::Assets {
             return state;
         }
 
-        fs::path ExecutableDirectory() {
-#ifdef _WIN32
-            wchar_t buffer[MAX_PATH];
-            const DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-            if (n > 0 && n < MAX_PATH) return fs::path(buffer).parent_path();
-#endif
-            return fs::current_path();
-        }
+        fs::path ExecutableDirectory() { return Platform::Paths::ExecutableDirectory(); }
 
         bool DecodeImage(const std::vector<uint8_t>& bytes, Image& out) {
             int w = 0, h = 0, channels = 0;

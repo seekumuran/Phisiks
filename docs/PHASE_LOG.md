@@ -319,3 +319,39 @@ Verification, from an empty `Build/` directory and an empty shader cache:
   - **SDF raymarch:** a sphere's silhouette covers 33,900 px vs 33,835 px analytic (0.19%).
   - **Compute API:** a user saxpy kernel through `IComputeBackend` is exact for 10,000 elements.
   - **Shader cache:** 29 programs; truly cold 520 ms (29 compiled), warm 41 ms (29 from cache).
+
+## P8 — Cross-platform, PhisiksLab studio, core polish (tag `p8-studio`)
+**Cross-platform:**
+- One CMake build for Windows / Linux / macOS: `PHISIKS_PHYSICS_BACKEND` (PhysX | Native), `PHISIKS_AUDIO_BACKEND` (WASAPI | miniaudio), GLFW from `vendor/` (Windows) or the system / FetchContent, `PHISIKS_VENDOR` and `PHISIKS_OUTPUT_DIR` overrides. Presets: `vs2026-x64`, `windows-portable`, `linux-release/-debug`, `macos-release/-debug` (build + test presets). `tools/fetch_deps.py` downloads the portable dependencies at pinned versions (glad generated with glad2). `.github/workflows/ci.yml` builds and tests on Ubuntu 24.04, macOS 14 and Windows Server 2022.
+- Platform layer: `std::filesystem` paths with per-OS executable / cache directories (`platform/Paths`), POSIX fatal-signal handler with `execinfo` backtraces and `crash.txt`, miniaudio output device, process / system memory telemetry (`Phisiks/Platform/System.h`), GL context fallback 4.6 → 4.5 → 4.3 → 4.1 (macOS: 4.1 forward-compatible).
+- **Native rigid-body backend** (`engine/src/physics/native/`): GJK distance + EPA, box-box SAT with face clipping, capsule/sphere analytic contacts, persistent manifolds, speculative contacts, sequential impulses with warm starting and Coulomb static/dynamic friction, restitution pass, split-impulse position correction, sleeping, triggers and collision events, raycasts / conservative-advancement sweeps / overlaps, triangle meshes (static), and a capsule character controller (up / side / down passes, step offset, slope limit, pushing). New API for both backends: `Physics::BackendName`, `Physics::SetBodyState`.
+- **OpenGL 4.1 tier:** tier-aware GL helpers (direct state access on 4.6, bind-to-edit on 4.1), shader storage through `Load*()` accessors (SSBO / texture buffer), automatic GLSL 4.60 → 4.10 rewrite with binding records, CPU culling with one instanced draw per command, no Hi-Z; ring buffer with CPU staging; `glGetError` polling instead of debug output.
+- **CPU compute backend** (`Compute::BackendType::CPU`): worker thread pool, buffers / bindings / uniforms / work-group dispatch identical to the GL backend, kernels registered as C++ functions (`RegisterCpuKernel`). The engine's particles (spatial hash, neighbours, fields, N-body, colliders), XPBD bodies (`Xpbd::Step` per body in parallel) and field sampling run on it on the 4.1 tier and headless (`PHISIKS_CPU_COMPUTE=1` forces it on 4.6).
+
+**PhisiksLab studio** (`apps/lab/src/Studio.cpp`, `Phisiks/UI/ImGuiLayer.h`): Dear ImGui 1.93 with a dark studio theme; hierarchy, inspector (Transform, mesh renderer + live material editing, light, collider, rigidbody, force field, particle system, soft body), ImGuizmo translate / rotate / scale gizmos, click-to-pick from the entity-id buffer, classroom lesson switcher (8 lessons; new lesson scenes `Rotors`, `Orbits`, `PBR`, `Fountain`), live gravity / friction / substeps / culling / quality / render-scale / sharpness controls, CPU / GPU / RAM telemetry with history plots, JSON save / load, replay timeline. Options: `--no-studio`, `--quality`, `--gl41`.
+
+**Core polish:**
+- **JSON scenes** (`Phisiks/Scene/SceneSerializer.h`, nlohmann/json): every built-in component, hierarchy and the procedural materials used; lossless round trip.
+- **Replay** (`Phisiks/Framework/Replay.h`, `GameContext::replay`): ring buffer of fixed-step snapshots (transforms, body velocities, camera, input actions); `Restore` puts the scene back exactly, playing resumes from there and drops the newer timeline.
+- **Synthetic vision export** (`--export-vision`, `Render::RequestVisionCapture`): an extra G-buffer pass of the first window view writes world normals, linear depth and entity ids aligned with the tonemapped colour; exported as PNG / PFM plus camera intrinsics + view matrices and an id → name table.
+- **Upscaling:** EASU + RCAS (clean-room implementation of the FSR 1.0 algorithm) as two fragment passes, with a C++ reference (`Phisiks/Render/Upscaler.h`); `RenderSettings::renderScale / upscaler / sharpness`; `Render::ApplyQualityPreset(Low | Medium | High)`.
+- **Particle emitters** (`ParticleSystem::emissionRate / lifetime / emitDirection / emitSpeed / emitSpread`) on both backends; **two-way coupling**: particle and soft-body node contacts with dynamic rigid-body colliders apply the reaction impulse `-m Δx / h` to the body (fixed-point integer atomics on the GPU, so deterministic; read back without stalling).
+
+**Bug found and fixed:** after a scene change, `Gameplay::UpdatePlayerBody` called `Entity::Valid()` on a player-body handle whose scene had been destroyed (use-after-free; it surfaced as a crash in the native-physics Release build on the FieldLab → Fountain transition).
+
+**Verification** (Windows 11, Intel UHD Graphics, 12 threads):
+- Clean Release build of every target from an empty build directory: **0 errors, 0 warnings, 304 s**. Layering + name check: clean (182 files).
+- `PhisiksUnitTests` **122/122** (+10): worker pool coverage, CPU backend 2D dispatch, FSR (constant images preserved, ramp within 2/255, no ringing at a step edge, sharper than bilinear, higher PSNR than bilinear on a downsampled ring pattern), GLSL 4.10 rewrite, lossless JSON round trip, replay restore + resume truncation, headless CPU emitter (600/s, 0.5 s lifetime → 600 emitted, ~300 alive) pushing a body, `SetBodyState`. The same 122 pass with the native physics backend.
+- ctest **3/3** (PhysX build, portable build, and the CI-like build).
+- Runtime autotest, 0 OpenGL errors in every run:
+  | Configuration | Checks |
+  |---|---|
+  | PhysX + WASAPI, OpenGL 4.6 tier | **131/131** |
+  | PhysX + WASAPI, `--gl41` (real 4.1 core context, CPU compute) | **118/118** (GPU-only checks replaced by tier checks) |
+  | Native physics + miniaudio, 4.6 tier | **131/131** |
+  | Native physics + miniaudio, `--gl41` (the macOS combination) | **118/118** |
+  | CI-like: dependencies freshly fetched by `tools/fetch_deps.py`, GLFW from FetchContent, native + miniaudio | **131/131**, unit 122/122, ctest 3/3 |
+  New P8 checks: ImGui panels drawn (6,568 vertices); CPU-backend saxpy exact for 100,000 elements; GPU EASU + RCAS vs CPU reference max 4/255 (0.3% of values > 1); FSR PSNR 27.73 dB vs bilinear 26.77 dB against the native frame; Low-preset scale renders 960x600 → 1440x900; vision ids agree with the colour pass on 95% of labelled pixels (sprites draw over meshes in colour only), all normals unit length, linear depth vs physics raycasts max error 0.6 mm; emitter 2,715 alive after 3 s (expected ~2,700); 214 reaction impulses moved a crate 0.53 m; replay restore deviation 0 m; resume truncates the timeline; live JSON round trip identical and rebuilt.
+- FieldLab rendered on the 4.1 tier is visually identical to the 4.6 tier (except particle positions, which evolve independently). CPU-backend FieldLab step: ~7 ms on 12 threads (GPU path: 13 dispatches, 0.7 ms to record).
+- Shader cache: 4.6 tier 33 programs (warm 47 ms); 4.1 tier 16 programs (cold 2.9 s, warm 30 ms).
+- **Not verified:** no Linux or macOS compile has run yet (no WSL / Mac / remote here). The CI workflow is written but has not been executed.

@@ -56,6 +56,11 @@ void main() {
     float r = u_in[i * 2u].w;
     vec3 v = u_in[i * 2u + 1u].xyz;
     float mass = u_in[i * 2u + 1u].w;
+    if (r <= 0.0) {   // dead emitter slot: parked
+        u_out[i * 2u] = u_in[i * 2u];
+        u_out[i * 2u + 1u] = u_in[i * 2u + 1u];
+        return;
+    }
 
     vec3 a = u_gravity + FieldAcceleration(x, 2u);
     if (u_useNBody != 0) a += u_accel[i].xyz;
@@ -76,7 +81,7 @@ void main() {
                 visited[visitedCount++] = h;
                 for (uint s = u_cellStart[h]; s < u_cellStart[h + 1u]; ++s) {
                     uint j = u_sorted[s];
-                    if (j == i) continue;
+                    if (j == i || u_in[j * 2u].w <= 0.0) continue;
                     vec3 d = x - u_in[j * 2u].xyz;
                     float rsum = r + u_in[j * 2u].w;
                     float d2 = dot(d, d);
@@ -92,7 +97,7 @@ void main() {
     v += a * u_dt;
     v *= max(0.0, 1.0 - u_damping * u_dt);
     vec3 next = x + v * u_dt + correction;
-    if (CollideAll(next, x, r, u_friction)) v = (next - x) / u_dt;   // contact: velocity follows the resolved motion
+    if (CollideAll(next, x, r, u_friction, mass / u_dt)) v = (next - x) / u_dt;   // contact: velocity follows the resolved motion
     u_out[i * 2u] = vec4(next, r);
     u_out[i * 2u + 1u] = vec4(v, mass);
 }

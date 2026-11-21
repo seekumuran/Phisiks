@@ -10,6 +10,14 @@ namespace Phisiks::Render::GL {
         m_label = label;
         m_regions = std::clamp(frames, 2, 8);
         m_regionSize = (std::max<size_t>(bytesPerFrame, 4096) + 255) & ~size_t(255);
+        if (Compat()) {
+            m_staging.assign(m_regionSize * size_t(m_regions), 0);
+            m_id = CreateBufferObject(m_regionSize * size_t(m_regions), nullptr, GL_STREAM_DRAW);
+            m_mapped = m_staging.data();
+            m_current = m_regions - 1;
+            m_cursor = 0;
+            return;
+        }
         const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
         glCreateBuffers(1, &m_id);
         glNamedBufferStorage(m_id, GLsizeiptr(m_regionSize * m_regions), nullptr, flags);
@@ -26,11 +34,12 @@ namespace Phisiks::Render::GL {
             f = nullptr;
         }
         if (m_id) {
-            glUnmapNamedBuffer(m_id);
+            if (!Compat()) glUnmapNamedBuffer(m_id);
             glDeleteBuffers(1, &m_id);
         }
         m_id = 0;
         m_mapped = nullptr;
+        m_staging.clear();
     }
 
     void RingBuffer::BeginFrame(size_t bytesNeeded) {
@@ -62,8 +71,14 @@ namespace Phisiks::Render::GL {
         return offset;
     }
 
+    void RingBuffer::Flush() {
+        if (!Compat() || !m_id || m_cursor == 0) return;
+        const size_t start = size_t(m_current) * m_regionSize;
+        BufferSubData(m_id, start, std::min(m_cursor, m_regionSize), m_staging.data() + start);
+    }
+
     void RingBuffer::EndFrame() {
-        if (!m_id) return;
+        if (!m_id || Compat()) return;
         if (m_fences[m_current]) glDeleteSync(m_fences[m_current]);
         m_fences[m_current] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     }

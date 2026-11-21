@@ -4,8 +4,17 @@
 // material/entity of instance u_instance; SHADOW_PASS renders it into the shadow maps.
 #include "common.glsl"
 
+#ifdef PHISIKS_GL41
+layout(binding = 13) uniform samplerBuffer u_positionTexels;
+layout(binding = 14) uniform samplerBuffer u_normalTexels;
+vec4 LoadPosition(int i) { return texelFetch(u_positionTexels, i); }
+vec4 LoadNormal(int i) { return texelFetch(u_normalTexels, i); }
+#else
 layout(std430, binding = 4) readonly buffer Positions { vec4 u_x[]; };
 layout(std430, binding = 8) readonly buffer Normals { vec4 u_normals[]; };
+vec4 LoadPosition(int i) { return u_x[i]; }
+vec4 LoadNormal(int i) { return u_normals[i]; }
+#endif
 
 out vec3 v_worldPos;
 #ifdef SHADOW_PASS
@@ -20,12 +29,12 @@ flat out uint v_instance;
 #endif
 
 void main() {
-    vec3 p = u_x[gl_VertexID].xyz;
+    vec3 p = LoadPosition(gl_VertexID).xyz;
     v_worldPos = p;
 #ifdef SHADOW_PASS
     gl_Position = u_lightViewProjection * vec4(p, 1.0);
 #else
-    vec3 n = u_normals[gl_VertexID].xyz;
+    vec3 n = LoadNormal(gl_VertexID).xyz;
     v_normal = n;
     v_patternPos = p;          // world-space metres: patterns stay put while the surface deforms only locally
     v_objectNormal = n;

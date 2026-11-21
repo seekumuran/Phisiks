@@ -76,8 +76,14 @@ namespace Phisiks::Physics::Xpbd {
         size_t fieldCount = 0;
         const Collider* colliders = nullptr;
         size_t colliderCount = 0;
+        // Two-way coupling (optional): 2 entries per collider, += reaction impulse (N*s) and its
+        // angular part about the collider centre, J = -m * push-out / h for every node contact.
+        glm::vec3* colliderImpulses = nullptr;
     };
     void Step(Model& model, const StepParams& params);   // CPU reference
+    // Pushes a particle of radius r at x (moved from prev this step) out of a collider, with
+    // friction on the tangential motion. Returns true on contact (shared by CPU particles).
+    bool CollideParticle(glm::vec3& x, const glm::vec3& prev, float r, float friction, const Collider& c);
 
     float TetVolume(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& d);   // signed
     float TotalVolume(const Model& model);               // sum of |tet volumes|

@@ -7,6 +7,10 @@
 #include "FieldLab.h"
 #include "SceneBuilder.h"
 #include "Phisiks/Compute/Compute.h"
+#include "Phisiks/Framework/Replay.h"
+#include "Phisiks/Render/Upscaler.h"
+#include "Phisiks/Scene/SceneSerializer.h"
+#include "Phisiks/UI/ImGuiLayer.h"
 #include "Phisiks/Physics/Advanced.h"
 #include "Phisiks/Physics/Fields.h"
 #include "Phisiks/Physics/Xpbd.h"
@@ -274,8 +278,9 @@ namespace Phisiks {
             Expect("every id in the id buffer belongs to a live entity", unknown == 0 && ids.size() >= 5, F("%.0f distinct ids, %.0f unknown", double(ids.size()), double(unknown)));
 
             const Render::ShaderCacheStats cache = Render::GetShaderCacheStats();
+            const bool compat = Render::GetRendererInfo().compatTier;
             Expect("shader programs built (cache or compile), none failed",
-                   cache.programs == 29 && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
+                   cache.programs == (compat ? 16u : 33u) && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
                    F("%.0f programs: %.0f from cache, %.0f compiled, ", cache.programs, cache.loadedFromCache, cache.compiled) + F("%.0f written, %.0f failed", cache.written, cache.failures));
             const RenderStats render = GetRenderStats();
             Expect("indirect drawing: at most one command per mesh type", render.drawCommands <= render.meshesLoaded && render.instancesDrawn >= 10,
@@ -768,6 +773,10 @@ namespace Phisiks {
 
         // 9e. GPU-driven culling: the compute path must produce exactly the CPU path's image and counts.
         m_steps.push_back({ "GPU culling: compute shader vs CPU (identical frame)", [this](GameContext& ctx) {
+            if (Render::GetRendererInfo().compatTier) {
+                Expect("4.1 tier: CPU frustum culling (no compute shaders)", !GetRenderStats().gpuCulling && GetRenderStats().compatTier, "GPU culling checks skipped");
+                return true;
+            }
             Render::RenderSettings& rs = Render::Settings();
             switch (m_phase) {
                 case 0:
@@ -831,6 +840,10 @@ namespace Phisiks {
 
         // 9f. Hi-Z occlusion: a box hidden behind the wall is culled, nothing visible is.
         m_steps.push_back({ "GPU culling: Hi-Z occlusion", [this](GameContext& ctx) {
+            if (Render::GetRendererInfo().compatTier) {
+                Expect("4.1 tier: no Hi-Z pass", !GetRenderStats().occlusionActive, "occlusion checks skipped");
+                return true;
+            }
             Render::RenderSettings& rs = Render::Settings();
             Scene& scene = *ctx.CurrentScene();
             switch (m_phase) {
@@ -943,13 +956,16 @@ namespace Phisiks {
                     case 2: {
                         if (StepSimTime(ctx) - m_scratch[0] < 2.0) return false;
                         const Adv::Stats s = Adv::GetStats();
-                        Expect("GPU compute available on this device", s.gpuAvailable, "OpenGL 4.6 compute");
+                        const bool compat = Render::GetRendererInfo().compatTier;
+                        Expect("compute backend matches the renderer tier", compat ? (s.cpuBackend && !s.gpuAvailable) : s.gpuAvailable,
+                               compat ? "OpenGL 4.1 tier: CPU worker-pool backend" : "OpenGL 4.6 compute");
                         Expect("GPU systems created", s.particles == PARTICLES && s.particleSystems == 1 && s.softBodies == 4 && s.colorsMax >= 2,
                                F("%.0f particles, %.0f soft bodies, %.0f nodes, ", s.particles, s.softBodies, s.softBodyNodes) +
                                F("%.0f constraints in up to %.0f colours", s.constraints, s.colorsMax));
                         // fused solver: 1 solve + (cloth/box) 1 normals dispatch per soft body; particles: hash count,
                         // 3 scan passes, scatter, step (+ n-body if enabled); far below substeps * colours.
-                        Expect("GPU physics step is a handful of dispatches (fused XPBD)", s.dispatchesLastStep > 0 && s.dispatchesLastStep <= 16,
+                        Expect(compat ? "CPU physics step ran on the worker pool" : "GPU physics step is a handful of dispatches (fused XPBD)",
+                               compat ? (s.dispatchesLastStep == 0 && s.cpuMsLastStep > 0.0f) : (s.dispatchesLastStep > 0 && s.dispatchesLastStep <= 16),
                                F("%.0f dispatches, %.2f ms CPU to record the step", s.dispatchesLastStep, s.cpuMsLastStep));
                         const RenderStats r = GetRenderStats();
                         Expect("particles and rope nodes drawn as sprites, cloth and jelly as meshes",
@@ -1004,12 +1020,12 @@ namespace Phisiks {
                         double spread = 0.0;
                         for (int i = 0; i < 6; ++i) spread += glm::length(Find(ctx, "Cluster_" + std::to_string(i)).WorldPosition() - centroid) / 6.0;
                         Expect("n-body cluster contracts under mutual gravity", spread < 1.55, F("mean distance to centroid %.3f m (started at 1.6)", spread));
-                        m_scratch[0] = float(m_stepFrames);
+                        m_scratch[0] = float(StepSimTime(ctx));
                         m_phase = 3;
                         return false;
                     }
                     case 3: {
-                        if (m_stepFrames - m_scratch[0] < 2) return false;
+                        if (StepSimTime(ctx) - m_scratch[0] < 4.0 / 60.0 - 1e-6) return false;   // 4 fixed steps (same on every tier / frame rate)
                         std::vector<glm::vec4> after;
                         Adv::ReadParticles(Find(ctx, "Particles"), after);
                         size_t inside = 0, ccw = 0;
@@ -1044,6 +1060,12 @@ namespace Phisiks {
         // 10c. GPU kernels against their CPU references (synchronous readbacks).
         m_steps.push_back({ "FieldLab: GPU kernels vs CPU references", [this](GameContext& ctx) {
             namespace Adv = Physics::Advanced;
+            if (Render::GetRendererInfo().compatTier) {   // no GPU kernels: the CPU backend's field sampling vs FieldMath
+                std::vector<glm::vec4> samples;
+                const bool ok = Adv::SampleFields(glm::vec3(-4, 0.5f, -4), glm::vec3(4, 3, 4), glm::ivec3(8, 3, 8), samples);
+                Expect("4.1 tier: CPU field sampling available (GPU kernel checks skipped)", ok && samples.size() == 192, F("%.0f samples", double(samples.size())));
+                return true;
+            }
             // spatial hash: exact neighbour counts on a 1/64 m lattice (exactly representable)
             std::mt19937 rng(5);
             std::uniform_int_distribution<int> q(0, 4 * 64 - 1);
@@ -1158,8 +1180,8 @@ namespace Phisiks {
                 Expect("compute backend API: user kernel runs on the OpenGL backend (exact saxpy)",
                        gpu && info.available && wrong == 0 && info.maxWorkGroupInvocations >= 1024,
                        std::string(info.device) + F(": %.0f wrong of 10000, %.0f invocations/group, %.0f storage blocks/kernel", wrong, info.maxWorkGroupInvocations, info.maxStorageBlocksPerKernel));
-                Expect("OpenCL / SYCL listed as unavailable interface hooks", all.size() == 3 && all[0].available && !all[1].available && !all[2].available,
-                       all.size() == 3 ? all[1].note : std::string("?"));
+                Expect("OpenCL / SYCL listed as unavailable hooks, CPU backend available", all.size() == 4 && all[0].available && !all[1].available && !all[2].available && all[3].available,
+                       all.size() == 4 ? all[1].note + "; " + all[3].device : std::string("?"));
             }
 
             // force-field sampling (the arrow visualiser's data) vs FieldMath
@@ -1232,6 +1254,243 @@ namespace Phisiks {
         } });
 
         // 11. Round trip back: resource counts identical to the first load.
+        // 11. P8: studio UI, tiers, CPU compute backend.
+        m_steps.push_back({ "P8: studio UI, renderer tier, CPU compute backend", [this](GameContext&) {
+            if (m_stepFrames < 3) return false;
+            const Render::RendererInfo info = Render::GetRendererInfo();
+            Expect("Dear ImGui studio panels rendered", UI::IsActive() && UI::LastDrawVertexCount() > 100, F("%.0f UI vertices last frame", double(UI::LastDrawVertexCount())));
+            Expect("renderer tier reported", info.contextVersion >= 41 && info.gpuCompute == !info.compatTier,
+                   F("OpenGL %.0f.%.0f, ", info.contextVersion / 10, info.contextVersion % 10) + (info.compatTier ? "4.1 tier" : "4.6 tier"));
+            Compute::RegisterCpuKernel("saxpy", 64, [](const Compute::CpuInvocation& inv) {
+                const uint32_t i = inv.globalId[0];
+                if (i >= inv.U("u_n")) return;
+                const float* x = inv.Buffer<float>(4);
+                float* y = inv.Buffer<float>(5);
+                y[i] = inv.F("u_a") * x[i] + y[i];
+            });
+            Compute::IComputeBackend* cpu = Compute::GetBackend(Compute::BackendType::CPU);
+            const uint32_t n = 100000;
+            std::vector<float> xs(n), ys(n, 1.0f);
+            for (uint32_t i = 0; i < n; ++i) xs[i] = 0.5f * float(i % 4096);
+            uint32_t wrong = n;
+            if (cpu) {
+                const Compute::BufferId bx = cpu->CreateBuffer(n * 4), by = cpu->CreateBuffer(n * 4);
+                cpu->Upload(bx, xs.data(), n * 4);
+                cpu->Upload(by, ys.data(), n * 4);
+                const Compute::KernelId k = cpu->CreateKernel("saxpy", "");
+                cpu->SetBuffer(k, 4, bx);
+                cpu->SetBuffer(k, 5, by);
+                cpu->SetUniform(k, "u_a", 3.0f);
+                cpu->SetUniform(k, "u_n", n);
+                cpu->Dispatch(k, (n + 63) / 64);
+                cpu->Download(by, ys.data(), n * 4);
+                wrong = 0;
+                for (uint32_t i = 0; i < n; ++i) wrong += ys[i] != 1.5f * float(i % 4096) + 1.0f;
+            }
+            Expect("CPU compute backend: registered kernel on the worker pool (exact saxpy)", cpu && wrong == 0,
+                   cpu ? cpu->Info().device + F(": %.0f wrong of %.0f", double(wrong), double(n)) : std::string("no CPU backend"));
+            return true;
+        } });
+
+        // 12. P8: FSR 1.0 (EASU + RCAS) on the GPU vs the CPU reference, quality vs bilinear, live render scale.
+        m_steps.push_back({ "P8: FSR 1.0 upscaling", [this](GameContext&) {
+            Render::RenderSettings& rs = Render::Settings();
+            switch (m_phase) {
+                case 0: RequestCapture(); m_phase = 1; return false;
+                case 1: {
+                    if (!m_captureReady) return false;
+                    // ground truth: the native frame; input: its 2/3 box-downsample
+                    const int W = m_capture.width - m_capture.width % 3, H = m_capture.height - m_capture.height % 3;
+                    const int w = W * 2 / 3, h = H * 2 / 3;
+                    std::vector<uint8_t> truth(size_t(W) * H * 4), low(size_t(w) * h * 4);
+                    for (int y = 0; y < H; ++y) std::copy_n(&m_capture.rgba[size_t(y) * m_capture.width * 4], size_t(W) * 4, &truth[size_t(y) * W * 4]);
+                    for (int y = 0; y < h; ++y)
+                        for (int x = 0; x < w; ++x)
+                            for (int c = 0; c < 4; ++c) {
+                                const float sx = (x + 0.5f) * 1.5f - 0.5f, sy = (y + 0.5f) * 1.5f - 0.5f;   // bilinear sample of the area centre
+                                const int x0 = int(sx), y0 = int(sy);
+                                const float fx = sx - x0, fy = sy - y0;
+                                auto T = [&](int xx, int yy) { return float(truth[(size_t(std::min(yy, H - 1)) * W + std::min(xx, W - 1)) * 4 + c]); };
+                                const float v = (T(x0, y0) * (1 - fx) + T(x0 + 1, y0) * fx) * (1 - fy) + (T(x0, y0 + 1) * (1 - fx) + T(x0 + 1, y0 + 1) * fx) * fy;
+                                low[(size_t(y) * w + x) * 4 + c] = uint8_t(std::lround(v));
+                            }
+                    std::vector<uint8_t> gpuFsr, gpuBilinear, cpuEasu, cpuFsr;
+                    const bool ok = Render::UpscaleImage(low, w, h, W, H, Render::Upscaler::FSR1, 0.25f, gpuFsr) &&
+                                    Render::UpscaleImage(low, w, h, W, H, Render::Upscaler::Bilinear, 0.0f, gpuBilinear);
+                    Render::Fsr::Easu(low, w, h, W, H, cpuEasu);
+                    Render::Fsr::Rcas(cpuEasu, W, H, 0.25f, cpuFsr);
+                    int maxDiff = 0;
+                    size_t over1 = 0;
+                    for (size_t i = 0; ok && i < cpuFsr.size(); ++i) {
+                        if (i % 4 == 3) continue;
+                        const int d = std::abs(int(gpuFsr[i]) - int(cpuFsr[i]));
+                        maxDiff = std::max(maxDiff, d);
+                        over1 += d > 1;
+                    }
+                    Expect("GPU EASU + RCAS matches the CPU reference", ok && maxDiff <= 6 && over1 * 100 <= cpuFsr.size(),
+                           F("%.0fx%.0f -> ", w, h) + F("%.0fx%.0f: max channel difference %.0f", W, H, maxDiff) + F(", %.0f values > 1", double(over1)));
+                    const double psnrFsr = ok ? Render::Fsr::Psnr(gpuFsr, truth) : 0.0, psnrBilinear = ok ? Render::Fsr::Psnr(gpuBilinear, truth) : 0.0;
+                    Expect("FSR reconstructs the native frame better than bilinear", ok && psnrFsr > psnrBilinear,
+                           F("PSNR vs native: FSR %.2f dB, bilinear %.2f dB", psnrFsr, psnrBilinear));
+                    m_scratch[5] = rs.renderScale;
+                    rs.renderScale = 0.667f;
+                    rs.upscaler = Render::Upscaler::FSR1;
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                }
+                case 2:
+                    if (m_stepFrames - m_scratch[0] < 3) return false;
+                    RequestCapture();
+                    m_phase = 3;
+                    return false;
+                case 3: {
+                    if (!m_captureReady) return false;
+                    const RenderStats r = GetRenderStats();
+                    const glm::ivec2 window = Render::GetFramebufferSize();
+                    Expect("Low preset scale: scene at 2/3 resolution upscaled to the window", r.upscaled && r.outputWidth == window.x &&
+                           std::abs(r.internalWidth - int(std::lround(window.x * 0.667f))) <= 1 && m_capture.width == window.x,
+                           F("%.0fx%.0f -> ", r.internalWidth, r.internalHeight) + F("%.0fx%.0f", r.outputWidth, r.outputHeight));
+                    Expect("no OpenGL errors with upscaling", Render::GetGLErrorCount() == 0, F("%.0f errors", double(Render::GetGLErrorCount())));
+                    Screenshot("11_fsr_low_preset");
+                    rs.renderScale = m_scratch[5];
+                    return true;
+                }
+            }
+            return false;
+        } });
+
+        // 13. P8: synthetic vision (aligned colour, linear depth, world normals, entity ids).
+        m_steps.push_back({ "P8: synthetic vision buffers", [this](GameContext& ctx) {
+            switch (m_phase) {
+                case 0: Render::RequestVisionCapture(); RequestCapture(); m_phase = 1; return false;
+                case 1: {
+                    if (!m_captureReady) return false;
+                    Render::VisionCapture v;
+                    const bool ok = Render::GetVisionCapture(v) && v.width == m_capture.width && v.height == m_capture.height;
+                    size_t labelled = 0, agree = 0, unitNormals = 0;
+                    for (size_t p = 0; ok && p < v.entityIds.size(); ++p) {
+                        if (v.entityIds[p] == 0) continue;
+                        ++labelled;
+                        agree += v.entityIds[p] == m_capture.entityIds[p];
+                        unitNormals += std::abs(glm::length(v.normals[p]) - 1.0f) < 0.01f;
+                    }
+                    Expect("vision buffers aligned with the frame (ids agree with the colour pass)", ok && labelled > 1000 && agree >= labelled * 90 / 100,
+                           F("%.0fx%.0f, ", v.width, v.height) + F("%.0f labelled pixels, %.2f%% agree", double(labelled), labelled ? 100.0 * agree / labelled : 0.0));
+                    Expect("world normals are unit vectors", ok && unitNormals == labelled, F("%.0f of %.0f", double(unitNormals), double(labelled)));
+                    // linear depth vs a physics raycast through the same pixel
+                    const glm::mat4 invView = glm::inverse(v.view), invProj = glm::inverse(v.projection);
+                    const glm::vec3 eye(invView[3]), forward = -glm::vec3(invView[2]);
+                    int tested = 0;
+                    double worst = 0.0;
+                    for (int k = 0; ok && k < 4000 && tested < 40; ++k) {
+                        const int x = (k * 37) % v.width, y = (k * 53) % v.height;
+                        const size_t p = size_t(y) * v.width + x;
+                        const uint32_t id = v.entityIds[p];
+                        if (id == 0) continue;
+                        const glm::vec4 ndc((x + 0.5f) / v.width * 2.0f - 1.0f, (y + 0.5f) / v.height * 2.0f - 1.0f, 1.0f, 1.0f);
+                        glm::vec4 far = invView * (invProj * ndc);
+                        const glm::vec3 dir = glm::normalize(glm::vec3(far) / far.w - eye);
+                        Physics::QueryOptions options;
+                        options.ignoreCharacter = ctx.player.GetCharacter();   // the camera may sit inside the player capsule
+                        const auto hit = Physics::Raycast(eye, dir, 400.0f, options);
+                        if (!hit) continue;
+                        const Entity owner = ctx.CurrentScene()->FromBody(hit->body);
+                        const bool sameEntity = owner && (owner.Id() + 1 == id || (owner.GetParent() && owner.GetParent().Id() + 1 == id));   // e.g. Ground + GroundCollider
+                        if (!sameEntity) continue;
+                        if (!owner.Has<Collider>() || owner.Get<Collider>().shape.shape != Physics::ShapeType::Box) continue;   // flat faces: mesh == collider
+                        const double expected = hit->distance * glm::dot(dir, forward);
+                        worst = std::max(worst, std::abs(double(v.linearDepth[p]) - expected));
+                        ++tested;
+                    }
+                    Expect("linear depth equals the raycast distance along the view axis (box faces)", ok && tested >= 10 && worst < 0.01,
+                           F("%.0f pixels, max error %.4f m", double(tested), worst));
+                    return true;
+                }
+            }
+            return false;
+        } });
+
+        // 14. P8: particle emitter + two-way coupling (Fountain), replay scrubbing, JSON round trip.
+        m_steps.push_back({ "P8: emitter, two-way coupling, replay scrub, JSON round trip", [this](GameContext& ctx) {
+            namespace Adv = Physics::Advanced;
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("Fountain"); m_phase = 1; return false;
+                case 1:
+                    if (ctx.scenes->CurrentName() != "Fountain") return false;
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_scratch[1] = Find(ctx, "Crate0").WorldPosition().x;
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (StepSimTime(ctx) - m_scratch[0] < 3.0) return false;
+                    const Adv::Stats s = Adv::GetStats();
+                    const double t = StepSimTime(ctx) - m_scratch[0];
+                    const double expectedAlive = std::min(900.0 * t, 900.0 * 5.0);   // rate x min(time, lifetime)
+                    Expect("emitter spawns at its rate (pool of 6000, lifetime 5 s)", s.particleSystems == 1 && s.particles == 6000 &&
+                           std::abs(double(s.particlesAlive) - expectedAlive) < 0.06 * expectedAlive + 20,
+                           F("%.0f alive after %.2f s (expected ~%.0f)", double(s.particlesAlive), t, expectedAlive));
+                    const Entity crate = Find(ctx, "Crate0");
+                    Expect("particles push dynamic crates (two-way coupling)", s.coupledImpulsesApplied > 0 && std::abs(crate.WorldPosition().x - m_scratch[1]) > 0.02f,
+                           F("%.0f impulses applied, Crate0 moved %.3f m", double(s.coupledImpulsesApplied), double(crate.WorldPosition().x - m_scratch[1])));
+                    // replay: restore an older snapshot and check the scene matches it exactly
+                    const Replay& replay = ctx.replay;
+                    Expect("replay recorded every fixed step", replay.Enabled() && replay.Size() >= 150, F("%.0f snapshots", double(replay.Size())));
+                    if (replay.Size() < 61) return true;
+                    m_scratch[2] = float(replay.Size() - 60);
+                    ctx.state = GameState::Paused;
+                    ctx.replay.Restore(*ctx.CurrentScene(), size_t(m_scratch[2]));
+                    m_scratch[3] = float(m_stepFrames);
+                    m_phase = 3;
+                    return false;
+                }
+                case 3: {
+                    if (m_stepFrames - m_scratch[3] < 2) return false;
+                    const ReplaySnapshot& snap = ctx.replay.At(size_t(m_scratch[2]));
+                    const Entity crate = Find(ctx, "Crate0");
+                    float worst = 0.0f;
+                    for (const ReplayEntityState& st : snap.entities) {
+                        Entity e = ctx.CurrentScene()->FromId(st.entity);
+                        if (!e || !st.hasBody) continue;
+                        worst = std::max(worst, glm::length(e.LocalTransform().position - st.position));
+                        worst = std::max(worst, glm::length(Physics::GetPosition(e.GetBody()) - e.WorldPosition()));
+                    }
+                    Expect("scrubbed to an older step: bodies and transforms match the snapshot", crate && worst < 1e-4f,
+                           F("snapshot %.0f (step %.0f): max deviation %.2e m", m_scratch[2], double(snap.step), worst));
+                    ctx.state = GameState::Running;   // resume from the scrubbed step
+                    m_scratch[3] = float(m_stepFrames);
+                    m_phase = 4;
+                    return false;
+                }
+                case 4: {
+                    if (m_stepFrames - m_scratch[3] < 10) return false;
+                    Expect("resuming discards the newer timeline", ctx.replay.Size() < size_t(m_scratch[2]) + 1 + 40 && !ctx.replay.Scrubbed(),
+                           F("%.0f snapshots after resuming from %.0f", double(ctx.replay.Size()), m_scratch[2]));
+                    // JSON round trip of the live scene
+                    Scene& scene = *ctx.CurrentScene();
+                    const std::string before = SceneSerializer::ToJson(scene);
+                    const size_t entities = scene.EntityCount();
+                    std::string error;
+                    const bool loaded = SceneSerializer::FromJson(scene, before, &error);
+                    const std::string after = SceneSerializer::ToJson(scene);
+                    Expect("JSON scene round trip is lossless", loaded && after == before && scene.EntityCount() == entities,
+                           F("%.0f entities, %.0f bytes", double(entities), double(before.size())) + (error.empty() ? "" : ", " + error));
+                    m_scratch[3] = float(m_stepFrames);
+                    m_phase = 5;
+                    return false;
+                }
+                case 5: {
+                    if (m_stepFrames - m_scratch[3] < 5) return false;
+                    const RenderStats r = GetRenderStats();
+                    Expect("reloaded scene rebuilt its render objects and bodies", r.meshObjects == CountRenderedEntities(ctx) && Adv::GetStats().particleSystems == 1,
+                           F("%.0f render objects, %.0f MeshRenderer entities", r.meshObjects, double(CountRenderedEntities(ctx))));
+                    Screenshot("12_fountain");
+                    return true;
+                }
+            }
+            return false;
+        } });
+
         m_steps.push_back({ "Scene transition back to Sandbox", [this](GameContext& ctx) {
             if (m_phase == 0) { ctx.scenes->Request("Sandbox"); m_phase = 1; return false; }
             if (ctx.scenes->CurrentName() != "Sandbox") return false;

@@ -1,7 +1,7 @@
 // Phisiks::Physics implementation (PhysX 5 backend). Written against the PhysX SDK documentation.
 #include "Phisiks/Physics/Physics.h"
 #include "Phisiks/Core/Log.h"
-#include "physics/PhysicsCore.h"
+#include "physics/physx/PhysicsCore.h"
 
 #pragma warning(push, 0)
 #include <PxPhysicsAPI.h>
@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <map>
+#include <string>
 #include <tuple>
 
 using namespace physx;
@@ -432,6 +433,10 @@ namespace Phisiks::Physics {
     }
 
     bool IsInitialized() { return g.initialized; }
+    const char* BackendName() {
+        static const std::string name = "PhysX " + std::to_string(PX_PHYSICS_VERSION_MAJOR) + "." + std::to_string(PX_PHYSICS_VERSION_MINOR);
+        return name.c_str();
+    }
     const Settings& GetSettings() { return g.settings; }
 
     void SetGravity(const glm::vec3& gravity) {
@@ -581,6 +586,17 @@ namespace Phisiks::Physics {
         if (PxRigidDynamic* d = s->actor->is<PxRigidDynamic>(); d && s->type == BodyType::Dynamic) {
             d->setLinearVelocity(PxVec3(0.0f));
             d->setAngularVelocity(PxVec3(0.0f));
+            d->wakeUp();
+        }
+    }
+
+    void SetBodyState(BodyId id, const glm::vec3& position, const glm::quat& rotation, const glm::vec3& linearVelocity, const glm::vec3& angularVelocity) {
+        BodySlot* s = Resolve(id);
+        if (!s) return;
+        s->actor->setGlobalPose(ToPx(position, rotation));
+        if (PxRigidDynamic* d = s->actor->is<PxRigidDynamic>(); d && s->type == BodyType::Dynamic) {
+            d->setLinearVelocity(ToPx(linearVelocity));
+            d->setAngularVelocity(ToPx(angularVelocity));
             d->wakeUp();
         }
     }

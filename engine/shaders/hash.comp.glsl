@@ -15,11 +15,15 @@ layout(std430, binding = 8) writeonly buffer QueryOut { uint u_query[]; };
 uniform uint u_count;
 uniform uint u_stride;
 uniform float u_queryRadius;
+uniform int u_skipDead;   // particles: radius (w) <= 0 marks a dead emitter slot, not inserted
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= u_count) return;
     vec3 p = u_particles[i * u_stride].xyz;
+#ifndef HASH_QUERY
+    if (u_skipDead != 0 && u_particles[i * u_stride].w <= 0.0) return;
+#endif
 #ifdef HASH_COUNT
     atomicAdd(u_counters[HashIndex(HashCell(p))], 1u);
 #endif

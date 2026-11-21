@@ -1,6 +1,7 @@
 #include "render/ShaderCache.h"
 #include "render/ShaderCacheFormat.h"
 #include "Phisiks/Core/Log.h"
+#include "platform/Paths.h"
 
 #include <cstdlib>
 #include <system_error>
@@ -17,9 +18,7 @@ namespace Phisiks::Render {
 
         fs::path DefaultDirectory() {
             if (const char* custom = std::getenv("PHISIKS_SHADER_CACHE_DIR"); custom && *custom) return fs::path(custom);
-#ifdef _WIN32
-            if (const char* local = std::getenv("LOCALAPPDATA"); local && *local) return fs::path(local) / "Phisiks" / "ShaderCache";
-#endif
+            if (const fs::path user = Platform::Paths::UserCacheDirectory(); !user.empty()) return user / "ShaderCache";
             return fs::path(".phisiks_cache") / "shaders";
         }
 

@@ -33,7 +33,7 @@ vec3 Shade(vec3 p, vec3 N, vec3 V) {
     int lightCount = int(u_groundColor.w + 0.5);
     bool shadows = u_fogParams2.y > 0.5;
     for (int i = 0; i < lightCount; ++i) {
-        Light light = u_lights[i];
+        Light light = LoadLight(uint(i));
         int type = int(light.directionType.w + 0.5);
         int shadowIndex = light.params.z < 0.0 ? -1 : int(light.params.z + 0.5);
         vec3 L;

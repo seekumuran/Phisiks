@@ -32,3 +32,15 @@ Instances are uploaded once per frame (persistent-mapped ring); each view has on
 
 ## ADR-11: Small-step XPBD with graph colouring; fused single-workgroup solver
 XPBD runs one iteration per sub-step with Lagrange multipliers reset each sub-step, which is stable and makes `alpha*m*g` an exact analytic test. Constraints are graph-coloured so each colour is solved in parallel without atomics. Dispatch overhead, not arithmetic, dominated on the iGPU (a 64-node soft box needs 51 colours x 16 sub-steps), so bodies that fit run the whole fixed step in one workgroup with `barrier()` between colours; large bodies use one dispatch per colour. Both produce bit-identical results.
+
+## ADR-12: Two physics backends behind one API
+PhysX 5 does not support macOS, and the repository only vendors Windows binaries. `Phisiks::Physics` therefore has two interchangeable implementations chosen at configure time (`PHISIKS_PHYSICS_BACKEND`): PhysX (`engine/src/physics/physx/`) and a native solver (`engine/src/physics/native/`: GJK/EPA, box SAT clipping, speculative contacts, sequential impulses with warm starting, split-impulse position correction, conservative-advancement sweeps, a three-pass capsule character controller). The same 112 physics/scene unit tests and the runtime autotest run against both.
+
+## ADR-13: An OpenGL 4.1 feature tier instead of a second renderer
+macOS stops at OpenGL 4.1. Rather than a separate renderer, the renderer runs in one of two tiers chosen at startup. `render/gl/GLObjects` hides direct state access behind tier-aware helpers. Shaders read storage through `Load*()` accessors: SSBOs on 4.6, texture buffers on 4.1. A preprocessor rewrite turns `#version 460` + `layout(binding = N)` into 4.10 source and records the bindings, which are applied after linking. On 4.1 the compute-based systems (culling, Hi-Z, particles, XPBD, field sampling) are replaced by the CPU culling path and the CPU compute backend (worker thread pool). `--gl41` forces the tier on any GPU, so it is tested on Windows.
+
+## ADR-14: Clean-room FSR 1.0-style upscaling with a CPU reference
+The window scene renders at `renderScale` × the window size. It is then upscaled by an edge-adaptive EASU pass and sharpened by an RCAS pass, both single fragment passes that work on both tiers. The shaders were written from the published description of the algorithm, not from AMD's source. The same maths exists in C++ (`Phisiks/Render/Upscaler.h`) so unit tests can check its properties headlessly and the runtime check can compare GPU output with it.
+
+## ADR-15: Studio UI in the app, ImGui integration in the engine
+`Phisiks/UI/ImGuiLayer.h` owns Dear ImGui's lifetime and its GLFW/OpenGL3 backends (GLSL 410, both tiers). The Application draws the UI after the frame is presented, so captures, exports and pixel tests never contain UI. The studio itself (`apps/lab/src/Studio.cpp`) uses only the public engine API plus `<imgui.h>` / `<ImGuizmo.h>`, which the layering check allows for apps.

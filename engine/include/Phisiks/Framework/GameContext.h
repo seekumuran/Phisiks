@@ -5,6 +5,7 @@
 #include "Phisiks/Framework/Gameplay.h"
 #include "Phisiks/Framework/Input.h"
 #include "Phisiks/Framework/PlayerController.h"
+#include "Phisiks/Framework/Replay.h"
 #include "Phisiks/Scene/Scene.h"
 
 #include <cstdint>
@@ -42,6 +43,7 @@ namespace Phisiks {
         bool overlayVisible = true;
         bool physicsDebugDraw = false;
         bool quitRequested = false;
+        Replay replay;                     // deterministic replay ring + timeline scrubbing (AppOptions::recordReplay)
 
         std::deque<std::string> eventLog;  // recent gameplay events shown by the debug overlay
         void PushEvent(const std::string& message);

@@ -4,9 +4,12 @@
 #include "Phisiks/Core/Log.h"
 
 #include <GLFW/glfw3.h>
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
+#endif
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -16,6 +19,7 @@ namespace Phisiks::Platform {
             GLFWwindow* window = nullptr;
             std::array<GLFWcursor*, 6> cursors{};
             WindowDesc desc;
+            int requestedVersion = 0;
             glm::ivec2 windowedSize{ 0 };
             glm::ivec2 windowedPosition{ 0 };
             bool fullscreen = false;
@@ -72,20 +76,33 @@ namespace Phisiks::Platform {
         g.windowedSize = glm::ivec2(desc.width > 0 ? desc.width : int(std::lround(monitor.x * 0.75)),
                                     desc.height > 0 ? desc.height : int(std::lround(monitor.y * 0.75)));
 
-        glfwDefaultWindowHints();
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, desc.debugContext ? GLFW_TRUE : GLFW_FALSE);
-        glfwWindowHint(GLFW_RESIZABLE, desc.resizable ? GLFW_TRUE : GLFW_FALSE);
-        glfwWindowHint(GLFW_VISIBLE, desc.startVisible ? GLFW_TRUE : GLFW_FALSE);
-        glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
-        glfwWindowHint(GLFW_SAMPLES, 0);
-
-        g.window = glfwCreateWindow(g.windowedSize.x, g.windowedSize.y, desc.title.c_str(), nullptr, nullptr);
+        // Newest core context first; macOS stops at 4.1 (forward-compatible core profile).
+#if defined(__APPLE__)
+        const int versions[] = { 41 };
+#else
+        const int versions[] = { 46, 45, 43, 41 };
+#endif
+        for (int version : versions) {
+            if (version > desc.maxGLVersion) continue;
+            glfwDefaultWindowHints();
+            glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, version / 10);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, version % 10);
+            glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#if defined(__APPLE__)
+            glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+            glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
+#endif
+            glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, desc.debugContext && version >= 43 ? GLFW_TRUE : GLFW_FALSE);
+            glfwWindowHint(GLFW_RESIZABLE, desc.resizable ? GLFW_TRUE : GLFW_FALSE);
+            glfwWindowHint(GLFW_VISIBLE, desc.startVisible ? GLFW_TRUE : GLFW_FALSE);
+            glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
+            glfwWindowHint(GLFW_SAMPLES, 0);
+            g.window = glfwCreateWindow(g.windowedSize.x, g.windowedSize.y, desc.title.c_str(), nullptr, nullptr);
+            if (g.window) { g.requestedVersion = version; break; }
+        }
         if (!g.window) {
-            Log::Error() << "Platform: could not create an OpenGL 4.6 core window";
+            Log::Error() << "Platform: could not create an OpenGL 4.1+ core window";
             glfwTerminate();
             return false;
         }
@@ -109,7 +126,9 @@ namespace Phisiks::Platform {
         SetVSync(desc.vsync);
         if (desc.fullscreen) SetFullscreen(true);
         g.focused = glfwGetWindowAttrib(g.window, GLFW_FOCUSED) != 0;
-        Log::Info() << "Platform: window " << g.windowedSize.x << "x" << g.windowedSize.y << " (monitor " << monitor.x << "x" << monitor.y << ")";
+        Log::Info() << "Platform: window " << g.windowedSize.x << "x" << g.windowedSize.y << " (monitor " << monitor.x << "x" << monitor.y << "), OpenGL "
+                    << glfwGetWindowAttrib(g.window, GLFW_CONTEXT_VERSION_MAJOR) << "." << glfwGetWindowAttrib(g.window, GLFW_CONTEXT_VERSION_MINOR)
+                    << " core context (requested " << g.requestedVersion / 10 << "." << g.requestedVersion % 10 << ")";
         return true;
     }
 
@@ -225,5 +244,14 @@ namespace Phisiks::Platform {
     }
 
     void* GetNativeHandle() { return g.window; }
+#if defined(_WIN32)
     void* GetWin32Handle()  { return g.window ? glfwGetWin32Window(g.window) : nullptr; }
+#else
+    void* GetWin32Handle()  { return nullptr; }
+#endif
+    int GetGLContextVersion() {
+        if (!g.window) return 0;
+        return glfwGetWindowAttrib(g.window, GLFW_CONTEXT_VERSION_MAJOR) * 10 + glfwGetWindowAttrib(g.window, GLFW_CONTEXT_VERSION_MINOR);
+    }
+    int GetRequestedGLVersion() { return g.window ? std::min(g.requestedVersion, g.desc.maxGLVersion) : 0; }
 }

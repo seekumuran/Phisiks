@@ -77,7 +77,7 @@ void FinishNode(uint i) {
     if (x.w == 0.0) return;
     vec3 prev = u_prev[i].xyz;
     vec3 p = x.xyz;
-    CollideAll(p, prev, u_radius, u_friction);
+    CollideAll(p, prev, u_radius, u_friction, 1.0 / (x.w * u_h));
     u_x[i] = vec4(p, x.w);
     u_v[i] = vec4((p - prev) / u_h * max(0.0, 1.0 - u_damping * u_h), 0.0);
 }

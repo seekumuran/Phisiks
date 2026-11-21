@@ -1,6 +1,7 @@
 #include "core/CrashHandler.h"
 #include "Phisiks/Core/Log.h"
 
+#if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -144,3 +145,69 @@ namespace Phisiks::CrashHandler {
         SetUnhandledExceptionFilter(OnUnhandledException);
     }
 }
+#else
+// POSIX: fatal signals (SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT) are reported with a symbolized
+// backtrace (execinfo) to stderr, <dumpDirectory>/crash.txt and the log, then re-raised with the
+// default action so the OS still produces its core dump / crash report.
+#include <atomic>
+#include <csignal>
+#include <cstdio>
+#include <cstring>
+#include <execinfo.h>
+#include <fcntl.h>
+#include <string>
+#include <unistd.h>
+
+namespace Phisiks::CrashHandler {
+    namespace {
+        std::string g_crashPath;
+        std::atomic<bool> g_reported{ false };
+        char g_altStack[64 * 1024];
+
+        const char* Describe(int sig) {
+            switch (sig) {
+                case SIGSEGV: return "segmentation fault";
+                case SIGBUS:  return "bus error";
+                case SIGFPE:  return "floating-point exception";
+                case SIGILL:  return "illegal instruction";
+                case SIGABRT: return "abort";
+                default:      return "fatal signal";
+            }
+        }
+
+        void OnSignal(int sig, siginfo_t* info, void*) {
+            if (!g_reported.exchange(true)) {
+                char header[256];
+                const int n = std::snprintf(header, sizeof(header), "FATAL: %s (signal %d) at %p\n", Describe(sig), sig, info ? info->si_addr : nullptr);
+                void* frames[64];
+                const int count = backtrace(frames, 64);
+                const int file = g_crashPath.empty() ? -1 : open(g_crashPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                for (int fd : { 2, file }) {
+                    if (fd < 0) continue;
+                    if (n > 0) { const ssize_t written = write(fd, header, size_t(n)); (void)written; }
+                    backtrace_symbols_fd(frames, count, fd);
+                }
+                if (file >= 0) close(file);
+                // best effort (not async-signal-safe; the process is going down anyway)
+                Log::Error() << header << "Backtrace written to " << (g_crashPath.empty() ? std::string("stderr") : g_crashPath);
+                Log::Shutdown();
+            }
+            std::signal(sig, SIG_DFL);
+            std::raise(sig);
+        }
+    }
+
+    void Install(const std::string& dumpDirectory) {
+        g_crashPath = dumpDirectory.empty() ? std::string() : dumpDirectory + "/crash.txt";
+        stack_t stack{};
+        stack.ss_sp = g_altStack;
+        stack.ss_size = sizeof(g_altStack);
+        sigaltstack(&stack, nullptr);   // stack overflows still get reported
+        struct sigaction action {};
+        action.sa_sigaction = OnSignal;
+        action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sigemptyset(&action.sa_mask);
+        for (int sig : { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT }) sigaction(sig, &action, nullptr);
+    }
+}
+#endif

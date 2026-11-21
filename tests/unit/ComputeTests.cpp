@@ -232,16 +232,19 @@ TEST_CASE("Fields: rigid body on a circular orbit around a planetary field keeps
 }
 
 // ============================================================================ compute backends
-TEST_CASE("Compute: OpenGL backend needs the renderer; OpenCL and SYCL are interface hooks") {
+TEST_CASE("Compute: OpenGL backend needs the renderer; OpenCL and SYCL are hooks; CPU is always there") {
     using namespace Phisiks::Compute;
     CHECK(GetBackend(BackendType::OpenGL) == nullptr);   // headless: no GL context
     CHECK(GetBackend(BackendType::OpenCL) == nullptr);
     CHECK(GetBackend(BackendType::SYCL) == nullptr);
+    CHECK(GetBackend(BackendType::CPU) != nullptr);
     const std::vector<DeviceInfo> all = EnumerateBackends();
-    CHECK(all.size() == 3);
-    for (const DeviceInfo& d : all) {
-        CHECK(!d.available);
-        CHECK(!d.note.empty());
+    CHECK(all.size() == 4);
+    for (size_t i = 0; i < 3 && i < all.size(); ++i) {
+        CHECK(!all[i].available);
+        CHECK(!all[i].note.empty());
     }
+    CHECK(all.size() == 4 && all[3].available && all[3].backend == BackendType::CPU);
     CHECK(std::string(ToString(BackendType::SYCL)) == "SYCL");
+    CHECK(std::string(ToString(BackendType::CPU)) == "CPU");
 }

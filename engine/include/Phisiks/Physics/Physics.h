@@ -1,6 +1,8 @@
 #pragma once
 // Phisiks::Physics — rigid bodies, colliders, queries, collision/trigger events and a character
-// controller. Backed by NVIDIA PhysX (hidden). Runs headless (no window or GPU needed).
+// controller. Two interchangeable backends (hidden): NVIDIA PhysX 5 (Windows default) and the
+// native Phisiks solver (macOS, Linux without PhysX; -DPHISIKS_PHYSICS_BACKEND=Native anywhere).
+// Runs headless (no window or GPU needed).
 //
 //   Physics::Init();
 //   BodyDesc ground{ .type = BodyType::Static };  ground.colliders.push_back(box);
@@ -18,6 +20,7 @@
 namespace Phisiks::Physics {
 
     bool Init(const Settings& settings = Settings());
+    const char* BackendName();                                   // "PhysX 5.x" or "Phisiks native"
     void Shutdown();
     bool IsInitialized();
 
@@ -50,6 +53,8 @@ namespace Phisiks::Physics {
     glm::vec3 GetPosition(BodyId body);
     glm::quat GetRotation(BodyId body);
     void SetPose(BodyId body, const glm::vec3& position, const glm::quat& rotation);   // teleport; resets velocity of dynamics
+    // Exact state restore (replay / timeline scrubbing): pose and velocities, body woken.
+    void SetBodyState(BodyId body, const glm::vec3& position, const glm::quat& rotation, const glm::vec3& linearVelocity, const glm::vec3& angularVelocity);
     void SetKinematicTarget(BodyId body, const glm::vec3& position, const glm::quat& rotation);   // kinematic: moves during the next step, pushing dynamics
 
     glm::vec3 GetLinearVelocity(BodyId body);

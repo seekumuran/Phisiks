@@ -3,7 +3,13 @@
 // colour from the GPU-sampled field (field_sample.comp). Drawn with lines.frag.
 #include "common.glsl"
 
+#ifdef PHISIKS_GL41
+layout(binding = 13) uniform samplerBuffer u_sampleTexels;
+vec4 LoadSample(int i) { return texelFetch(u_sampleTexels, i); }
+#else
 layout(std430, binding = 14) readonly buffer Samples { vec4 u_samples[]; };
+vec4 LoadSample(int i) { return u_samples[i]; }
+#endif
 uniform ivec3 u_resolution;
 uniform vec3 u_boundsMin;
 uniform vec3 u_boundsMax;
@@ -16,7 +22,7 @@ void main() {
     int k = gl_VertexID % 6;
     ivec3 c = ivec3(arrow % u_resolution.x, (arrow / u_resolution.x) % u_resolution.y, arrow / (u_resolution.x * u_resolution.y));
     vec3 base = mix(u_boundsMin, u_boundsMax, (vec3(c) + 0.5) / vec3(u_resolution));
-    vec4 s = u_samples[arrow];
+    vec4 s = LoadSample(arrow);
     float magnitude = s.w;
     vec3 dir = magnitude > 1e-6 ? s.xyz / magnitude : vec3(0.0, 1.0, 0.0);
     float len = magnitude > 1e-6 ? min(magnitude * u_arrowScale, u_maxLength) : 0.0;

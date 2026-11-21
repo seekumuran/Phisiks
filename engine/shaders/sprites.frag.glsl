@@ -24,9 +24,10 @@ void main() {
     vec3 color = albedo * mix(u_ambientDown.rgb, u_ambientUp.rgb, N.y * 0.5 + 0.5) * u_skyZenith.w;
     int lightCount = int(u_groundColor.w + 0.5);
     for (int i = 0; i < lightCount; ++i) {
-        if (int(u_lights[i].directionType.w + 0.5) != 0) continue;
-        vec3 L = -normalize(u_lights[i].directionType.xyz);
-        color += albedo / PI * max(dot(N, L), 0.0) * u_lights[i].colorIntensity.rgb * u_lights[i].colorIntensity.w;
+        Light light = LoadLight(uint(i));
+        if (int(light.directionType.w + 0.5) != 0) continue;
+        vec3 L = -normalize(light.directionType.xyz);
+        color += albedo / PI * max(dot(N, L), 0.0) * light.colorIntensity.rgb * light.colorIntensity.w;
     }
     vec3 toPoint = v_center - u_cameraPosition.xyz;
     float distance = length(toPoint);
