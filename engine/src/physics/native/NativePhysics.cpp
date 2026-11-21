@@ -3,7 +3,10 @@
 // -DPHISIKS_PHYSICS_BACKEND=Native.
 //
 //   bodies     boxes, spheres, Y-up capsules, convex point clouds (support-mapped), static/kinematic
-//              triangle meshes; mass and inertia from collider volumes
+//              triangle meshes and height fields (grid-indexed); mass and inertia from collider volumes
+//   joints     hinge (limits, motor), ball-and-socket, prismatic (limits, motor), spring-damper
+//              (implicit soft constraint); solved with the contacts (sequential impulses, split
+//              impulse position correction)
 //   step       sub-stepped: speculative contacts -> sequential impulses with warm starting,
 //              Coulomb friction (static/dynamic), restitution pass, split-impulse position
 //              correction, per-body sleeping
@@ -35,7 +38,8 @@ namespace Phisiks::Physics {
         using Native::ContactSet;
 
         // ------------------------------------------------------------------ ids (same layout as the PhysX backend)
-        constexpr uint64_t TAG_BODY = 1, TAG_CHARACTER = 2;
+        constexpr uint64_t TAG_BODY = 1, TAG_CHARACTER = 2, TAG_JOINT = 3;
+        constexpr uint32_t WORLD = 0xFFFFFFFFu;
         uint64_t MakeId(uint64_t tag, uint32_t generation, uint32_t index) {
             return (tag << 62) | (uint64_t(generation & 0x3FFFFFFFu) << 32) | uint64_t(index + 1);
         }
@@ -79,7 +83,10 @@ namespace Phisiks::Physics {
             std::vector<glm::vec3> points;       // convex: local points
             std::vector<glm::vec3> vertices;     // triangle mesh (local)
             std::vector<uint32_t> indices;
-            glm::vec3 localLo{ 0.0f }, localHi{ 0.0f };   // points / mesh local bounds
+            std::vector<float> heights;          // height field samples (z-major)
+            uint32_t columns = 0, rows = 0;      // height field grid
+            float cell = 1.0f;
+            glm::vec3 localLo{ 0.0f }, localHi{ 0.0f };   // points / mesh / height field local bounds
             glm::vec3 localPosition{ 0.0f };
             glm::quat localRotation{ 1, 0, 0, 0 };
             PhysicsMaterial material;
@@ -161,6 +168,28 @@ namespace Phisiks::Physics {
             bool touched = false;
         };
 
+        struct Joint {
+            JointType type = JointType::BallSocket;
+            uint32_t a = WORLD, b = WORLD;       // body indices (WORLD = static world)
+            glm::vec3 localA{ 0.0f }, localB{ 0.0f };   // anchors in the actor frames
+            glm::vec3 axisA{ 0, 1, 0 }, axisB{ 0, 1, 0 };   // joint axis in each actor frame
+            glm::vec3 refA{ 1, 0, 0 }, refB{ 1, 0, 0 };     // perpendicular references (hinge angle)
+            glm::quat relative{ 1, 0, 0, 0 };    // conj(qA) * qB at creation (prismatic rotation lock)
+            bool limits = false, motor = false, collideConnected = false;
+            float lower = 0.0f, upper = 0.0f, motorSpeed = 0.0f, maxMotorForce = 0.0f;
+            float stiffness = 0.0f, damping = 0.0f, rest = 0.0f;
+            uint32_t generation = 1;
+            bool alive = false;
+            // accumulated impulses (warm started)
+            glm::vec3 jPoint{ 0.0f }, jAngular{ 0.0f };
+            float jPerp1 = 0.0f, jPerp2 = 0.0f, jLimit = 0.0f, jMotor = 0.0f, jSpring = 0.0f;
+            // per sub-step
+            glm::vec3 rA{ 0.0f }, rB{ 0.0f }, rA2{ 0.0f }, axis{ 0, 1, 0 }, p1{ 1, 0, 0 }, p2{ 0, 0, 1 }, n{ 0, 1, 0 };
+            glm::vec3 pointError{ 0.0f }, angularError{ 0.0f };
+            float perpError1 = 0.0f, perpError2 = 0.0f, position = 0.0f, length = 0.0f;
+            int limitState = 0;                  // -1 at lower, +1 at upper
+        };
+
         struct PairInfo {
             glm::vec3 point{ 0.0f }, normal{ 0.0f };
             float impactSpeed = 0.0f, impulse = 0.0f;
@@ -179,6 +208,10 @@ namespace Phisiks::Physics {
             std::set<std::pair<uint32_t, uint32_t>> triggerPairs;   // (trigger body, other body)
             std::vector<CollisionEvent> collisionEvents;
             std::vector<TriggerEvent> triggerEvents;
+            std::vector<Joint> joints;
+            std::vector<uint32_t> freeJoints;
+            std::map<std::pair<uint32_t, uint32_t>, int> jointPairs;   // bodies that must not collide (collideConnected = false)
+            Body world;                          // static anchor for joints attached to the world
             uint64_t steps = 0;
         };
         State g;
@@ -199,6 +232,15 @@ namespace Phisiks::Physics {
             return (c.alive && c.generation == GenerationOf(id.value)) ? &c : nullptr;
         }
         BodyId IdOf(uint32_t index) { return BodyId{ MakeId(TAG_BODY, g.bodies[index].generation, index) }; }
+        Joint* Resolve(JointId id) {
+            if (!g.initialized || TagOf(id.value) != TAG_JOINT) return nullptr;
+            const uint32_t index = IndexOf(id.value);
+            if (index >= g.joints.size()) return nullptr;
+            Joint& j = g.joints[index];
+            return (j.alive && j.generation == GenerationOf(id.value)) ? &j : nullptr;
+        }
+        Body& BodyAt(uint32_t index) { return index == WORLD ? g.world : g.bodies[index]; }
+        bool IsMesh(const Shape& s) { return s.type == ShapeType::TriangleMesh || s.type == ShapeType::HeightField; }
 
         void Wake(Body& b) {
             if (b.type != BodyType::Dynamic) return;
@@ -241,6 +283,7 @@ namespace Phisiks::Physics {
                 }
                 case ShapeType::ConvexMesh: c.kind = Convex::Kind::Points; c.center = s.position; c.rotation = s.rotation; c.points = &s.points; break;
                 case ShapeType::TriangleMesh: break;
+                case ShapeType::HeightField: break;
             }
             return c;
         }
@@ -257,6 +300,46 @@ namespace Phisiks::Physics {
             Aabb box;
             box.Add(c.a); box.Add(c.b); box.Add(c.c);
             return box;
+        }
+
+        // Calls f(triangle, index) for the mesh / height-field triangles whose bounds overlap `box`
+        // (world). Height fields only visit the grid cells under the box.
+        template<class F>
+        void ForTriangles(const Shape& s, const Aabb& box, F&& f) {
+            if (s.type == ShapeType::TriangleMesh) {
+                for (size_t t = 0; t < s.indices.size() / 3; ++t) {
+                    const Convex tri = TriangleOf(s, t);
+                    if (BoundsOf(tri).Overlaps(box)) f(tri, uint32_t(t));
+                }
+                return;
+            }
+            if (s.type != ShapeType::HeightField || s.columns < 2 || s.rows < 2) return;
+            const glm::mat3 inv = glm::transpose(s.rotation);
+            Aabb local;
+            for (int k = 0; k < 8; ++k) {
+                const glm::vec3 corner((k & 1) ? box.hi.x : box.lo.x, (k & 2) ? box.hi.y : box.lo.y, (k & 4) ? box.hi.z : box.lo.z);
+                local.Add(inv * (corner - s.position));
+            }
+            const float hx = 0.5f * float(s.columns - 1), hz = 0.5f * float(s.rows - 1);
+            const int x0 = std::max(int(std::floor(local.lo.x / s.cell + hx)), 0), x1 = std::min(int(std::floor(local.hi.x / s.cell + hx)), int(s.columns) - 2);
+            const int z0 = std::max(int(std::floor(local.lo.z / s.cell + hz)), 0), z1 = std::min(int(std::floor(local.hi.z / s.cell + hz)), int(s.rows) - 2);
+            for (int z = z0; z <= z1; ++z) {
+                for (int x = x0; x <= x1; ++x) {
+                    const float h00 = s.heights[size_t(z) * s.columns + x], h10 = s.heights[size_t(z) * s.columns + x + 1];
+                    const float h01 = s.heights[size_t(z + 1) * s.columns + x], h11 = s.heights[size_t(z + 1) * s.columns + x + 1];
+                    if (std::max({ h00, h10, h01, h11 }) < local.lo.y || std::min({ h00, h10, h01, h11 }) > local.hi.y) continue;
+                    const float lx0 = (float(x) - hx) * s.cell, lx1 = lx0 + s.cell, lz0 = (float(z) - hz) * s.cell, lz1 = lz0 + s.cell;
+                    auto world = [&](float lx, float ly, float lz) { return s.position + s.rotation * glm::vec3(lx, ly, lz); };
+                    const glm::vec3 p00 = world(lx0, h00, lz0), p10 = world(lx1, h10, lz0), p01 = world(lx0, h01, lz1), p11 = world(lx1, h11, lz1);
+                    const uint32_t cellIndex = uint32_t(z) * (s.columns - 1) + uint32_t(x);
+                    Convex tri;
+                    tri.kind = Convex::Kind::Triangle;
+                    tri.a = p00; tri.b = p01; tri.c = p10;   // counter-clockwise seen from +Y
+                    if (BoundsOf(tri).Overlaps(box)) f(tri, cellIndex * 2);
+                    tri.a = p10; tri.b = p01; tri.c = p11;
+                    if (BoundsOf(tri).Overlaps(box)) f(tri, cellIndex * 2 + 1);
+                }
+            }
         }
 
         // Volume and inertia (about the shape centre, shape frame) for mass distribution.
@@ -423,7 +506,7 @@ namespace Phisiks::Physics {
                 for (uint32_t sb = 0; sb < B.shapes.size(); ++sb) {
                     const Shape& shapeB = B.shapes[sb];
                     if (shapeB.trigger || !shapeA.box.Expanded(margin).Overlaps(shapeB.box)) continue;
-                    if (shapeA.type == ShapeType::TriangleMesh && shapeB.type == ShapeType::TriangleMesh) continue;
+                    if (IsMesh(shapeA) && IsMesh(shapeB)) continue;
                     auto collide = [&](const Convex& ca, const Convex& cb, uint32_t triangle) {
                         ContactSet set;
                         if (!Native::GenerateContacts(ca, cb, margin, set) || set.count == 0) return;
@@ -435,17 +518,15 @@ namespace Phisiks::Physics {
                         UpdateManifold(m, A, B, set, margin);
                         m.touched = m.count > 0;
                     };
-                    if (shapeA.type == ShapeType::TriangleMesh || shapeB.type == ShapeType::TriangleMesh) {
-                        const bool meshIsA = shapeA.type == ShapeType::TriangleMesh;
+                    if (IsMesh(shapeA) || IsMesh(shapeB)) {
+                        const bool meshIsA = IsMesh(shapeA);
                         const Shape& mesh = meshIsA ? shapeA : shapeB;
                         const Convex other = ConvexOf(meshIsA ? shapeB : shapeA);
                         const Aabb otherBox = (meshIsA ? shapeB : shapeA).box.Expanded(margin);
-                        for (size_t t = 0; t < mesh.indices.size() / 3; ++t) {
-                            const Convex tri = TriangleOf(mesh, t);
-                            if (!BoundsOf(tri).Overlaps(otherBox)) continue;
-                            if (meshIsA) collide(tri, other, uint32_t(t));
-                            else collide(other, tri, uint32_t(t));
-                        }
+                        ForTriangles(mesh, otherBox, [&](const Convex& tri, uint32_t t) {
+                            if (meshIsA) collide(tri, other, t);
+                            else collide(other, tri, t);
+                        });
                     }
                     else collide(ConvexOf(shapeA), ConvexOf(shapeB), 0xFFFFFFFFu);
                 }
@@ -456,6 +537,10 @@ namespace Phisiks::Physics {
             if (!a.alive || !b.alive) return false;
             const bool movableA = a.type == BodyType::Dynamic, movableB = b.type == BodyType::Dynamic;
             if (!movableA && !movableB) return false;
+            if (!g.jointPairs.empty()) {
+                const uint32_t ia = uint32_t(&a - g.bodies.data()), ib = uint32_t(&b - g.bodies.data());
+                if (g.jointPairs.count({ std::min(ia, ib), std::max(ia, ib) })) return false;
+            }
             if (!a.Awake() && !b.Awake()) {
                 // a sleeping body only wakes when something moving touches it
                 const bool kinematicMoving = (a.type == BodyType::Kinematic && (a.hasTarget || glm::length(a.v) > 0.0f)) ||
@@ -522,6 +607,250 @@ namespace Phisiks::Physics {
             return glm::normalize(glm::cross(n, axis));
         }
 
+        // ------------------------------------------------------------------ joints
+        // Velocity rows are solved with the contacts (no bias: no energy is added); positional
+        // drift is removed with pseudo velocities like the contacts' split impulse. The spring is
+        // an implicit soft constraint (exact implicit-Euler spring + damper).
+        glm::mat3 Skew(const glm::vec3& v) { return glm::mat3(0.0f, v.z, -v.y, -v.z, 0.0f, v.x, v.y, -v.x, 0.0f); }   // Skew(a) * b = cross(a, b)
+
+        void ApplyAngular(Body& a, Body& b, const glm::vec3& impulse) {
+            if (a.Awake()) a.w -= a.invInertia * impulse;
+            if (b.Awake()) b.w += b.invInertia * impulse;
+        }
+        void ApplyAngularPseudo(Body& a, Body& b, const glm::vec3& impulse) {
+            if (a.Awake()) a.pw -= a.invInertia * impulse;
+            if (b.Awake()) b.pw += b.invInertia * impulse;
+        }
+        float AngularMass(const Body& a, const Body& b, const glm::vec3& axis) {
+            const float k = glm::dot(axis, a.InvInertia() * axis) + glm::dot(axis, b.InvInertia() * axis);
+            return k > 1e-12f ? 1.0f / k : 0.0f;
+        }
+        glm::mat3 PointMass(const Body& a, const Body& b, const glm::vec3& rA, const glm::vec3& rB) {
+            const glm::mat3 sa = Skew(rA), sb = Skew(rB);
+            const glm::mat3 k = glm::mat3(a.InvMass() + b.InvMass()) - sa * a.InvInertia() * sa - sb * b.InvInertia() * sb;
+            return std::fabs(glm::determinant(k)) > 1e-18f ? glm::inverse(k) : glm::mat3(0.0f);
+        }
+        glm::vec3 AnchorVelocity(const Body& a, const Body& b, const glm::vec3& rA, const glm::vec3& rB) { return RelativeVelocity(a, b, rA, rB); }
+
+        float HingeAngle(const Joint& j, const Body& A, const Body& B) {
+            const glm::vec3 axis = A.rotation * j.axisA;
+            const glm::vec3 ra = A.rotation * j.refA, rb = B.rotation * j.refB;
+            return std::atan2(glm::dot(glm::cross(ra, rb), axis), glm::dot(ra, rb));
+        }
+
+        void PrepareJoints(float h) {
+            for (Joint& j : g.joints) {
+                if (!j.alive) continue;
+                Body& A = BodyAt(j.a);
+                Body& B = BodyAt(j.b);
+                if (A.Dynamic() && B.Dynamic() && (A.Awake() || B.Awake())) { Wake(A); Wake(B); }
+                const glm::vec3 pA = A.position + A.rotation * j.localA, pB = B.position + B.rotation * j.localB;
+                j.rA = pA - A.WorldCom();
+                j.rB = pB - B.WorldCom();
+                j.axis = glm::normalize(A.rotation * j.axisA);
+                j.p1 = Perpendicular(j.axis);
+                j.p2 = glm::cross(j.axis, j.p1);
+                const glm::vec3 d = pB - pA;
+                j.pointError = d;
+                j.limitState = 0;
+                switch (j.type) {
+                    case JointType::BallSocket:
+                        break;
+                    case JointType::Hinge: {
+                        const glm::vec3 aB = glm::normalize(B.rotation * j.axisB);
+                        j.angularError = glm::cross(j.axis, aB);
+                        j.position = HingeAngle(j, A, B);
+                        break;
+                    }
+                    case JointType::Prismatic: {
+                        j.rA2 = j.rA + d;
+                        j.perpError1 = glm::dot(j.p1, d);
+                        j.perpError2 = glm::dot(j.p2, d);
+                        j.position = glm::dot(j.axis, d);
+                        glm::quat e = B.rotation * glm::conjugate(A.rotation * j.relative);
+                        if (e.w < 0.0f) e = -e;
+                        j.angularError = 2.0f * glm::vec3(e.x, e.y, e.z);
+                        break;
+                    }
+                    case JointType::SpringDamper: {
+                        j.length = glm::length(d);
+                        j.n = j.length > 1e-6f ? d / j.length : j.axis;
+                        j.position = j.length;
+                        break;
+                    }
+                }
+                if (j.limits && (j.type == JointType::Hinge || j.type == JointType::Prismatic)) {
+                    if (j.position <= j.lower) j.limitState = -1;
+                    else if (j.position >= j.upper) j.limitState = 1;
+                }
+                if (j.limitState == 0) j.jLimit = 0.0f;
+                if (!j.motor) j.jMotor = 0.0f;
+                // warm start
+                const glm::vec3 armA = j.type == JointType::Prismatic ? j.rA2 : j.rA;
+                if (j.type == JointType::BallSocket || j.type == JointType::Hinge) ApplyImpulse(A, B, j.rA, j.rB, j.jPoint);
+                if (j.type == JointType::Prismatic) {
+                    ApplyImpulse(A, B, armA, j.rB, j.p1 * j.jPerp1 + j.p2 * j.jPerp2 + j.axis * (j.jLimit + j.jMotor));
+                    ApplyAngular(A, B, j.jAngular);
+                }
+                if (j.type == JointType::Hinge) ApplyAngular(A, B, j.p1 * j.jPerp1 + j.p2 * j.jPerp2 + j.axis * (j.jLimit + j.jMotor));
+                if (j.type == JointType::SpringDamper) ApplyImpulse(A, B, j.rA, j.rB, j.n * j.jSpring);
+                (void)h;
+            }
+        }
+
+        void SolveJointVelocities(float h) {
+            for (Joint& j : g.joints) {
+                if (!j.alive) continue;
+                Body& A = BodyAt(j.a);
+                Body& B = BodyAt(j.b);
+                if (!A.Awake() && !B.Awake()) continue;
+                switch (j.type) {
+                    case JointType::BallSocket:
+                    case JointType::Hinge: {
+                        if (j.type == JointType::Hinge) {
+                            const glm::vec3 dw = B.w - A.w;
+                            if (j.motor) {
+                                const float m = AngularMass(A, B, j.axis);
+                                const float maxImpulse = j.maxMotorForce * h;
+                                const float l = -m * (glm::dot(dw, j.axis) - j.motorSpeed);
+                                const float total = std::clamp(j.jMotor + l, -maxImpulse, maxImpulse);
+                                ApplyAngular(A, B, j.axis * (total - j.jMotor));
+                                j.jMotor = total;
+                            }
+                            if (j.limitState != 0) {
+                                const float m = AngularMass(A, B, j.axis);
+                                const float l = -m * glm::dot(B.w - A.w, j.axis);
+                                const float total = j.limitState < 0 ? std::max(j.jLimit + l, 0.0f) : std::min(j.jLimit + l, 0.0f);
+                                ApplyAngular(A, B, j.axis * (total - j.jLimit));
+                                j.jLimit = total;
+                            }
+                            for (int k = 0; k < 2; ++k) {
+                                const glm::vec3& u = k == 0 ? j.p1 : j.p2;
+                                float& acc = k == 0 ? j.jPerp1 : j.jPerp2;
+                                const float l = -AngularMass(A, B, u) * glm::dot(B.w - A.w, u);
+                                ApplyAngular(A, B, u * l);
+                                acc += l;
+                            }
+                        }
+                        const glm::vec3 lambda = -(PointMass(A, B, j.rA, j.rB) * AnchorVelocity(A, B, j.rA, j.rB));
+                        ApplyImpulse(A, B, j.rA, j.rB, lambda);
+                        j.jPoint += lambda;
+                        break;
+                    }
+                    case JointType::Prismatic: {
+                        const glm::mat3 ia = A.InvInertia() + B.InvInertia();
+                        if (std::fabs(glm::determinant(ia)) > 1e-18f) {
+                            const glm::vec3 l = -(glm::inverse(ia) * (B.w - A.w));
+                            ApplyAngular(A, B, l);
+                            j.jAngular += l;
+                        }
+                        if (j.motor) {
+                            const float m = EffectiveMass(A, B, j.rA2, j.rB, j.axis);
+                            const float maxImpulse = j.maxMotorForce * h;
+                            const float l = -m * (glm::dot(RelativeVelocity(A, B, j.rA2, j.rB), j.axis) - j.motorSpeed);
+                            const float total = std::clamp(j.jMotor + l, -maxImpulse, maxImpulse);
+                            ApplyImpulse(A, B, j.rA2, j.rB, j.axis * (total - j.jMotor));
+                            j.jMotor = total;
+                        }
+                        if (j.limitState != 0) {
+                            const float m = EffectiveMass(A, B, j.rA2, j.rB, j.axis);
+                            const float l = -m * glm::dot(RelativeVelocity(A, B, j.rA2, j.rB), j.axis);
+                            const float total = j.limitState < 0 ? std::max(j.jLimit + l, 0.0f) : std::min(j.jLimit + l, 0.0f);
+                            ApplyImpulse(A, B, j.rA2, j.rB, j.axis * (total - j.jLimit));
+                            j.jLimit = total;
+                        }
+                        for (int k = 0; k < 2; ++k) {
+                            const glm::vec3& u = k == 0 ? j.p1 : j.p2;
+                            float& acc = k == 0 ? j.jPerp1 : j.jPerp2;
+                            const float l = -EffectiveMass(A, B, j.rA2, j.rB, u) * glm::dot(RelativeVelocity(A, B, j.rA2, j.rB), u);
+                            ApplyImpulse(A, B, j.rA2, j.rB, u * l);
+                            acc += l;
+                        }
+                        break;
+                    }
+                    case JointType::SpringDamper: {
+                        const float k = EffectiveMass(A, B, j.rA, j.rB, j.n);
+                        if (k <= 0.0f) break;
+                        const float invK = 1.0f / k;
+                        const float denominator = h * (h * j.stiffness + j.damping);
+                        if (denominator <= 1e-12f) break;
+                        const float gamma = 1.0f / denominator;
+                        const float bias = j.stiffness / (h * j.stiffness + j.damping) * (j.length - j.rest);
+                        const float cdot = glm::dot(RelativeVelocity(A, B, j.rA, j.rB), j.n);
+                        const float l = -(cdot + bias + gamma * j.jSpring) / (invK + gamma);
+                        ApplyImpulse(A, B, j.rA, j.rB, j.n * l);
+                        j.jSpring += l;
+                        break;
+                    }
+                }
+            }
+        }
+
+        void SolveJointPositions(float h) {
+            for (Joint& j : g.joints) {
+                if (!j.alive || j.type == JointType::SpringDamper) continue;
+                Body& A = BodyAt(j.a);
+                Body& B = BodyAt(j.b);
+                if (!A.Awake() && !B.Awake()) continue;
+                auto pseudoRel = [&](const glm::vec3& rA, const glm::vec3& rB) {
+                    return (B.pv + glm::cross(B.pw, rB)) - (A.pv + glm::cross(A.pw, rA));
+                };
+                const float rate = BAUMGARTE / h;
+                if (j.type == JointType::BallSocket || j.type == JointType::Hinge) {
+                    const glm::vec3 target = -j.pointError * rate;   // pseudo velocity closing the gap
+                    const glm::vec3 lambda = PointMass(A, B, j.rA, j.rB) * (target - pseudoRel(j.rA, j.rB));
+                    ApplyPseudo(A, B, j.rA, j.rB, lambda);
+                }
+                if (j.type == JointType::Hinge) {
+                    for (int k = 0; k < 2; ++k) {
+                        const glm::vec3& u = k == 0 ? j.p1 : j.p2;
+                        const float target = -glm::dot(j.angularError, u) * rate;
+                        const float l = AngularMass(A, B, u) * (target - glm::dot(B.pw - A.pw, u));
+                        ApplyAngularPseudo(A, B, u * l);
+                    }
+                    if (j.limitState != 0) {
+                        const float error = j.limitState < 0 ? j.position - j.lower : j.position - j.upper;
+                        const float target = -error * rate;
+                        const float l = AngularMass(A, B, j.axis) * (target - glm::dot(B.pw - A.pw, j.axis));
+                        if ((j.limitState < 0 && l > 0.0f) || (j.limitState > 0 && l < 0.0f)) ApplyAngularPseudo(A, B, j.axis * l);
+                    }
+                }
+                if (j.type == JointType::Prismatic) {
+                    const glm::mat3 ia = A.InvInertia() + B.InvInertia();
+                    if (std::fabs(glm::determinant(ia)) > 1e-18f) {
+                        const glm::vec3 l = glm::inverse(ia) * (-j.angularError * rate - (B.pw - A.pw));
+                        ApplyAngularPseudo(A, B, l);
+                    }
+                    for (int k = 0; k < 2; ++k) {
+                        const glm::vec3& u = k == 0 ? j.p1 : j.p2;
+                        const float error = k == 0 ? j.perpError1 : j.perpError2;
+                        const float l = EffectiveMass(A, B, j.rA2, j.rB, u) * (-error * rate - glm::dot(pseudoRel(j.rA2, j.rB), u));
+                        ApplyPseudo(A, B, j.rA2, j.rB, u * l);
+                    }
+                    if (j.limitState != 0) {
+                        const float error = j.limitState < 0 ? j.position - j.lower : j.position - j.upper;
+                        const float l = EffectiveMass(A, B, j.rA2, j.rB, j.axis) * (-error * rate - glm::dot(pseudoRel(j.rA2, j.rB), j.axis));
+                        if ((j.limitState < 0 && l > 0.0f) || (j.limitState > 0 && l < 0.0f)) ApplyPseudo(A, B, j.rA2, j.rB, j.axis * l);
+                    }
+                }
+            }
+        }
+
+        void ReleaseJoint(uint32_t index) {
+            Joint& j = g.joints[index];
+            if (!j.alive) return;
+            if (!j.collideConnected && j.a != WORLD && j.b != WORLD) {
+                auto it = g.jointPairs.find({ std::min(j.a, j.b), std::max(j.a, j.b) });
+                if (it != g.jointPairs.end() && --it->second <= 0) g.jointPairs.erase(it);
+            }
+            if (j.a != WORLD) Wake(g.bodies[j.a]);
+            if (j.b != WORLD) Wake(g.bodies[j.b]);
+            const uint32_t generation = ((j.generation + 1) & 0x3FFFFFFFu) ? ((j.generation + 1) & 0x3FFFFFFFu) : 1u;
+            j = Joint{};
+            j.generation = generation;
+            g.freeJoints.push_back(index);
+        }
+
         void Solve(float h) {
             std::vector<Manifold*> list;
             list.reserve(g.manifolds.size());
@@ -556,8 +885,10 @@ namespace Phisiks::Physics {
                     ApplyImpulse(A, B, p.rA, p.rB, m->normal * p.jn + m->t1 * p.jt1 + m->t2 * p.jt2);
                 }
             }
+            PrepareJoints(h);
             // velocity iterations
             for (int it = 0; it < VELOCITY_ITERATIONS; ++it) {
+                SolveJointVelocities(h);
                 for (Manifold* m : list) {
                     Body& A = g.bodies[m->a];
                     Body& B = g.bodies[m->b];
@@ -607,6 +938,7 @@ namespace Phisiks::Physics {
             }
             // split-impulse position correction (pseudo velocities, no energy added)
             for (int it = 0; it < POSITION_ITERATIONS; ++it) {
+                SolveJointPositions(h);
                 for (Manifold* m : list) {
                     Body& A = g.bodies[m->a];
                     Body& B = g.bodies[m->b];
@@ -719,14 +1051,26 @@ namespace Phisiks::Physics {
         }
 
         bool RayShape(const Shape& s, const glm::vec3& o, const glm::vec3& d, float maxDistance, float& t, glm::vec3& n) {
-            if (s.type == ShapeType::TriangleMesh) {
+            if (IsMesh(s)) {
                 bool any = false;
                 float best = maxDistance;
-                for (size_t i = 0; i < s.indices.size() / 3; ++i) {
-                    const Convex tri = TriangleOf(s, i);
+                Aabb ray; ray.Add(o); ray.Add(o + d * maxDistance);
+                const auto test = [&](const Convex& tri, uint32_t) {
                     float ti; glm::vec3 ni;
                     if (Native::RaycastTriangle(o, d, tri.a, tri.b, tri.c, best, ti, ni)) { best = ti; t = ti; n = ni; any = true; }
+                };
+                if (s.type == ShapeType::HeightField && maxDistance > 4.0f * s.cell) {
+                    // long rays: walk the ray in cell-sized pieces (nearest hit first)
+                    const float stepLength = 2.0f * s.cell;
+                    for (float start = 0.0f; start < maxDistance && !any; start += stepLength) {
+                        Aabb piece; piece.Add(o + d * start); piece.Add(o + d * std::min(start + stepLength, maxDistance));
+                        piece = piece.Expanded(1e-3f);
+                        if (!piece.Overlaps(s.box)) continue;
+                        ForTriangles(s, piece, test);
+                    }
+                    return any;
                 }
+                ForTriangles(s, ray.Expanded(1e-3f), test);
                 return any;
             }
             return Native::RaycastConvex(ConvexOf(s), o, d, maxDistance, t, n);
@@ -801,12 +1145,7 @@ namespace Phisiks::Physics {
                             if (glm::length(fn) > 1e-12f) { fn = glm::normalize(fn); best.surface = glm::dot(fn, n) >= 0.0f ? fn : -fn; }
                         }
                     };
-                    if (s.type == ShapeType::TriangleMesh) {
-                        for (size_t k = 0; k < s.indices.size() / 3; ++k) {
-                            const Convex tri = TriangleOf(s, k);
-                            if (BoundsOf(tri).Overlaps(swept)) test(tri);
-                        }
-                    }
+                    if (IsMesh(s)) ForTriangles(s, swept, [&](const Convex& tri, uint32_t) { test(tri); });
                     else test(ConvexOf(s));
                 }
             }
@@ -827,13 +1166,10 @@ namespace Phisiks::Physics {
                 const Native::GjkResult r = Native::Gjk(c, target);
                 return r.overlap || r.distance <= c.radius + target.radius;
             };
-            if (s.type == ShapeType::TriangleMesh) {
-                const Aabb box = ConvexBounds(c);
-                for (size_t k = 0; k < s.indices.size() / 3; ++k) {
-                    const Convex tri = TriangleOf(s, k);
-                    if (BoundsOf(tri).Overlaps(box) && overlap(tri)) return true;
-                }
-                return false;
+            if (IsMesh(s)) {
+                bool any = false;
+                ForTriangles(s, ConvexBounds(c), [&](const Convex& tri, uint32_t) { if (!any && overlap(tri)) any = true; });
+                return any;
             }
             return overlap(ConvexOf(s));
         }
@@ -879,7 +1215,7 @@ namespace Phisiks::Physics {
                         if (!o.alive || (t.type == BodyType::Static && o.type == BodyType::Static) || !LayerPairCollides(t, o) || !ts.box.Overlaps(o.box)) continue;
                         for (const Shape& os : o.shapes) {
                             if (os.trigger || !ts.box.Overlaps(os.box)) continue;
-                            if (ts.type == ShapeType::TriangleMesh) continue;
+                            if (IsMesh(ts)) continue;
                             if (ShapesOverlap(tc, os)) { now.insert({ i, j }); break; }
                         }
                     }
@@ -959,6 +1295,9 @@ namespace Phisiks::Physics {
         }
 
         void ReleaseBody(uint32_t index) {
+            for (uint32_t k = 0; k < g.joints.size(); ++k) {
+                if (g.joints[k].alive && (g.joints[k].a == index || g.joints[k].b == index)) ReleaseJoint(k);
+            }
             ForgetBody(index);
             Body& b = g.bodies[index];
             const uint32_t generation = ((b.generation + 1) & 0x3FFFFFFFu) ? ((b.generation + 1) & 0x3FFFFFFFu) : 1u;
@@ -994,6 +1333,19 @@ namespace Phisiks::Physics {
                 for (const glm::vec3& p : s.vertices) box.Add(p);
                 s.localLo = box.lo; s.localHi = box.hi;
             }
+            if (c.shape == ShapeType::HeightField) {
+                if (type == BodyType::Dynamic) { Log::Error() << "Physics: height-field colliders are only valid on static/kinematic bodies"; return std::nullopt; }
+                if (c.heightfieldColumns < 2 || c.heightfieldRows < 2 || c.heights.size() != size_t(c.heightfieldColumns) * c.heightfieldRows || c.heightfieldCellSize <= 0.0f) {
+                    Log::Error() << "Physics: invalid height field"; return std::nullopt;
+                }
+                s.heights = c.heights;
+                s.columns = c.heightfieldColumns;
+                s.rows = c.heightfieldRows;
+                s.cell = c.heightfieldCellSize;
+                const auto [lo, hi] = std::minmax_element(s.heights.begin(), s.heights.end());
+                s.localLo = glm::vec3(-0.5f * float(s.columns - 1) * s.cell, *lo, -0.5f * float(s.rows - 1) * s.cell);
+                s.localHi = glm::vec3(0.5f * float(s.columns - 1) * s.cell, *hi, 0.5f * float(s.rows - 1) * s.cell);
+            }
             return s;
         }
 
@@ -1022,12 +1374,7 @@ namespace Phisiks::Physics {
                             Native::Distance(CapsuleConvex(center, c.radius, 0.5f * c.height), target, sep, n, pa, pb);
                             if (sep < -1e-4f) { center += n * sep; moved = true; }
                         };
-                        if (s.type == ShapeType::TriangleMesh) {
-                            for (size_t k = 0; k < s.indices.size() / 3; ++k) {
-                                const Convex tri = TriangleOf(s, k);
-                                if (BoundsOf(tri).Overlaps(box)) push(tri);
-                            }
-                        }
+                        if (IsMesh(s)) ForTriangles(s, box, [&](const Convex& tri, uint32_t) { push(tri); });
                         else push(ConvexOf(s));
                     }
                 }
@@ -1380,6 +1727,106 @@ namespace Phisiks::Physics {
         outMax = proxy.box.hi;
     }
 
+    // ====================================================================== joints
+    JointId CreateJoint(const JointDesc& desc) {
+        if (!g.initialized) return {};
+        Body* a = desc.bodyA.Valid() ? Resolve(desc.bodyA) : nullptr;
+        Body* b = desc.bodyB.Valid() ? Resolve(desc.bodyB) : nullptr;
+        if ((desc.bodyA.Valid() && !a) || (desc.bodyB.Valid() && !b) || (!a && !b) || a == b) {
+            Log::Error() << "Physics: CreateJoint needs one or two distinct valid bodies";
+            return {};
+        }
+        if (glm::length(desc.axis) < 1e-6f && (desc.type == JointType::Hinge || desc.type == JointType::Prismatic)) {
+            Log::Error() << "Physics: CreateJoint: zero axis";
+            return {};
+        }
+        uint32_t index;
+        if (!g.freeJoints.empty()) { index = g.freeJoints.back(); g.freeJoints.pop_back(); }
+        else { index = uint32_t(g.joints.size()); g.joints.emplace_back(); }
+        Joint& j = g.joints[index];
+        const uint32_t generation = j.generation;
+        j = Joint{};
+        j.generation = generation;
+        j.alive = true;
+        j.type = desc.type;
+        j.a = a ? uint32_t(a - g.bodies.data()) : WORLD;
+        j.b = b ? uint32_t(b - g.bodies.data()) : WORLD;
+        Body& A = BodyAt(j.a);
+        Body& B = BodyAt(j.b);
+        const glm::quat ia = glm::conjugate(A.rotation), ib = glm::conjugate(B.rotation);
+        const glm::vec3 anchorB = desc.type == JointType::SpringDamper ? desc.anchorB : desc.anchor;
+        j.localA = ia * (desc.anchor - A.position);
+        j.localB = ib * (anchorB - B.position);
+        const glm::vec3 axis = glm::length(desc.axis) > 1e-6f ? glm::normalize(desc.axis) : glm::vec3(0, 1, 0);
+        j.axisA = ia * axis;
+        j.axisB = ib * axis;
+        const glm::vec3 ref = Perpendicular(axis);
+        j.refA = ia * ref;
+        j.refB = ib * ref;
+        j.relative = glm::normalize(ia * B.rotation);
+        j.limits = desc.enableLimits;
+        j.lower = std::min(desc.lowerLimit, desc.upperLimit);
+        j.upper = std::max(desc.lowerLimit, desc.upperLimit);
+        j.motor = desc.enableMotor;
+        j.motorSpeed = desc.motorSpeed;
+        j.maxMotorForce = std::max(desc.maxMotorForce, 0.0f);
+        j.stiffness = std::max(desc.stiffness, 0.0f);
+        j.damping = std::max(desc.damping, 0.0f);
+        j.rest = desc.restLength >= 0.0f ? desc.restLength : glm::length(anchorB - desc.anchor);
+        j.collideConnected = desc.collideConnected;
+        if (!j.collideConnected && j.a != WORLD && j.b != WORLD) ++g.jointPairs[{ std::min(j.a, j.b), std::max(j.a, j.b) }];
+        Wake(A);
+        Wake(B);
+        return JointId{ MakeId(TAG_JOINT, j.generation, index) };
+    }
+
+    void DestroyJoint(JointId id) {
+        if (Joint* j = Resolve(id)) ReleaseJoint(uint32_t(j - g.joints.data()));
+    }
+
+    bool IsValid(JointId id) { return Resolve(id) != nullptr; }
+
+    JointState GetJointState(JointId id) {
+        JointState s;
+        Joint* j = Resolve(id);
+        if (!j) return s;
+        const Body& A = BodyAt(j->a);
+        const Body& B = BodyAt(j->b);
+        s.anchorA = A.position + A.rotation * j->localA;
+        s.anchorB = B.position + B.rotation * j->localB;
+        const glm::vec3 axis = glm::normalize(A.rotation * j->axisA);
+        const glm::vec3 rA = s.anchorA - A.WorldCom(), rB = s.anchorB - B.WorldCom();
+        const glm::vec3 d = s.anchorB - s.anchorA;
+        switch (j->type) {
+            case JointType::Hinge:
+                s.position = HingeAngle(*j, A, B);
+                s.speed = glm::dot(B.w - A.w, axis);
+                break;
+            case JointType::Prismatic:
+                s.position = glm::dot(axis, d);
+                s.speed = glm::dot(RelativeVelocity(A, B, rA + d, rB), axis);
+                break;
+            case JointType::SpringDamper: {
+                s.position = glm::length(d);
+                const glm::vec3 n = s.position > 1e-6f ? d / s.position : axis;
+                s.speed = glm::dot(RelativeVelocity(A, B, rA, rB), n);
+                break;
+            }
+            case JointType::BallSocket: break;
+        }
+        return s;
+    }
+
+    void SetJointMotor(JointId id, bool enable, float speed, float maxForce) {
+        Joint* j = Resolve(id);
+        if (!j) return;
+        j->motor = enable;
+        j->motorSpeed = speed;
+        j->maxMotorForce = std::max(maxForce, 0.0f);
+        if (j->a != WORLD) Wake(g.bodies[j->a]);
+        if (j->b != WORLD) Wake(g.bodies[j->b]);
+    }
+
     Stats GetStats() {
         Stats stats;
         for (const Body& b : g.bodies) {
@@ -1394,6 +1841,7 @@ namespace Phisiks::Physics {
             }
         }
         for (const Character& c : g.characters) if (c.alive) ++stats.characters;
+        for (const Joint& j : g.joints) if (j.alive) ++stats.joints;
         stats.stepsSimulated = g.steps;
         return stats;
     }

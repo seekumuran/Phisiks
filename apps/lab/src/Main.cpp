@@ -7,6 +7,7 @@
 //   --gl41       force the OpenGL 4.1 feature tier (the macOS path: CPU culling + CPU compute)
 //   --quality    scalability preset (Low = 720p internal -> FSR 1 upscale, for i3 / UHD laptops)
 //   --no-studio  hide the Dear ImGui studio panels (on by default whenever a window exists)
+//   --hot-reload [dir]  watch GLSL sources (default engine/shaders) and rebuild changed programs live
 // Run from the repository root (asset paths are relative to it).
 
 #include "Phisiks/Framework/GameContext.h"
@@ -15,6 +16,7 @@
 
 #include "AutoTest.h"
 #include "LessonScenes.h"
+#include "P9Scenes.h"
 #include "SandboxScenes.h"
 #include "Studio.h"
 
@@ -31,10 +33,12 @@ namespace {
         void RegisterScenes(Phisiks::SceneManager& scenes) override {
             Lab::RegisterScenes(scenes);
             Lab::RegisterLessonScenes(scenes);
+            Lab::RegisterP9Scenes(scenes);
         }
         void OnStart(Phisiks::GameContext&) override {
             Lab::RegisterMaterials();
             Lab::RegisterLessonMaterials();
+            Lab::RegisterP9Materials();
             if (quality >= 0) Phisiks::Render::ApplyQualityPreset(Phisiks::Render::QualityPreset(quality));
         }
         void OnUpdate(Phisiks::GameContext& ctx, float) override {
@@ -87,6 +91,7 @@ int main(int argc, char** argv) {
         else if (arg == "--export-every" && hasValue) options.exportEvery = std::atoi(argv[++i]);
         else if (arg == "--gl41") options.maxGLVersion = 41;
         else if (arg == "--no-studio") studio = false;
+        else if (arg == "--hot-reload") options.shaderHotReloadDirectory = (hasValue && argv[i + 1][0] != '-') ? argv[++i] : "engine/shaders";
         else if (arg == "--quality" && hasValue) {
             const std::string q = argv[++i];
             quality = q == "low" ? 0 : q == "medium" ? 1 : q == "high" ? 2 : -1;

@@ -4,7 +4,7 @@
 // after the scene was presented (the UI is not part of captured frames). Include <imgui.h> /
 // <ImGuizmo.h> in game code to build windows inside OnGui.
 namespace Phisiks::UI {
-    bool Init();               // needs the window and renderer; applies the dark studio theme
+    bool Init();               // needs the window and renderer; applies the retro deck theme (RetroDeck.h)
     void Shutdown();
     bool IsActive();
     void BeginFrame();
@@ -12,4 +12,8 @@ namespace Phisiks::UI {
     bool WantsMouse();         // the cursor is over / dragging a UI element (games should ignore the mouse)
     bool WantsKeyboard();
     int LastDrawVertexCount(); // vertices of the last rendered UI frame (tests)
+    // Studio panels shown (the game decides what it draws; the engine HUD hides its telemetry text
+    // while they are, so nothing overlaps behind the panels).
+    void SetPanelsVisible(bool visible);
+    bool PanelsVisible();      // IsActive() and not hidden
 }

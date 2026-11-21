@@ -15,6 +15,11 @@
 #include "Phisiks/Assets/Assets.h"
 #include "Phisiks/Audio/Audio.h"
 #include "Phisiks/UI/ImGuiLayer.h"
+#include "Phisiks/AI/Navigation.h"
+#include "Phisiks/Animation/Animation.h"
+#include "Phisiks/Script/Script.h"
+#include "Phisiks/VFX/VFX.h"
+#include "Phisiks/World/Terrain.h"
 
 namespace Phisiks {
     namespace {
@@ -55,6 +60,7 @@ namespace Phisiks {
             }
             m_rendererReady = true;
             if (options.enableUI && !UI::Init()) Log::Warning() << "UI unavailable; continuing without the studio panels";
+            if (!options.shaderHotReloadDirectory.empty()) Render::EnableShaderHotReload(options.shaderHotReloadDirectory);
         }
         if (!Physics::Init()) {
             Log::Error() << "Physics initialization failed; aborting";
@@ -217,13 +223,16 @@ namespace Phisiks {
                 GlobalEvents().Enqueue(SceneLoadedEvent{ m_scenes.CurrentName() });
             }
             scene = m_scenes.Current();
+            if (scene) World::UpdateScene(*scene);       // terrain meshes / colliders / foliage for new components
 
             // 3. Variable-rate gameplay
             if (running) {
                 m_game->OnUpdate(m_ctx, dt);
                 Gameplay::UpdatePlayerActions(m_ctx);
                 if (scene) scene->Update(m_ctx, dt);
+                if (scene) Scripting::Update(*scene, m_ctx, dt);   // Lua on_start / on_update
             }
+            if (scene) Animation::UpdateScene(*scene, running ? dt : 0.0f);   // clips + dual-quaternion skinning
             m_ctx.player.CaptureInput(m_ctx.input, running && m_ctx.camera.GetMode() != CameraMode::FreeFly && m_ctx.camera.GetMode() != CameraMode::Orbit);
         }
 
@@ -240,6 +249,8 @@ namespace Phisiks {
                 m_game->OnFixedUpdate(m_ctx, fixedDt);
                 if (scene) {
                     scene->FixedUpdate(m_ctx, fixedDt);
+                    Scripting::FixedUpdate(*scene, m_ctx, fixedDt);
+                    AI::UpdateScene(*scene, fixedDt);    // navigation grid + crowd steering
                     scene->SyncPhysicsBodies();          // also pushes kinematic targets for this step
                 }
                 m_ctx.player.FixedUpdate(m_ctx.camera.GetYaw(), fixedDt);
@@ -253,6 +264,7 @@ namespace Phisiks {
                 }
             }
             if (scene) scene->PullPhysicsPoses();         // dynamic bodies -> transforms
+            if (scene && steps > 0) Scripting::DispatchPhysicsEvents(*scene, m_ctx);   // on_collision / on_trigger
             m_ctx.stats.fixedStepsThisFrame = steps;
             m_ctx.stats.totalFixedSteps += steps;
             m_ctx.stats.simulationTime += steps * double(fixedDt);
@@ -263,6 +275,7 @@ namespace Phisiks {
             // 6. Post-physics: camera, player body, presentation (renderers/lights/camera/audio)
             m_ctx.camera.Update(m_ctx.input, &m_ctx.player, dt, running);
             if (scene) m_ctx.camera.ApplyToScene(*scene);
+            if (scene) Animation::UpdateCameraPaths(*scene, running ? dt : 0.0f);   // spline camera sequencer overrides the controller
             Gameplay::UpdatePlayerBody(m_ctx);
             if (m_harness) m_harness->AfterSimulation(m_ctx);
             if (scene) {
@@ -274,6 +287,7 @@ namespace Phisiks {
         {
             PHISIKS_PROFILE_SCOPE("Render");
             // 7. Debug drawing + overlay, then render (GPU-timed without stalling)
+            if (scene && m_rendererReady) VFX::UpdateScene(*scene, running ? dt : 0.0f);   // trails / beams / orbits / decals
             if (m_ctx.physicsDebugDraw) DebugOverlay::DrawPhysicsDebug(m_ctx);
             DebugOverlay::Draw(m_ctx);
             if (scene) scene->DrawUI(m_ctx);
@@ -326,6 +340,7 @@ namespace Phisiks {
             m_harness->AfterUnload(m_ctx);
             m_harness->WriteReport();
         }
+        Scripting::Shutdown();
         Presentation::Uninstall();
         Audio::Shutdown();
         Assets::Shutdown();

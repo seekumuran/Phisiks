@@ -5,9 +5,13 @@
 #include <vector>
 
 namespace Phisiks::Render::Shaders {
-    // Embedded engine/shaders/*.glsl by file name (nullptr if unknown).
+    // Embedded engine/shaders/*.glsl by file name (nullptr if unknown). A hot-reload override
+    // (SetOverride) takes precedence over the embedded copy.
     const std::string* Find(const std::string& fileName);
     std::vector<std::string> FileNames();
+    void SetOverride(const std::string& fileName, const std::string& source);
+    void ClearOverrides();
+    size_t OverrideCount();
 
     enum class Stage { Vertex, Fragment, Compute };
     struct StageDef { Stage stage; const char* file; };
@@ -22,6 +26,7 @@ namespace Phisiks::Render::Shaders {
         FORWARD, SHADOW, SHADOW_POINT, SKY, TONEMAP, LINES, TEXT,
         SPRITES, SOFTBODY, SOFTBODY_SHADOW, SDF, ARROWS,
         EASU, RCAS, GBUFFER, GBUFFER_SOFT,
+        RIBBON, DECAL, SSAO, SSAO_BLUR, SSAO_APPLY, BLOOM_PREFILTER, BLOOM_DOWN, BLOOM_UP,
         // compute
         CULL, HIZ_INIT, HIZ_DOWNSAMPLE,
         HASH_COUNT, HASH_SCATTER, HASH_QUERY, SCAN_LOCAL, SCAN_BLOCKS, SCAN_ADD,

@@ -25,10 +25,20 @@ void main() {
     if (!gl_FrontFacing) N = -N;
 
     float glow;
-    vec4 surface = SamplePattern(m, v_patternPos, normalize(v_objectNormal), inst.uvScale.xy, glow);
-    vec3 albedo = surface.rgb * SampleAlbedoTexture(m, v_patternPos, normalize(v_objectNormal), inst.uvScale.xy);
-    float patternRoughness = m.params.z >= 0.0 ? m.params.z : m.baseRoughness.a;
-    float roughness = clamp(mix(m.baseRoughness.a, patternRoughness, surface.a), 0.04, 1.0);
+    vec3 albedo;
+    float roughness;
+    if (uint(m.emissivePattern.w + 0.5) == 7u) {   // terrain splat layers
+        glow = 0.0;
+        vec4 splat = SampleSplat(m, v_uv, v_worldPos);
+        albedo = splat.rgb;
+        roughness = clamp(splat.a, 0.04, 1.0);
+    }
+    else {
+        vec4 surface = SamplePattern(m, v_patternPos, normalize(v_objectNormal), inst.uvScale.xy, glow);
+        albedo = surface.rgb * SampleAlbedoTexture(m, v_patternPos, normalize(v_objectNormal), inst.uvScale.xy, v_uv);
+        float patternRoughness = m.params.z >= 0.0 ? m.params.z : m.baseRoughness.a;
+        roughness = clamp(mix(m.baseRoughness.a, patternRoughness, surface.a), 0.04, 1.0);
+    }
     float metallic = m.patternMetallic.a;
 
     vec3 V = normalize(u_cameraPosition.xyz - v_worldPos);

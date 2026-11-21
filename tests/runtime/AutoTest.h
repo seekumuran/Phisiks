@@ -67,6 +67,10 @@ namespace Phisiks {
             int characterControllers = 0;
         } m_baseline;
         float m_scratch[8]{};
+        bool m_backbufferRequested = false, m_backbufferReady = false;
+        Render::FrameCapture m_backbuffer;   // presented frame incl. the studio UI
+        Render::RenderSettings m_savedSettings;
+        std::string m_shaderOriginal;
         uint32_t m_scratchId = 0;
         double m_wallMark = 0.0;       // real-time marker (seconds)
     };

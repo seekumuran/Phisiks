@@ -19,6 +19,7 @@ namespace Phisiks::SceneInternal {
     };
 
     struct PhysicsRuntime { Physics::BodyId body; };
+    struct JointRuntime { Physics::JointId joint; };
 
     struct MeshRuntime {
         uint64_t object = 0;
@@ -59,6 +60,10 @@ namespace Phisiks::SceneInternal {
     public:
         virtual ~IAudioBackend() = default;
         virtual uint64_t Play(const std::string& clip, float volume, bool loop) = 0;   // 0 = failed
+        virtual uint64_t PlaySpatial(const std::string& clip, float volume, bool loop, const glm::vec3& /*position*/,
+                                     float /*minDistance*/, float /*maxDistance*/, float /*dopplerFactor*/) { return Play(clip, volume, loop); }
+        virtual void SetVoicePosition(uint64_t /*voice*/, const glm::vec3& /*position*/, const glm::vec3& /*velocity*/) {}
+        virtual void SetListener(const glm::vec3& /*position*/, const glm::vec3& /*forward*/, const glm::vec3& /*up*/, const glm::vec3& /*velocity*/) {}
         virtual void Stop(uint64_t voice) = 0;
         virtual bool IsPlaying(uint64_t voice) = 0;
     };

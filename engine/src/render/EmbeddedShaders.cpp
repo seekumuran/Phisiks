@@ -9,6 +9,11 @@ namespace Phisiks::Render::Shaders {
 #include "phisiks/EmbeddedShaders.inc"
         };
 
+        std::unordered_map<std::string, std::string>& Overrides() {
+            static std::unordered_map<std::string, std::string> overrides;
+            return overrides;
+        }
+
         const std::unordered_map<std::string, std::string>& Table() {
             static const std::unordered_map<std::string, std::string> table = [] {
                 std::unordered_map<std::string, std::string> t;
@@ -20,9 +25,15 @@ namespace Phisiks::Render::Shaders {
     }
 
     const std::string* Find(const std::string& fileName) {
+        auto o = Overrides().find(fileName);
+        if (o != Overrides().end()) return &o->second;
         auto it = Table().find(fileName);
         return it == Table().end() ? nullptr : &it->second;
     }
+
+    void SetOverride(const std::string& fileName, const std::string& source) { Overrides()[fileName] = source; }
+    void ClearOverrides() { Overrides().clear(); }
+    size_t OverrideCount() { return Overrides().size(); }
 
     std::vector<std::string> FileNames() {
         std::vector<std::string> names;
@@ -52,6 +63,14 @@ namespace Phisiks::Render::Shaders {
             { "rcas",            { { S::Vertex, "fullscreen.vert.glsl" }, { S::Fragment, "rcas.frag.glsl" } }, {} },
             { "gbuffer",         { { S::Vertex, "mesh.vert.glsl" }, { S::Fragment, "gbuffer.frag.glsl" } }, {} },
             { "gbuffer_soft",    { { S::Vertex, "softbody.vert.glsl" }, { S::Fragment, "gbuffer.frag.glsl" } }, { "SOFT_SURFACE" } },
+            { "ribbon",          { { S::Vertex, "ribbon.vert.glsl" }, { S::Fragment, "ribbon.frag.glsl" } }, {} },
+            { "decal",           { { S::Vertex, "decal.vert.glsl" }, { S::Fragment, "decal.frag.glsl" } }, {} },
+            { "ssao",            { { S::Vertex, "fullscreen.vert.glsl" }, { S::Fragment, "ssao.frag.glsl" } }, { "SSAO_PASS" } },
+            { "ssao_blur",       { { S::Vertex, "fullscreen.vert.glsl" }, { S::Fragment, "ssao.frag.glsl" } }, { "SSAO_BLUR" } },
+            { "ssao_apply",      { { S::Vertex, "fullscreen.vert.glsl" }, { S::Fragment, "ssao.frag.glsl" } }, { "SSAO_APPLY" } },
+            { "bloom_prefilter", { { S::Vertex, "fullscreen.vert.glsl" }, { S::Fragment, "bloom.frag.glsl" } }, { "BLOOM_PREFILTER" } },
+            { "bloom_down",      { { S::Vertex, "fullscreen.vert.glsl" }, { S::Fragment, "bloom.frag.glsl" } }, { "BLOOM_DOWN" } },
+            { "bloom_up",        { { S::Vertex, "fullscreen.vert.glsl" }, { S::Fragment, "bloom.frag.glsl" } }, { "BLOOM_UP" } },
             compute("cull", "cull.comp.glsl"),
             compute("hiz_init", "hiz.comp.glsl", { "HIZ_INIT" }),
             compute("hiz_downsample", "hiz.comp.glsl", { "HIZ_DOWNSAMPLE" }),

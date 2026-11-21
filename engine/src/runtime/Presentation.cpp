@@ -35,6 +35,13 @@ namespace Phisiks::Presentation {
         class AudioBackend final : public IAudioBackend {
         public:
             uint64_t Play(const std::string& clip, float volume, bool loop) override { return Audio::Play(clip, volume, loop); }
+            uint64_t PlaySpatial(const std::string& clip, float volume, bool loop, const glm::vec3& position, float minDistance, float maxDistance, float doppler) override {
+                return Audio::PlaySpatial(clip, position, volume, loop, minDistance, maxDistance, doppler);
+            }
+            void SetVoicePosition(uint64_t voice, const glm::vec3& position, const glm::vec3& velocity) override { Audio::SetVoicePosition(voice, position, velocity); }
+            void SetListener(const glm::vec3& position, const glm::vec3& forward, const glm::vec3& up, const glm::vec3& velocity) override {
+                Audio::SetListener(position, forward, up, velocity);
+            }
             void Stop(uint64_t voice) override { Audio::Stop(voice); }
             bool IsPlaying(uint64_t voice) override { return Audio::IsPlaying(voice); }
         };

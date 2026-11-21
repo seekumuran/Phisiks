@@ -46,6 +46,7 @@ namespace Phisiks {
         int maxGLVersion = 46;         // 41 = force the OpenGL 4.1 feature tier (macOS path) on any GPU
         bool recordReplay = false;     // GameContext::replay records every fixed step
         size_t replayCapacity = 1800;
+        std::string shaderHotReloadDirectory;   // non-empty: watch these GLSL files (Render::EnableShaderHotReload)
     };
 
     class Application {

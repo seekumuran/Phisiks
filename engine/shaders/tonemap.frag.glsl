@@ -1,8 +1,11 @@
 #version 460 core
-// HDR -> display: exposure, filmic curve (rational fit of the ACES reference curve), sRGB encode.
+// HDR -> display: exposure, + bloom (already exposure-scaled), filmic curve (rational fit of the
+// ACES reference curve), sRGB encode.
 #include "common.glsl"
 
 layout(binding = 0) uniform sampler2D u_hdr;
+layout(binding = 1) uniform sampler2D u_bloom;
+uniform float u_bloomIntensity;
 in vec2 v_uv;
 layout(location = 0) out vec4 o_color;
 
@@ -16,5 +19,6 @@ vec3 LinearToSrgb(vec3 c) {
 
 void main() {
     vec3 hdr = texture(u_hdr, v_uv).rgb * u_skyHorizon.w;
+    if (u_bloomIntensity > 0.0) hdr += texture(u_bloom, v_uv).rgb * u_bloomIntensity;
     o_color = vec4(LinearToSrgb(Filmic(hdr)), 1.0);
 }

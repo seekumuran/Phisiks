@@ -6,7 +6,7 @@
 
 Fetched: glm, EnTT, stb_image(_write), glad (generated with glad2: GL 4.6 core loader),
 Dear ImGui (+ GLFW / OpenGL3 backends), ImGuizmo (+ a compatibility patch for this ImGui
-version), miniaudio, nlohmann/json. Not fetched: the Windows prebuilt GLFW and PhysX binaries
+version), miniaudio, nlohmann/json, Lua 5.4 (sources from lua.org). Not fetched: the Windows prebuilt GLFW and PhysX binaries
 (see docs/BUILD.md); Linux/macOS use a system GLFW (or CMake fetches it) and the native physics
 backend. Licences: THIRD_PARTY_NOTICES.md.
 """
@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import urllib.request
 import zipfile
 
@@ -30,6 +31,8 @@ IMGUIZMO = "105e4fde45e4e74aae8973d98750820ef7aca7e2"
 MINIAUDIO = "0.11.21"
 JSON = "v3.11.3"
 GLAD = "2.0.8"
+LUA = "5.4.7"
+LUA_SHA256 = "9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30"
 GLAD_EXTENSIONS = "GL_ARB_bindless_texture,GL_ATI_meminfo,GL_EXT_debug_label,GL_EXT_texture_compression_s3tc,GL_KHR_texture_compression_astc_ldr,GL_NVX_gpu_memory_info"
 
 
@@ -97,6 +100,21 @@ def main():
         print("nlohmann/json " + JSON)
         write("nlohmann/json.hpp", raw("nlohmann/json", JSON, "single_include/nlohmann/json.hpp"))
         write("nlohmann/LICENSE.MIT", raw("nlohmann/json", JSON, "LICENSE.MIT"))
+    if need("lua/src/lua.h"):
+        print("Lua " + LUA)
+        data = fetch("https://www.lua.org/ftp/lua-%s.tar.gz" % LUA)
+        import hashlib
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != LUA_SHA256:
+            sys.exit("Lua archive checksum mismatch: %s" % digest)
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as t:
+            for member in t.getmembers():
+                parts = member.name.split("/", 1)
+                if len(parts) < 2 or not member.isfile():
+                    continue
+                if parts[1].startswith("src/") or parts[1] in ("README", "doc/readme.html"):
+                    f = t.extractfile(member)
+                    write("lua/" + parts[1], f.read())
     if need("glad/src/gl.c"):
         print("glad " + GLAD + " (pip install glad2==%s)" % GLAD)
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "glad2==" + GLAD])

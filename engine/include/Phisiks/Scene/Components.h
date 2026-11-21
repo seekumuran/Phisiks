@@ -87,11 +87,37 @@ namespace Phisiks {
         bool useGravity = true;
     };
 
+    // Joint between this entity's body and `connectedTo` (an entity name; empty = the world).
+    // Both need a Collider; this one must be Dynamic or Kinematic. Anchors and axes are in local
+    // units of their entities (scaled with them). The scene creates the joint once both bodies
+    // exist and re-creates it when a body is rebuilt.
+    struct Joint {
+        Physics::JointType type = Physics::JointType::BallSocket;
+        std::string connectedTo;
+        glm::vec3 anchor{ 0.0f };            // on this entity (local)
+        glm::vec3 axis{ 0.0f, 1.0f, 0.0f };  // hinge axis / slide direction (local to this entity)
+        glm::vec3 connectedAnchor{ 0.0f };   // SpringDamper: on the connected entity (local; world point if no entity)
+        bool enableLimits = false;
+        float lowerLimit = 0.0f, upperLimit = 0.0f;   // radians / metres
+        bool enableMotor = false;
+        float motorSpeed = 0.0f, maxMotorForce = 0.0f;
+        float stiffness = 200.0f, damping = 5.0f, restLength = -1.0f;
+        bool collideConnected = false;
+        Physics::JointId runtime;            // runtime: the live joint (invalid until created)
+    };
+
+    // Plays a clip. Spatial sources are positioned at the entity (stereo panning, inverse-square
+    // attenuation, Doppler shift from the entity / listener velocities); the listener is the
+    // primary camera.
     struct AudioSource {
         std::string clip;                    // file name inside the audio asset folder
         float volume = 1.0f;
         bool loop = false;
         bool playOnStart = false;
+        bool spatial = false;
+        float minDistance = 1.0f;            // metres: full volume inside
+        float maxDistance = 80.0f;           // metres: silent beyond (smooth fade over the last 20 %)
+        float dopplerFactor = 1.0f;          // 0 = no pitch shift
         // Control: set by Play()/Stop(), consumed by the audio system.
         void Play() { playRequested = true; stopRequested = false; }
         void Stop() { stopRequested = true; playRequested = false; }
@@ -101,5 +127,7 @@ namespace Phisiks {
         bool started = false;                // playOnStart has been handled
         bool isPlaying = false;              // updated by the audio system each frame
         uint64_t voice = 0;
+        glm::vec3 lastPosition{ 0.0f };      // runtime: velocity estimate for Doppler
+        bool hasLastPosition = false;
     };
 }

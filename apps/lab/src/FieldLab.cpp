@@ -1,6 +1,7 @@
 #include "FieldLab.h"
 #include "SandboxScenes.h"
 #include "SceneBuilder.h"
+#include "P9Scenes.h"
 #include "Phisiks/Framework/GameContext.h"
 #include "Phisiks/Physics/Advanced.h"
 #include "Phisiks/Physics/Physics.h"
@@ -238,7 +239,6 @@ namespace Lab {
         char line[200];
         std::snprintf(line, sizeof(line), "GPU: %u particles, %u soft bodies (%u nodes, %u constraints, %u colours), %u fields, %u colliders",
                       s.particles, s.softBodies, s.softBodyNodes, s.constraints, s.colorsMax, s.fields, s.colliders);
-        const glm::vec2 size = glm::vec2(Render::GetFramebufferSize());
-        Render::DrawScreenText(line, glm::vec2(16.0f, size.y - 34.0f), glm::vec4(0.6f, 0.9f, 1.0f, 1.0f), 2.0f);
+        ShowCaption("FieldLab: GPU culling, spatial-hash particles, XPBD soft bodies, force fields, SDF visualiser", line);
     }
 }

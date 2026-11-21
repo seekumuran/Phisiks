@@ -102,6 +102,7 @@ namespace Phisiks {
         virtual void DrawUI(GameContext& /*ctx*/) {}
 
         const std::string& Name() const { return m_name; }
+        uint64_t Serial() const { return m_serial; }      // unique per Scene instance (never reused)
 
         // ---- Entities
         Entity CreateEntity(const std::string& name = "Entity");
@@ -141,10 +142,13 @@ namespace Phisiks {
         void Unlink(entt::entity entity);
 
         std::string m_name;
+        uint64_t m_serial = 0;
         entt::registry m_registry;
         std::unordered_set<entt::entity> m_physicsDirty;
         std::vector<entt::entity> m_destroyQueue;
         bool m_cameraBound = false;
+        glm::vec3 m_listenerPosition{ 0.0f };
+        bool m_listenerValid = false;
     };
 
     // ------------------------------------------------------------------ Entity templates

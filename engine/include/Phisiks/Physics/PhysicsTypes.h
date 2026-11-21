@@ -21,9 +21,15 @@ namespace Phisiks::Physics {
         bool Valid() const { return value != 0; }
         friend bool operator==(CharacterId a, CharacterId b) { return a.value == b.value; }
     };
+    struct JointId {
+        uint64_t value = 0;
+        bool Valid() const { return value != 0; }
+        friend bool operator==(JointId a, JointId b) { return a.value == b.value; }
+        friend bool operator!=(JointId a, JointId b) { return a.value != b.value; }
+    };
 
     enum class BodyType { Static, Dynamic, Kinematic };
-    enum class ShapeType { Box, Sphere, Capsule, ConvexMesh, TriangleMesh };
+    enum class ShapeType { Box, Sphere, Capsule, ConvexMesh, TriangleMesh, HeightField };
 
     // Friction/restitution. Defaults are realistic for wood/plastic-like surfaces
     // (a box starts sliding on a slope steeper than atan(0.6) ~= 31 degrees).
@@ -47,6 +53,11 @@ namespace Phisiks::Physics {
         float halfHeight = 0.5f;                // Capsule: half length of the cylinder part, along local +Y
         std::vector<glm::vec3> vertices;        // ConvexMesh / TriangleMesh
         std::vector<uint32_t> indices;          // TriangleMesh (3 per triangle)
+        // HeightField (static only): heights[z * columns + x] in metres, a grid of columns x rows
+        // samples `cellSize` apart, centred on the collider's local origin (x right, z forward).
+        std::vector<float> heights;
+        uint32_t heightfieldColumns = 0, heightfieldRows = 0;
+        float heightfieldCellSize = 1.0f;
         glm::vec3 localPosition{ 0.0f };
         glm::quat localRotation{ 1.0f, 0.0f, 0.0f, 0.0f };
         PhysicsMaterial material;
@@ -128,8 +139,40 @@ namespace Phisiks::Physics {
         uint32_t workerThreads = 2;
     };
 
+    // ---- Joints (constraints between two bodies, or a body and the world)
+    //   Hinge         shared anchor point, rotation only about `axis` (optional angle limits / motor)
+    //   BallSocket    shared anchor point, free rotation
+    //   Prismatic     slides along `axis`, no rotation (optional travel limits / motor)
+    //   SpringDamper  soft distance constraint between `anchor` (on A) and `anchorB` (on B)
+    enum class JointType { Hinge, BallSocket, Prismatic, SpringDamper };
+
+    struct JointDesc {
+        JointType type = JointType::BallSocket;
+        BodyId bodyA;                           // invalid = the static world
+        BodyId bodyB;
+        glm::vec3 anchor{ 0.0f };               // world space, at creation
+        glm::vec3 anchorB{ 0.0f };              // SpringDamper: world anchor on B
+        glm::vec3 axis{ 0.0f, 1.0f, 0.0f };     // world space: hinge axis / slide direction
+        bool enableLimits = false;
+        float lowerLimit = 0.0f, upperLimit = 0.0f;   // radians (hinge) or metres (prismatic), relative to creation
+        bool enableMotor = false;
+        float motorSpeed = 0.0f;                // rad/s or m/s (B relative to A)
+        float maxMotorForce = 0.0f;             // N*m or N
+        float stiffness = 200.0f;               // SpringDamper: N/m
+        float damping = 5.0f;                   // SpringDamper: N*s/m
+        float restLength = -1.0f;               // SpringDamper: metres, < 0 = distance at creation
+        bool collideConnected = false;
+    };
+
+    struct JointState {
+        float position = 0.0f;                  // hinge angle (rad), slide (m), spring length (m), 0 for ball
+        float speed = 0.0f;                     // d(position)/dt
+        glm::vec3 anchorA{ 0.0f }, anchorB{ 0.0f };   // current world anchors on A and B
+    };
+
     struct Stats {
         uint32_t staticBodies = 0, dynamicBodies = 0, kinematicBodies = 0, characters = 0;
+        uint32_t joints = 0;
         uint32_t awakeDynamicBodies = 0;
         uint64_t stepsSimulated = 0;
     };

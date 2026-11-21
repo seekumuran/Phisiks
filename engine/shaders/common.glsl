@@ -43,13 +43,15 @@ struct Material {
     vec4 patternMetallic;       // rgb pattern colour, a metallic
     vec4 emissivePattern;       // rgb emissive, a pattern id
     vec4 params;                // pattern scale, line width, pattern roughness (<0: same), pattern glow
-    vec4 textureParams;         // x albedo texture layer (-1 none), y repeats per metre
+    vec4 textureParams;         // x albedo texture layer (-1 none), y repeats per metre, z 1 = mesh UVs (else tri-planar)
+    vec4 splat[4];              // Pattern::Splat layers: rgb colour, a roughness
+    vec4 splatDetail;           // per-layer colour noise amount
 };
 
 #ifdef PHISIKS_GL41
 layout(binding = 9) uniform samplerBuffer u_lightTexels;       // 4 texels per light
 layout(binding = 10) uniform samplerBuffer u_instanceTexels;   // 11 texels per instance (ids stored as float values)
-layout(binding = 11) uniform samplerBuffer u_materialTexels;   // 5 texels per material
+layout(binding = 11) uniform samplerBuffer u_materialTexels;   // 10 texels per material
 uniform int u_instanceBase;                                    // texel of instance 0 (per-frame ring region)
 Light LoadLight(uint i) {
     int b = int(i) * 4;
@@ -71,13 +73,15 @@ Instance LoadInstance(uint i) {
     return s;
 }
 Material LoadMaterial(uint i) {
-    int b = int(i) * 5;
+    int b = int(i) * 10;
     Material m;
     m.baseRoughness = texelFetch(u_materialTexels, b);
     m.patternMetallic = texelFetch(u_materialTexels, b + 1);
     m.emissivePattern = texelFetch(u_materialTexels, b + 2);
     m.params = texelFetch(u_materialTexels, b + 3);
     m.textureParams = texelFetch(u_materialTexels, b + 4);
+    for (int k = 0; k < 4; ++k) m.splat[k] = texelFetch(u_materialTexels, b + 5 + k);
+    m.splatDetail = texelFetch(u_materialTexels, b + 9);
     return m;
 }
 #else

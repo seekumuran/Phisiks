@@ -33,6 +33,27 @@ namespace Phisiks::Render {
         float maxOpacity = 0.97f;
     };
 
+    // HDR bloom: bright parts (above `threshold`, soft knee) are blurred through a mip chain
+    // (13-tap downsample, 3x3 tent upsample) and added before tonemapping.
+    struct BloomSettings {
+        bool enabled = true;
+        float threshold = 1.0f;            // linear HDR luminance where bloom starts (after exposure)
+        float knee = 0.5f;                 // soft transition width
+        float intensity = 0.06f;           // fraction of the blurred light added
+        int mipCount = 6;                  // chain length (each level half the previous)
+    };
+
+    // Screen-space ambient occlusion from the depth buffer (normals reconstructed from depth),
+    // hemisphere kernel + 4x4 depth-aware blur, multiplied into the lit image.
+    struct SsaoSettings {
+        bool enabled = true;
+        float radius = 0.6f;               // metres
+        float intensity = 1.2f;            // 0 = off, 1 = physical-ish, >1 stronger
+        float bias = 0.03f;                // metres (self-occlusion guard)
+        int samples = 12;                  // 4..32
+        bool halfResolution = false;
+    };
+
     // Spatial upscaling of the window image from renderScale x the window size.
     enum class Upscaler : uint32_t { Bilinear = 0, FSR1 = 1 };   // FSR1: edge-adaptive EASU + RCAS sharpening
 
@@ -58,13 +79,18 @@ namespace Phisiks::Render {
         bool gpuCulling = true;            // frustum culling in a compute shader writing the indirect commands
         bool occlusionCulling = true;      // + Hi-Z occlusion against the previous frame's depth (window views)
         glm::vec4 clearColor{ 0.012f, 0.013f, 0.018f, 1.0f };
+        BloomSettings bloom;
+        SsaoSettings ssao;
+        bool decals = true;                // projected decals (Render::DrawDecal / Decal components)
     };
     RenderSettings& Settings();
 
     // Scalability presets for integrated GPUs (tuned on a Core i3 / 8 GB / Intel UHD laptop):
-    //   Low     renderScale 0.667 (720p -> 1080p) FSR1, no MSAA, 1024 shadows over 25 m, no occlusion pass
-    //   Medium  renderScale 0.77 FSR1, 2x MSAA, 2048 shadows over 35 m
-    //   High    native resolution, 4x MSAA, 2048 shadows over 40 m, Hi-Z occlusion
+    //   Low     renderScale 0.667 (720p -> 1080p) FSR1, no MSAA, 1024 shadows over 25 m, no occlusion pass,
+    //           bloom with 4 mips, no SSAO
+    //   Medium  renderScale 0.77 FSR1, 2x MSAA, 2048 shadows over 35 m, bloom 5 mips, half-res SSAO (8 samples)
+    //   High    native resolution, 4x MSAA, 2048 shadows over 40 m, Hi-Z occlusion, bloom 6 mips,
+    //           full-res SSAO (16 samples)
     enum class QualityPreset { Low, Medium, High };
     void ApplyQualityPreset(QualityPreset preset);
     const char* ToString(QualityPreset preset);
@@ -89,6 +115,13 @@ namespace Phisiks::Render {
         Wood = 4,             // ring/grain bands
         Tiles = 5,            // tiles with grout (patternColor) of lineWidth
         CalibrationGrid = 6,  // dark tiles (baseColor), rainbow column colours, labels A0..J9, lines (patternColor)
+        Splat = 7,            // terrain: 4 layers (splat[]) weighted by the splatmap (albedoTexture at mesh UVs, RGBA = layers)
+    };
+
+    struct SplatLayer {
+        glm::vec3 color{ 0.5f };           // linear albedo
+        float roughness = 0.8f;
+        float detail = 0.25f;              // value-noise variation of the layer colour (0..1)
     };
 
     struct MaterialDesc {
@@ -102,8 +135,10 @@ namespace Phisiks::Render {
         float lineWidth = 0.04f;           // Grid/Tiles/CalibrationGrid
         float patternRoughness = -1.0f;    // roughness inside the pattern (-1 = same)
         float patternGlow = 0.0f;          // self-illumination of pattern labels/lines (readable in the dark)
-        std::string albedoTexture;         // asset path (e.g. "textures/bricks.png"); multiplies the albedo
-        float textureScale = 1.0f;         // texture repeats per metre
+        std::string albedoTexture;         // asset path (e.g. "textures/bricks.png") or a RegisterTexture name; multiplies the albedo
+        float textureScale = 1.0f;         // texture repeats per metre (tri-planar)
+        bool textureUsesMeshUV = false;    // sample albedoTexture at the mesh UVs instead of tri-planar (imported models)
+        SplatLayer splat[4];               // Pattern::Splat layers (R, G, B, A of the splatmap)
     };
     bool RegisterMaterial(const std::string& name, const MaterialDesc& desc);   // replaces an existing one
     bool HasMaterial(const std::string& name);
@@ -122,6 +157,36 @@ namespace Phisiks::Render {
     // Built-in unit meshes: "Cube" (1 m), "Sphere" (1 m diameter), "Plane" (1x1 m XZ, +Y up).
     bool RegisterMesh(const std::string& name, const MeshData& data);
     bool HasMesh(const std::string& name);
+    // Replaces the vertices of a registered mesh (same vertex count; CPU skinning / deformation).
+    bool UpdateMeshVertices(const std::string& name, const std::vector<Vertex>& vertices);
+
+    // In-memory RGBA8 image (rows top-first) usable as MaterialDesc::albedoTexture by `name`
+    // (resampled to the 512x512 texture array; replaces an earlier image of the same name).
+    bool RegisterTexture(const std::string& name, int width, int height, const std::vector<uint8_t>& rgba);
+
+    // ---------------------------------------------------------------- VFX primitives (this frame only)
+    // Camera-facing ribbon through `points` (trails, beams, orbit paths). Additive blending; does
+    // not write depth or entity ids (depth-tested against the scene).
+    struct RibbonPoint {
+        glm::vec3 position{ 0.0f };
+        float width = 0.1f;                // metres
+        glm::vec4 color{ 1.0f };           // linear HDR rgb x alpha
+    };
+    void DrawRibbon(const std::vector<RibbonPoint>& points);
+
+    // Projected box decal. The unit box (-0.5..0.5) of `world` is projected along its local -Y onto
+    // the scene depth; surfaces whose normal turns away from local +Y fade out (angleFade = cos limit).
+    enum class DecalPattern : uint32_t { Scorch = 0, Ring = 1, Paint = 2, Hazard = 3 };
+    enum class DecalBlend : uint32_t { Multiply = 0, Additive = 1, Alpha = 2 };
+    struct DecalDesc {
+        glm::mat4 world{ 1.0f };
+        glm::vec4 color{ 1.0f };           // rgb (HDR for additive), a = opacity
+        DecalPattern pattern = DecalPattern::Scorch;
+        DecalBlend blend = DecalBlend::Multiply;
+        float angleFade = 0.35f;
+        float seed = 0.0f;                 // pattern variation
+    };
+    void DrawDecal(const DecalDesc& decal);
 
     // ---------------------------------------------------------------- debug drawing (this frame only)
     void DrawLine(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color);
@@ -183,6 +248,27 @@ namespace Phisiks::Render {
     uint32_t GetTargetTexture(const std::string& name);
     bool CaptureTarget(const std::string& name, FrameCapture& out);   // like CaptureFrame, for an offscreen target
     uint32_t GetGLErrorCount();
+    // The default framebuffer as it will be presented (scene + overlay text + studio UI), RGBA8,
+    // rows bottom-up. Call after the UI was drawn (tests: ITestHarness::AfterRender).
+    bool CaptureBackbuffer(FrameCapture& out);
+
+    // ---------------------------------------------------------------- shader hot reload
+    // Watches `directory` (normally engine/shaders) for *.glsl changes; edited files replace the
+    // embedded copies and every program is rebuilt on the next frame. A program that fails to
+    // compile keeps its previous version (the error is logged and kept in the status).
+    bool EnableShaderHotReload(const std::string& directory);
+    void DisableShaderHotReload();
+    bool ReloadShadersNow();               // rescan + rebuild immediately; false if any program failed
+    struct ShaderReloadStatus {
+        bool enabled = false;
+        std::string directory;
+        uint32_t reloads = 0;              // rebuild passes
+        uint32_t programsRebuilt = 0;      // programs replaced in total
+        uint32_t failures = 0;             // programs that failed (old version kept)
+        uint32_t filesOverridden = 0;      // files currently read from the directory
+        std::string lastError;
+    };
+    ShaderReloadStatus GetShaderReloadStatus();
 
     // ---------------------------------------------------------------- analytical visualisers
     // Raymarched SDF / smooth-CSG scene (mirrors Phisiks::Math::SDF). Primitives are combined in order:

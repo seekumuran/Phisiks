@@ -3,6 +3,7 @@
 # Targets
 #   PhisiksCore        static library: the engine (engine/include public API, engine/src private)
 #   PhisiksImGui       static library: Dear ImGui + GLFW/OpenGL3 backends + ImGuizmo (vendor/)
+#   PhisiksLua         static library: Lua 5.4 (vendor/lua, C)
 #   PhisiksLab         interactive studio app (apps/lab) + runtime verification harness (tests/runtime)
 #   PhisiksUnitTests   headless unit tests (tests/unit)
 #   assetgen           regenerates the CC0 sample assets in assets/
@@ -56,9 +57,9 @@ find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------------------------
 # Third-party (see THIRD_PARTY_NOTICES.md): glad, GLFW, glm, EnTT, stb_image(_write), Dear ImGui,
-# ImGuizmo, miniaudio, nlohmann/json, NVIDIA PhysX 5 (optional backend).
+# ImGuizmo, miniaudio, nlohmann/json, Lua 5.4, NVIDIA PhysX 5 (optional backend).
 # ---------------------------------------------------------------------------------------------
-foreach(dep glad/src/gl.c glm/glm/glm.hpp entt/entt.hpp stb_image/stb_image.h imgui/imgui.h imguizmo/ImGuizmo.h nlohmann/json.hpp miniaudio/miniaudio.h)
+foreach(dep glad/src/gl.c glm/glm/glm.hpp entt/entt.hpp stb_image/stb_image.h imgui/imgui.h imguizmo/ImGuizmo.h nlohmann/json.hpp miniaudio/miniaudio.h lua/src/lua.h)
     if(NOT EXISTS ${PHISIKS_VENDOR}/${dep})
         message(FATAL_ERROR "vendor/${dep} is missing: run 'python tools/fetch_deps.py' (see docs/BUILD.md)")
     endif()
@@ -120,6 +121,24 @@ else()
     target_compile_definitions(PhisiksImGui PRIVATE IMGUI_DEFINE_MATH_OPERATORS)
 endif()
 
+# Lua 5.4 (C sources; the interpreter / compiler mains are not part of the library).
+file(GLOB PHISIKS_LUA_SOURCES ${PHISIKS_VENDOR}/lua/src/*.c)
+list(FILTER PHISIKS_LUA_SOURCES EXCLUDE REGEX "/(lua|luac)\\.c$")
+add_library(PhisiksLua STATIC ${PHISIKS_LUA_SOURCES})
+target_include_directories(PhisiksLua PUBLIC ${PHISIKS_VENDOR}/lua/src)
+set_target_properties(PhisiksLua PROPERTIES LINKER_LANGUAGE C)
+if(MSVC)
+    target_compile_options(PhisiksLua PRIVATE /W0)
+    target_compile_definitions(PhisiksLua PRIVATE _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_options(PhisiksLua PRIVATE -w)
+    if(APPLE)
+        target_compile_definitions(PhisiksLua PRIVATE LUA_USE_MACOSX)
+    elseif(UNIX)
+        target_compile_definitions(PhisiksLua PRIVATE LUA_USE_LINUX)
+    endif()
+endif()
+
 # ---------------------------------------------------------------------------------------------
 # PhisiksCore
 # ---------------------------------------------------------------------------------------------
@@ -163,7 +182,7 @@ target_include_directories(PhisiksCore PRIVATE
     ${PHISIKS_VENDOR}/miniaudio
     ${PHISIKS_VENDOR}/imgui/backends)
 target_link_libraries(PhisiksCore PUBLIC PhisiksImGui Threads::Threads)
-target_link_libraries(PhisiksCore PRIVATE phisiks_glfw ${CMAKE_DL_LIBS})
+target_link_libraries(PhisiksCore PRIVATE phisiks_glfw PhisiksLua ${CMAKE_DL_LIBS})
 if(PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
     target_link_libraries(PhisiksCore PRIVATE phisiks_physx)
     target_compile_definitions(PhisiksCore PUBLIC PHISIKS_PHYSICS_PHYSX=1)

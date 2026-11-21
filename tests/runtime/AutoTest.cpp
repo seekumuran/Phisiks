@@ -1,4 +1,4 @@
-#include "AutoTest.h"
+﻿#include "AutoTest.h"
 #include "Phisiks/Framework/GameContext.h"
 #include "Phisiks/Framework/SceneManager.h"
 #include "Phisiks/Core/Log.h"
@@ -6,6 +6,14 @@
 #include "SandboxScenes.h"
 #include "FieldLab.h"
 #include "SceneBuilder.h"
+#include "P9Scenes.h"
+#include "Phisiks/AI/Navigation.h"
+#include "Phisiks/Animation/Animation.h"
+#include "Phisiks/Framework/DebugOverlay.h"
+#include "Phisiks/Script/Script.h"
+#include "Phisiks/UI/RetroDeck.h"
+#include "Phisiks/VFX/VFX.h"
+#include "Phisiks/World/Terrain.h"
 #include "Phisiks/Compute/Compute.h"
 #include "Phisiks/Framework/Replay.h"
 #include "Phisiks/Render/Upscaler.h"
@@ -27,6 +35,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <random>
@@ -163,6 +172,10 @@ namespace Phisiks {
     }
 
     void AutoTest::AfterRender(GameContext& /*ctx*/) {
+        if (m_backbufferRequested) {   // after the studio UI was drawn: what the window shows
+            m_backbufferRequested = false;
+            m_backbufferReady = Render::CaptureBackbuffer(m_backbuffer);
+        }
         if (m_captureRequested) {
             m_captureRequested = false;
             m_captureReady = Render::CaptureFrame(m_capture);
@@ -280,7 +293,7 @@ namespace Phisiks {
             const Render::ShaderCacheStats cache = Render::GetShaderCacheStats();
             const bool compat = Render::GetRendererInfo().compatTier;
             Expect("shader programs built (cache or compile), none failed",
-                   cache.programs == (compat ? 16u : 33u) && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
+                   cache.programs == (compat ? 24u : 41u) && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
                    F("%.0f programs: %.0f from cache, %.0f compiled, ", cache.programs, cache.loadedFromCache, cache.compiled) + F("%.0f written, %.0f failed", cache.written, cache.failures));
             const RenderStats render = GetRenderStats();
             Expect("indirect drawing: at most one command per mesh type", render.drawCommands <= render.meshesLoaded && render.instancesDrawn >= 10,
@@ -1491,6 +1504,445 @@ namespace Phisiks {
             return false;
         } });
 
+        // ================================================================== P9
+        // P9a. Retro studio skin: panels, LCD, LED meters, EQ sliders, transport bar, playlist; the
+        // bitmap HUD telemetry is suppressed while the panels are open (and returns when hidden).
+        m_steps.push_back({ "P9: retro studio skin, zero HUD overlap", [this](GameContext& ctx) {
+            namespace Retro = UI::Retro;
+            switch (m_phase) {
+                case 0:
+                    UI::SetPanelsVisible(true);
+                    if (m_stepFrames < 3) return false;
+                    m_backbufferRequested = true;
+                    m_backbufferReady = false;
+                    m_phase = 1;
+                    return false;
+                case 1: {
+                    if (!m_backbufferReady) return false;
+                    const Retro::FrameStats& s = Retro::LastFrameStats();
+                    Expect("retro panels drawn (bevelled, gold title stripes)", s.panels >= 5, F("%.0f panels", s.panels));
+                    Expect("LCD readout, LED meters and spectrum analyser", s.lcds >= 1 && s.meters >= 4 && s.litSegments > 0,
+                           F("%.0f LCDs, %.0f meters, %.0f lit segments", s.lcds, s.meters, s.litSegments));
+                    Expect("equaliser sliders, transport buttons, lesson playlist", s.eqSliders >= 6 && s.transportButtons >= 7 && s.playlistRows >= 12,
+                           F("%.0f EQ sliders, %.0f transport buttons, %.0f playlist rows", s.eqSliders, s.transportButtons, s.playlistRows));
+                    // the LCD on the presented back buffer: recessed black with phosphor-green digits
+                    const Render::FrameCapture& b = m_backbuffer;
+                    size_t black = 0, green = 0, total = 0;
+                    const int x0 = int(s.lcdRect[0]) + 3, x1 = int(s.lcdRect[0] + s.lcdRect[2]) - 3;
+                    const int y0 = int(s.lcdRect[1]) + 3, y1 = int(s.lcdRect[1] + s.lcdRect[3]) - 3;
+                    for (int y = std::max(y0, 0); y < std::min(y1, b.height); ++y) {
+                        for (int x = std::max(x0, 0); x < std::min(x1, b.width); ++x) {
+                            const uint8_t* p = &b.rgba[(size_t(b.height - 1 - y) * b.width + x) * 4];
+                            ++total;
+                            black += p[0] < 24 && p[1] < 40 && p[2] < 24;
+                            green += p[1] > 180 && p[0] < 110 && p[2] < 140;
+                        }
+                    }
+                    const int cx = int(s.lcdRect[0] + s.lcdRect[2] * 0.5f), cy = int(s.lcdRect[1] + s.lcdRect[3] * 0.5f);
+                    const uint8_t* cp = (cx >= 0 && cy >= 0 && cx < b.width && cy < b.height) ? &b.rgba[(size_t(b.height - 1 - cy) * b.width + cx) * 4] : nullptr;
+                    Expect("LCD pixels on screen: black background, glowing green text", total > 500 && black > total / 2 && green > total / 100,
+                           F("%.0f px: %.1f %% black, %.2f %% phosphor green", double(total), 100.0 * black / std::max<size_t>(total, 1), 100.0 * green / std::max<size_t>(total, 1))
+                               + F(", rect (%.0f, %.0f, %.0f, ", s.lcdRect[0], s.lcdRect[1], s.lcdRect[2]) + F("%.0f) in %.0fx%.0f", s.lcdRect[3], b.width, b.height)
+                               + (cp ? F(", centre (%.0f, %.0f, %.0f)", cp[0], cp[1], cp[2]) : std::string()));
+                    { Assets::Image shot; shot.width = b.width; shot.height = b.height; shot.rgba.resize(b.rgba.size());
+                      for (int y = 0; y < b.height; ++y) std::copy_n(&b.rgba[size_t(b.height - 1 - y) * b.width * 4], size_t(b.width) * 4, &shot.rgba[size_t(y) * b.width * 4]);
+                      Assets::WritePng(m_runDirectory + "/p9_00_backbuffer_with_ui.png", shot); }
+                    const RenderStats r = GetRenderStats();
+                    Expect("no bitmap HUD text behind the panels", DebugOverlay::LastTelemetryLineCount() == 0 && r.overlayGlyphs <= 40,
+                           F("%.0f telemetry lines, %.0f overlay glyphs (crosshair / target label only)", DebugOverlay::LastTelemetryLineCount(), r.overlayGlyphs));
+                    Screenshot("p9_01_retro_studio");
+                    UI::SetPanelsVisible(false);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                }
+                default: {
+                    if (m_stepFrames - m_scratch[0] < 3) return false;
+                    const int lines = DebugOverlay::LastTelemetryLineCount();
+                    Expect("HUD telemetry returns when the panels are hidden (Tab)", lines > 10 && ctx.overlayVisible, F("%.0f lines", lines));
+                    UI::SetPanelsVisible(true);
+                    return true;
+                }
+            }
+        } });
+
+        // P9b. glTF import, dual-quaternion skinning on the GPU-drawn mesh, spline camera path.
+        m_steps.push_back({ "P9: glTF skinning and spline camera", [this](GameContext& ctx) {
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("Animation"); m_phase = 1; return false;
+                case 1:
+                    if (ctx.scenes->CurrentName() != "Animation") return false;
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (StepSimTime(ctx) - m_scratch[0] < 1.0) return false;
+                    const Animation::Stats a = Animation::GetStats();
+                    Expect("three glTF walkers loaded, animated and skinned every frame", a.models == 3 && a.clipsPlaying == 3 && a.skinnedVertices == 3u * 1025u,
+                           F("%.0f models, %.0f clips playing, %.0f vertices skinned in %.2f ms", a.models, a.clipsPlaying, a.skinnedVertices, a.skinningMs));
+                    Entity dq = Find(ctx, "Walker DQ");
+                    const SkinnedModel* m = dq.Valid() ? dq.TryGet<SkinnedModel>() : nullptr;
+                    Expect("SkinnedModel loaded without errors (embedded texture registered)", m && m->loaded && m->error.empty() && Render::HasMaterial("gltf:models/walker.glb#material0"),
+                           m ? m->error : std::string("no walker"));
+                    RequestCapture();
+                    m_phase = 3;
+                    return false;
+                }
+                case 3: {
+                    if (!m_captureReady) return false;
+                    Entity body = Find(ctx, "Walker DQ/Body");
+                    const size_t pixels = CountId(m_capture, PixelId(body));
+                    const glm::dvec3 color = MeanColor(m_capture, PixelId(body));
+                    Expect("skinned walker visible in the frame with its striped texture", pixels > 2000 && LumaStdDev(m_capture, PixelId(body)) > 12.0,
+                           F("%.0f px, mean colour (%.0f, %.0f, ", double(pixels), color.x, color.y) + F("%.0f), luma std dev %.1f", color.z, LumaStdDev(m_capture, PixelId(body))));
+                    Screenshot("p9_02_skinning");
+                    Entity camera = Find(ctx, "MainCamera");
+                    CameraPath* path = camera.Valid() ? camera.TryGet<CameraPath>() : nullptr;
+                    Expect("Catmull-Rom camera path attached", path != nullptr, path ? F("%.0f points", double(path->points.size())) : std::string("none"));
+                    if (path) { path->playing = true; path->time = 0.0f; }
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_phase = 4;
+                    return false;
+                }
+                default: {
+                    if (StepSimTime(ctx) - m_scratch[0] < 2.0) return false;
+                    Entity camera = Find(ctx, "MainCamera");
+                    CameraPath* path = camera.Valid() ? camera.TryGet<CameraPath>() : nullptr;
+                    if (!path) return true;
+                    const float u = path->time / path->duration;
+                    const glm::vec3 expected = path->positionSpline.Evaluate(u - std::floor(u));
+                    const glm::vec3 p = camera.WorldPosition();
+                    const glm::vec3 forward = camera.WorldRotation() * glm::vec3(0, 0, -1);
+                    const glm::vec3 toTarget = glm::normalize(glm::vec3(0.0f, 1.0f, -0.6f) - p);
+                    Expect("camera rides the spline and looks at its target", glm::length(p - expected) < 0.05f && glm::dot(forward, toTarget) > 0.999f && path->positionSpline.Length() > 30.0f,
+                           "at " + V(p) + F(" (u %.3f, error %.4f m), look dot %.5f", u, glm::length(p - expected), glm::dot(forward, toTarget)));
+                    path->playing = false;
+                    Screenshot("p9_03_camera_path");
+                    return true;
+                }
+            }
+        } });
+
+        // P9c. Post-processing and VFX, each verified by an A/B frame of the same view.
+        m_steps.push_back({ "P9: bloom, SSAO, trails, beam and decals", [this](GameContext& ctx) {
+            Render::RenderSettings& rs = Render::Settings();
+            auto meanLuma = [](const Render::FrameCapture& c) { double s = 0.0; for (size_t i = 0; i < c.entityIds.size(); ++i) s += Luma(c, i); return s / std::max<size_t>(c.entityIds.size(), 1); };
+            switch (m_phase) {
+                case 0:
+                    m_savedSettings = rs;
+                    ctx.scenes->Request("VFX");
+                    m_phase = 1;
+                    return false;
+                case 1:
+                    if (ctx.scenes->CurrentName() != "VFX") return false;
+                    Render::ApplyQualityPreset(Render::QualityPreset::High);
+                    rs.renderScale = 1.0f;
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (StepSimTime(ctx) - m_scratch[0] < 1.5) return false;
+                    ctx.state = GameState::Paused;   // freeze the orbs for the A/B frames
+                    const RenderStats r = GetRenderStats();
+                    const VFX::Stats v = VFX::GetStats();
+                    Expect("post stack active (High preset): bloom 6 mips, full-resolution SSAO", r.bloomMips == 6 && r.ssaoActive && r.ssaoWidth == r.internalWidth,
+                           F("bloom %.0f mips, SSAO %.0fx%.0f", r.bloomMips, r.ssaoWidth, r.ssaoHeight) + F(" (scene %.0fx%.0f)", r.internalWidth, r.internalHeight));
+                    Expect("VFX submitted: 3 trails, 3 orbit paths, a beam (2 strips), 4 decals", v.trails == 3 && v.orbits == 3 && v.beams == 1 && r.decalsDrawn == 4 && r.ribbonsDrawn == 8 && v.trailPoints > 30,
+                           F("%.0f trails (%.0f points), %.0f orbits, %.0f beams", v.trails, v.trailPoints, v.orbits, v.beams) + F(", %.0f ribbons, %.0f decals", r.ribbonsDrawn, r.decalsDrawn)
+                               + F(", frame dt %.3f s", ctx.stats.deltaTime));
+                    Entity pylon = Find(ctx, "PylonA");
+                    const Beam* beam = pylon.Valid() ? pylon.TryGet<Beam>() : nullptr;
+                    const Entity crate = Find(ctx, "BeamCrate");
+                    const float face = crate.Valid() ? crate.WorldPosition().x - 0.4f : 0.0f;
+                    Expect("raycast beam stops on the crate in its path", beam && std::fabs(beam->lastEnd.x - face) < 0.15f,
+                           beam ? F("beam end x %.3f, crate face x %.3f", beam->lastEnd.x, face) : std::string("no beam"));
+                    RequestCapture();
+                    m_phase = 3;
+                    return false;
+                }
+                case 3:   // reference: everything on
+                    if (!m_captureReady) return false;
+                    m_reference = m_capture;
+                    Screenshot("p9_04_vfx");
+                    rs.bloom.enabled = false;
+                    RequestCapture();
+                    m_phase = 4;
+                    return false;
+                case 4: {
+                    if (!m_captureReady) return false;
+                    const double withBloom = meanLuma(m_reference), without = meanLuma(m_capture);
+                    // glow spills onto the floor next to the neon sign (pixels that are not the sign itself)
+                    const uint32_t neon = PixelId(Find(ctx, "Neon"));
+                    double spill = 0.0;
+                    size_t spillPixels = 0;
+                    for (size_t i = 0; i < m_capture.entityIds.size(); ++i) {
+                        if (m_capture.entityIds[i] == neon) continue;
+                        const double d = Luma(m_reference, i) - Luma(m_capture, i);
+                        if (d > 2.0) { spill += d; ++spillPixels; }
+                    }
+                    Expect("HDR bloom brightens the image around emissive sources", withBloom > without + 0.3 && spillPixels > 2000,
+                           F("mean luma %.2f with vs %.2f without, %.0f px brightened", withBloom, without, double(spillPixels)));
+                    rs.bloom.enabled = true;
+                    rs.ssao.enabled = false;
+                    RequestCapture();
+                    m_phase = 5;
+                    return false;
+                }
+                case 5: {
+                    if (!m_captureReady) return false;
+                    // AO darkens creases: the corner boxes / walls lose light, open floor stays (almost) the same
+                    size_t darker = 0, lighter = 0;
+                    double cornerDelta = 0.0;
+                    size_t cornerPixels = 0;
+                    // static corner geometry only (the ring decal pulses and the beam flickers between frames)
+                    std::set<uint32_t> corner = { PixelId(Find(ctx, "WallBack")), PixelId(Find(ctx, "WallSide")) };
+                    for (int k = 0; k < 4; ++k) corner.insert(PixelId(Find(ctx, "AOBox" + std::to_string(k))));
+                    for (size_t i = 0; i < m_capture.entityIds.size(); ++i) {
+                        if (!corner.count(m_capture.entityIds[i])) continue;
+                        const double d = Luma(m_capture, i) - Luma(m_reference, i);   // without AO - with AO
+                        darker += d > 3.0;
+                        lighter += d < -3.0;
+                        cornerDelta += d;
+                        ++cornerPixels;
+                    }
+                    Expect("SSAO darkens the corner geometry (walls, stacked boxes)", darker > 1000 && lighter < darker / 20 && cornerPixels > 0 && cornerDelta / double(cornerPixels) > 1.0,
+                           F("%.0f px darker with AO, %.0f lighter, corner mean %.2f luma", double(darker), double(lighter), cornerPixels ? cornerDelta / double(cornerPixels) : 0.0));
+                    rs.ssao.enabled = true;
+                    rs.decals = false;
+                    RequestCapture();
+                    m_phase = 6;
+                    return false;
+                }
+                case 6: {
+                    if (!m_captureReady) return false;
+                    // scorch darkens, the glowing ring brightens the floor where the decals are
+                    auto region = [&](const glm::vec3& world) {
+                        Entity camera = Find(ctx, "MainCamera");
+                        const Camera& cam = camera.Get<Camera>();
+                        const float aspect = float(m_capture.width) / float(m_capture.height);
+                        const glm::mat4 vp = glm::perspective(cam.verticalFov, aspect, cam.nearPlane, cam.farPlane) * glm::inverse(camera.WorldMatrix());
+                        const glm::vec4 clip = vp * glm::vec4(world, 1.0f);
+                        const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+                        const int cx = int((ndc.x * 0.5f + 0.5f) * float(m_capture.width)), cy = int((ndc.y * 0.5f + 0.5f) * float(m_capture.height));
+                        double delta = 0.0;
+                        int n = 0;
+                        for (int y = cy - 6; y <= cy + 6; ++y)
+                            for (int x = cx - 6; x <= cx + 6; ++x) {
+                                if (x < 0 || y < 0 || x >= m_capture.width || y >= m_capture.height) continue;
+                                const size_t i = size_t(y) * m_capture.width + x;
+                                delta += Luma(m_reference, i) - Luma(m_capture, i);   // with decal - without
+                                ++n;
+                            }
+                        return n ? delta / n : 0.0;
+                    };
+                    const double scorch = region(glm::vec3(-3.0f, 0.0f, 2.5f)), ring = region(glm::vec3(0.936f, 0.0f, 2.5f)), paint = region(glm::vec3(3.0f, 0.0f, 2.5f));
+                    Expect("projected decals: scorch darkens, glowing ring brightens, paint recolours the floor", scorch < -8.0 && ring > 4.0 && std::fabs(paint) > 4.0,
+                           F("luma change: scorch %.1f, ring %.1f, paint %.1f", scorch, ring, paint));
+                    rs.decals = true;
+                    ctx.state = GameState::Running;
+                    rs = m_savedSettings;
+                    return true;
+                }
+            }
+            return false;
+        } });
+
+        // P9d. Live shader hot reload from a watched copy of engine/shaders.
+        m_steps.push_back({ "P9: live GLSL hot reload", [this](GameContext& ctx) {
+            namespace fs = std::filesystem;
+            const fs::path dir = fs::path(m_runDirectory) / "shaders_hot";
+            const fs::path tonemap = dir / "tonemap.frag.glsl";
+            auto writeTonemap = [&](const std::string& extra) {
+                std::ofstream f(tonemap, std::ios::binary | std::ios::trunc);
+                f << m_shaderOriginal << extra;
+            };
+            auto centre = [&](int channel) { return m_capture.rgba[(size_t(m_capture.height / 2) * m_capture.width + m_capture.width / 2) * 4 + channel]; };
+            const Render::ShaderReloadStatus status = Render::GetShaderReloadStatus();
+            switch (m_phase) {
+                case 0: {
+                    std::error_code ec;
+                    fs::remove_all(dir, ec);
+                    fs::create_directories(dir, ec);
+                    fs::copy("engine/shaders", dir, fs::copy_options::overwrite_existing, ec);
+                    std::ifstream in(tonemap, std::ios::binary);
+                    std::stringstream text;
+                    text << in.rdbuf();
+                    m_shaderOriginal = text.str();
+                    const bool enabled = !m_shaderOriginal.empty() && Render::EnableShaderHotReload(dir.string());
+                    Expect("watching a copy of engine/shaders", enabled && Render::GetShaderReloadStatus().filesOverridden == 0,
+                           dir.string() + F(" (%.0f files overridden: identical to the embedded sources)", Render::GetShaderReloadStatus().filesOverridden));
+                    m_scratch[0] = float(status.reloads);
+                    // edit: the tone mapper now paints everything magenta
+                    writeTonemap("\n// hot-reload test\n#define main main_original\n");
+                    {
+                        std::ofstream f(tonemap, std::ios::binary | std::ios::trunc);
+                        std::string edited = m_shaderOriginal;
+                        const size_t end = edited.rfind('}');
+                        edited.insert(end, "    o_color = vec4(1.0, 0.0, 1.0, 1.0);   // hot-reload test\n");
+                        f << edited;
+                    }
+                    m_phase = 1;
+                    return false;
+                }
+                case 1:
+                    if (float(status.reloads) <= m_scratch[0]) return false;
+                    RequestCapture();
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (!m_captureReady) return false;
+                    Expect("edited tonemap.frag.glsl rebuilt live (frame turns magenta)", centre(0) > 240 && centre(1) < 15 && centre(2) > 240 && status.failures == 0,
+                           F("%.0f reloads, %.0f programs rebuilt, centre pixel (%.0f, ", status.reloads, status.programsRebuilt, centre(0)) + F("%.0f, %.0f)", centre(1), centre(2)));
+                    m_scratch[0] = float(status.failures);
+                    std::ofstream f(tonemap, std::ios::binary | std::ios::trunc);
+                    f << m_shaderOriginal << "\nthis is not GLSL;\n";
+                    m_phase = 3;
+                    return false;
+                }
+                case 3:
+                    if (float(status.failures) <= m_scratch[0]) return false;
+                    RequestCapture();
+                    m_phase = 4;
+                    return false;
+                case 4: {
+                    if (!m_captureReady) return false;
+                    Expect("a broken edit is reported and the previous program keeps running", centre(0) > 240 && centre(1) < 15 && !status.lastError.empty(),
+                           status.lastError + F(" (centre still %.0f, %.0f, ", centre(0), centre(1)) + F("%.0f)", centre(2)));
+                    m_scratch[0] = float(status.reloads);
+                    writeTonemap("");
+                    m_phase = 5;
+                    return false;
+                }
+                case 5:
+                    if (float(status.reloads) <= m_scratch[0]) return false;
+                    RequestCapture();
+                    m_phase = 6;
+                    return false;
+                default: {
+                    if (!m_captureReady) return false;
+                    const bool magenta = centre(0) > 240 && centre(1) < 15 && centre(2) > 240;
+                    Render::DisableShaderHotReload();
+                    Expect("restored source renders normally again", !magenta && Render::GetShaderReloadStatus().filesOverridden == 0,
+                           F("centre (%.0f, %.0f, %.0f)", centre(0), centre(1), centre(2)));
+                    (void)ctx;
+                    return true;
+                }
+            }
+        }, 60.0 });
+
+        // P9e. Terrain + foliage + navigation crowd + spatial audio.
+        m_steps.push_back({ "P9: terrain, foliage, nav crowd, spatial audio", [this](GameContext& ctx) {
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("Terrain"); m_phase = 1; return false;
+                case 1:
+                    if (ctx.scenes->CurrentName() != "Terrain") return false;
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_scratch[1] = 10.0f; m_scratch[2] = 0.0f; m_scratch[3] = 1e9f;
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    // track the drone's Doppler pitch range and the crowd spacing while it runs
+                    Entity drone = Find(ctx, "Drone");
+                    const AudioSource* a = drone.Valid() ? drone.TryGet<AudioSource>() : nullptr;
+                    Audio::SpatialInfo info;
+                    if (a && Audio::GetSpatialInfo(a->voice, info)) { m_scratch[1] = std::min(m_scratch[1], info.dopplerPitch); m_scratch[2] = std::max(m_scratch[2], info.dopplerPitch); }
+                    if (StepSimTime(ctx) - m_scratch[0] > 1.0) m_scratch[3] = std::min(m_scratch[3], AI::GetStats().minSeparation);
+                    if (StepSimTime(ctx) - m_scratch[0] < 12.0) return false;
+                    const World::Stats w = World::GetStats();
+                    Expect("terrain built: 129x129 height field, splat material, 4 instanced foliage batches", w.terrains == 1 && w.terrainTriangles == 128u * 128u * 2u && w.foliageBatches == 4 && w.foliageInstances > 800,
+                           F("%.0f triangles, %.0f foliage instances in %.0f batches", w.terrainTriangles, w.foliageInstances, w.foliageBatches));
+                    Entity terrain = Find(ctx, "Terrain");
+                    float worst = 0.0f;
+                    int hits = 0;
+                    for (int i = 0; i < 24; ++i) {
+                        const glm::vec3 p(std::cos(float(i)) * (3.0f + float(i)), 30.0f, std::sin(float(i)) * (3.0f + float(i)));
+                        float h = 0.0f;
+                        const auto hit = Physics::Raycast(p, glm::vec3(0, -1, 0), 60.0f);
+                        if (!hit || !World::SampleTerrainHeight(terrain, p, h) || Find(ctx, "Terrain") != ctx.CurrentScene()->FromBody(hit->body)) continue;
+                        worst = std::max(worst, std::fabs(hit->point.y - h));
+                        ++hits;
+                    }
+                    Expect("height-field collision matches the rendered heights", hits >= 12 && worst < 0.03f, F("%.0f rays, max error %.4f m", double(hits), worst));
+                    const AI::Stats nav = AI::GetStats();
+                    const Lab::TerrainScene* scene = dynamic_cast<Lab::TerrainScene*>(ctx.CurrentScene());
+                    Expect("navigation grid built from static geometry; crowd crosses and re-targets", nav.walkableCells > 1500 && nav.agents == 8 && scene && scene->crossings >= 8 && nav.pathFailures == 0,
+                           F("%.0f walkable cells (%.1f ms), %.0f agents, %.0f arrivals", nav.walkableCells, nav.buildMs, nav.agents, scene ? double(scene->crossings) : 0.0)
+                               + F(", %.0f paths, %.0f failures", nav.pathsPlanned, nav.pathFailures));
+                    Expect("agents keep their distance (time-to-collision avoidance)", m_scratch[3] > -0.12f, F("closest gap %.3f m", m_scratch[3]));
+                    Expect("spatial drone: panned, attenuated, Doppler-shifted voice", m_scratch[2] > 1.01f && m_scratch[1] < 0.99f,
+                           F("pitch range %.3f .. %.3f", m_scratch[1], m_scratch[2]));
+                    Screenshot("p9_05_terrain");
+                    return true;
+                }
+            }
+            return false;
+        }, 30.0 });
+
+        // P9f. Joints on the active backend, driven by Lua scripts; scripted interaction.
+        m_steps.push_back({ "P9: joints and Lua scripting", [this](GameContext& ctx) {
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("Joints"); m_phase = 1; return false;
+                case 1:
+                    if (ctx.scenes->CurrentName() != "Joints") return false;
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_scratch[1] = 1e9f; m_scratch[2] = -1e9f; m_scratch[3] = 0.0f; m_scratch[4] = 1e9f; m_scratch[5] = -1e9f;
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    Entity lift = Find(ctx, "Elevator"), bob = Find(ctx, "SpringBob");
+                    if (const Joint* j = lift.Valid() ? lift.TryGet<Joint>() : nullptr) {
+                        const float p = Physics::GetJointState(j->runtime).position;
+                        m_scratch[1] = std::min(m_scratch[1], p);
+                        m_scratch[2] = std::max(m_scratch[2], p);
+                    }
+                    if (const Joint* j = bob.Valid() ? bob.TryGet<Joint>() : nullptr) {
+                        const float p = Physics::GetJointState(j->runtime).position;
+                        m_scratch[4] = std::min(m_scratch[4], p);
+                        m_scratch[5] = std::max(m_scratch[5], p);
+                    }
+                    float worst = 0.0f;   // ball / hinge anchors must stay together
+                    ctx.CurrentScene()->Each<Joint>([&](Entity, Joint& j) {
+                        if (j.type != Physics::JointType::BallSocket && j.type != Physics::JointType::Hinge) return;
+                        const Physics::JointState s = Physics::GetJointState(j.runtime);
+                        worst = std::max(worst, glm::length(s.anchorA - s.anchorB));
+                    });
+                    m_scratch[3] = std::max(m_scratch[3], worst);
+                    if (StepSimTime(ctx) - m_scratch[0] < 7.0) return false;
+                    const Physics::Stats ps = Physics::GetStats();
+                    Expect("9 joints created from Joint components", ps.joints == 9, F("%.0f joints on ", ps.joints) + Physics::BackendName());
+                    Expect("ball / hinge anchors stay together under load", m_scratch[3] < 0.03f, F("max anchor separation %.4f m", m_scratch[3]));
+                    Entity rotor = Find(ctx, "Windmill");
+                    const Joint* motor = rotor.Valid() ? rotor.TryGet<Joint>() : nullptr;
+                    const float speed = motor ? Physics::GetJointState(motor->runtime).speed : 0.0f;
+                    Expect("motorised hinge spins at its target speed", std::fabs(std::fabs(speed) - 2.5f) < 0.25f, F("%.3f rad/s (target 2.5)", speed));
+                    Expect("Lua drives the prismatic lift up and down between its limits", m_scratch[1] < 0.3f && m_scratch[2] > 1.9f && m_scratch[2] < 2.3f,
+                           F("travel %.3f .. %.3f m (limits 0 .. 2.2)", m_scratch[1], m_scratch[2]));
+                    Expect("spring-damper bob oscillates", m_scratch[5] - m_scratch[4] > 0.1f, F("length %.3f .. %.3f m", m_scratch[4], m_scratch[5]));
+                    const Scripting::Stats s = Scripting::GetStats();
+                    Expect("Lua scripts running without errors", s.scripts == 4 && s.running == 4 && s.errors == 0 && s.callbacks > 500,
+                           F("%.0f scripts, %.0f running, %.0f errors, %.0f callbacks", s.scripts, s.running, s.errors, double(s.callbacks)) + (s.lastError.empty() ? "" : " last: " + s.lastError));
+                    const Entity spinner = Find(ctx, "Spinner");
+                    const float yaw = spinner.Valid() ? glm::degrees(glm::angle(spinner.WorldRotation())) : 0.0f;
+                    Expect("file script (scripts/spinner.lua) rotates its kinematic body", yaw > 5.0f, F("rotated %.1f deg", yaw));
+                    ctx.eventLog.clear();
+                    ctx.input.InjectPress(Action::Interact);
+                    m_scratch[0] = float(StepSimTime(ctx));
+                    m_phase = 3;
+                    return false;
+                }
+                default: {
+                    bool hit = false;
+                    for (const std::string& e : ctx.eventLog) hit |= e.find("bumper hit") != std::string::npos;
+                    const bool spawned = Find(ctx, "Ball").Valid();
+                    if (!hit && StepSimTime(ctx) - m_scratch[0] < 3.0) return false;
+                    Expect("input -> Lua spawns a ball; its collision runs the bumper's on_collision", spawned && hit,
+                           std::string(spawned ? "ball spawned" : "no ball") + (hit ? ", bumper hit event" : ", no hit event"));
+                    Screenshot("p9_06_joints");
+                    return true;
+                }
+            }
+        }, 20.0 });
+
         m_steps.push_back({ "Scene transition back to Sandbox", [this](GameContext& ctx) {
             if (m_phase == 0) { ctx.scenes->Request("Sandbox"); m_phase = 1; return false; }
             if (ctx.scenes->CurrentName() != "Sandbox") return false;
@@ -1520,7 +1972,7 @@ namespace Phisiks {
                     m_scratch[0] = float(m_stepFrames); m_phase = 2; return false;
                 case 2:
                     if (m_stepFrames - m_scratch[0] < 15) return false;
-                    Expect("no simulation while paused", std::abs(ctx.stats.simulationTime - m_scratch[1]) < 1e-6, F("sim time %.4f -> %.4f over 15 frames", m_scratch[1], ctx.stats.simulationTime));
+                    Expect("no simulation while paused", std::abs(float(ctx.stats.simulationTime) - m_scratch[1]) < 1e-6f, F("sim time %.4f -> %.4f over 15 frames", m_scratch[1], ctx.stats.simulationTime));
                     Screenshot("09_paused");
                     ctx.input.InjectPress(Action::Pause);
                     m_scratch[0] = float(m_stepFrames); m_scratch[3] = 0.0f; m_phase = 3; return false;

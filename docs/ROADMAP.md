@@ -19,6 +19,7 @@ Every phase ends with a clean Release build, all unit and runtime checks green, 
 | P5 | `p5-assets-audio` | `Phisiks::Audio` (WASAPI + mixer), on-demand `Phisiks::Assets`, CC0 asset generator, dark studio look, multi-viewport and orthographic cameras, orbit camera, deterministic headless simulation with frame/data export |
 | P6 | `p6-clean-engine` | Repository contains only Phisiks code, CC0 assets and listed third-party libraries; strict layering/name check; MIT licence |
 | P7 / P7b | `p7-compute` | `Phisiks::Compute` (OpenGL 4.6 compute + SSBOs, `IComputeBackend` with OpenCL/SYCL hooks); persistent-mapped ring buffer; GPU frustum + Hi-Z occlusion culling writing the indirect commands; GPU spatial hash and particles; `Phisiks::Physics::Advanced` GPU XPBD (rope, cloth, soft bodies) with scene colliders; force fields (uniform, planetary, vortex, N-body) on rigid bodies, particles and XPBD; raymarched SDF/CSG and vector-field arrow visualisers; FieldLab scene |
+| P9 | `p9-3d-vfx` | Retro deck studio skin (zero HUD overlap); glTF 2.0 / GLB importer, dual-quaternion skinning, spline camera paths; HDR bloom, SSAO, ribbon trails / beams / orbit paths, projected decals, live GLSL hot reload; heightmap terrain with splatmaps and height-field collision, instanced foliage; joints (hinge, ball-socket, prismatic, spring-damper) on both physics backends; 3D audio (panning, inverse-square, Doppler); navigation grid + A* + crowd steering; embedded Lua 5.4 scripting |
 | P8 | `p8-studio` | Windows / Linux / macOS builds (platform layer, CMake presets, CI); native rigid-body backend; OpenGL 4.1 renderer tier + multi-threaded CPU compute backend; PhisiksLab ImGui studio (hierarchy, inspector, gizmos, classroom lessons, telemetry, timeline); JSON scenes; replay ring buffer with scrubbing; synthetic-vision export; FSR 1.0-style EASU + RCAS upscaling and quality presets; particle emitters; two-way particle / soft-body to rigid-body coupling |
 
 ## Next
@@ -32,15 +33,22 @@ From P7 (still open):
 
 From P8:
 - **Platforms:** the Linux and macOS builds exist (CMake presets, `ci.yml`) but have not been run yet; the first CI run will be the first real compile with GCC / Apple Clang. Linux PhysX via vcpkg is wired in CMake but untested.
-- **Native physics:** convex hulls use their bounding box for inertia; boxes and convex shapes resting on triangle meshes rely on an incremental manifold (less stable stacks than PhysX); no joints (neither backend exposes joints yet).
+- **Native physics:** convex hulls use their bounding box for inertia; boxes and convex shapes resting on triangle meshes rely on an incremental manifold (less stable stacks than PhysX).
 - **Replay:** covers transforms, rigid bodies, camera and input actions; particles and XPBD soft bodies are not snapshotted (they keep their current state when scrubbing); inputs are recorded, not re-injected for re-simulation.
 - **Vision export:** depth / normals / ids cover meshes and soft bodies; particle sprites and the SDF visualiser appear only in the colour image.
 - **Studio:** no native file dialogs (a path field); no undo; the gizmo works on the primary camera only (not quad view).
 - **Quality presets:** values chosen for an i3 / 8 GB / UHD-class laptop; frame times per preset have not been benchmarked on such a machine yet.
 
-### P9 candidates
-- Joints / articulations in `Phisiks::Physics` (both backends).
+From P9:
+- **Animation:** CPU skinning (all tiers); a GPU skinning path for many characters; no morph targets, sparse accessors or KHR extensions; no blending between clips.
+- **Navigation:** a walkable-cell grid (with ledge / radius erosion), not a polygon navmesh; agents move kinematically (no character-controller agents); foliage has no colliders, so agents walk through trees.
+- **VFX:** decals / SSAO / bloom apply to window views (offscreen targets get no post FX); SSAO normals are reconstructed from depth; ribbons are additive only.
+- **Scenes:** JSON scene files do not yet store the P9 components (Joint, SkinnedModel, Terrain, Script, ...).
+- **Joints:** no breakable joints, no articulation (reduced-coordinate) solver; PhysX prismatic is a D6 joint.
+
+### P10 candidates
 - Template projects in `examples/`: 3D game, headless simulation + data export, interactive visualiser.
+- GPU skinning and animation blending / state machines; polygon navmesh.
 - Vulkan or Metal backend evaluation for macOS beyond OpenGL 4.1.
 
 ## Principles

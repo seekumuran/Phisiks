@@ -4,6 +4,7 @@
 #include "Phisiks/Framework/SceneManager.h"
 #include "Phisiks/Physics/Physics.h"
 #include "Phisiks/Render/Renderer.h"
+#include "Phisiks/UI/ImGuiLayer.h"
 
 #include <cstdio>
 #include <string>
@@ -25,6 +26,7 @@ namespace Phisiks::DebugOverlay {
         }
 
         using Line = std::pair<glm::vec4, std::string>;
+        int g_telemetryLines = 0;
 
         void Lines(const std::vector<Line>& lines, float x, float y) {
             const float step = Render::MeasureText("X", SCALE).y + 4.0f;
@@ -59,7 +61,10 @@ namespace Phisiks::DebugOverlay {
             Centered("PAUSED  -  ESC resume   Q quit", center - glm::vec2(0.0f, 80.0f), YELLOW, SCALE * 1.5f);
         }
 
-        if (!ctx.overlayVisible) return;
+        g_telemetryLines = 0;
+        // The studio panels (Dear ImGui) carry the same telemetry; the bitmap text block would sit
+        // behind the left-hand panels, so it is only drawn while they are hidden.
+        if (!ctx.overlayVisible || UI::PanelsVisible()) return;
 
         const FrameStats& s = ctx.stats;
         const glm::vec3 feet = ctx.player.GetFeetPosition();
@@ -88,7 +93,10 @@ namespace Phisiks::DebugOverlay {
         lines.push_back({ GREY, "WASD move  SHIFT sprint  SPACE jump  MOUSE look  E interact  LMB push/damage" });
         lines.push_back({ GREY, "V camera  F1 overlay  F2 physics debug  R reload  N next scene  ESC pause" });
         Lines(lines, 16.0f, 12.0f);
+        g_telemetryLines = int(lines.size());
     }
+
+    int LastTelemetryLineCount() { return g_telemetryLines; }
 
     void DrawPhysicsDebug(GameContext& ctx) {
         if (Scene* scene = ctx.CurrentScene()) {

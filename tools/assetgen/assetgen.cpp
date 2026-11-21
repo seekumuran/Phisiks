@@ -7,6 +7,8 @@
 //     audio/spawn_chime.wav     two-note chime, 44.1 kHz mono 16-bit
 //     audio/impact.wav          short low thud, 44.1 kHz mono 16-bit
 //     meshes/torus.obj          torus with normals and UVs (R 0.35 m, r 0.13 m)
+//     audio/drone_hum.wav       2 s seamless hum loop (spatial-audio demo), 44.1 kHz mono 16-bit
+//     models/walker.glb         skinned 4-bone tube, embedded PNG, clips "Twist" (linear) / "Sway" (cubic)
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -190,6 +192,180 @@ namespace {
         }
         return bool(f);
     }
+
+    // ------------------------------------------------------------------ audio (loop)
+    // 2 s seamless hum (whole periods only) for the spatial-audio demo: 110 Hz + harmonics + slow beat.
+    std::vector<double> DroneHum(int rate) {
+        std::vector<double> out(size_t(rate) * 2, 0.0);
+        for (size_t i = 0; i < out.size(); ++i) {
+            const double t = double(i) / rate;
+            const double beat = 0.8 + 0.2 * std::sin(2 * PI * 1.0 * t);
+            out[i] = beat * (0.45 * std::sin(2 * PI * 110.0 * t) + 0.25 * std::sin(2 * PI * 220.0 * t) + 0.12 * std::sin(2 * PI * 330.0 * t)
+                             + 0.06 * std::sin(2 * PI * 550.0 * t));
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------ glTF 2.0 binary (GLB)
+    // models/walker.glb: a 2 m segmented tube skinned to a 4-bone chain, with an embedded PNG
+    // (stripes) and two clips: "Twist" (LINEAR: each bone twists 70 deg about Y and sways) and
+    // "Sway" (CUBICSPLINE bend about X). Written to exercise the importer and dual-quaternion skinning.
+    struct Blob {
+        std::vector<uint8_t> bytes;
+        size_t Add(const void* data, size_t size) {
+            while (bytes.size() % 4) bytes.push_back(0);
+            const size_t offset = bytes.size();
+            const uint8_t* p = static_cast<const uint8_t*>(data);
+            bytes.insert(bytes.end(), p, p + size);
+            return offset;
+        }
+    };
+
+    void PngToMemory(void* context, void* data, int size) {
+        auto* out = static_cast<std::vector<uint8_t>*>(context);
+        const uint8_t* p = static_cast<const uint8_t*>(data);
+        out->insert(out->end(), p, p + size);
+    }
+
+    bool WalkerGlb(const fs::path& path) {
+        constexpr int RINGS = 40, SIDES = 24, BONES = 4;
+        constexpr double HEIGHT = 2.0, RADIUS = 0.25, SEGMENT = HEIGHT / BONES;
+        std::vector<float> positions, normals, uvs, weights;
+        std::vector<uint16_t> joints;
+        std::vector<uint32_t> indices;
+        for (int r = 0; r <= RINGS; ++r) {
+            const double y = HEIGHT * r / RINGS;
+            const double b = std::min(y / SEGMENT, double(BONES) - 1e-9);
+            const int bone = std::min(int(std::floor(b - 0.5 < 0 ? 0 : b - 0.5)), BONES - 1);
+            // blend between the bone below and above the segment centre
+            const double centre = (bone + 0.5) * SEGMENT;
+            double f = (y - centre) / SEGMENT;
+            int j0 = bone, j1 = std::min(bone + 1, BONES - 1);
+            if (f < 0) { j1 = j0; f = 0; }
+            f = std::clamp(f, 0.0, 1.0);
+            const double smooth = f * f * (3 - 2 * f);
+            for (int s = 0; s <= SIDES; ++s) {
+                const double a = 2 * PI * s / SIDES;
+                positions.insert(positions.end(), { float(RADIUS * std::cos(a)), float(y), float(RADIUS * std::sin(a)) });
+                normals.insert(normals.end(), { float(std::cos(a)), 0.0f, float(std::sin(a)) });
+                uvs.insert(uvs.end(), { float(double(s) / SIDES), float(1.0 - y / HEIGHT) });
+                joints.insert(joints.end(), { uint16_t(j0), uint16_t(j1), 0, 0 });
+                weights.insert(weights.end(), { float(1.0 - smooth), float(smooth), 0.0f, 0.0f });
+            }
+        }
+        for (int r = 0; r < RINGS; ++r)
+            for (int s = 0; s < SIDES; ++s) {
+                const uint32_t a = uint32_t(r * (SIDES + 1) + s), b = a + SIDES + 1;
+                indices.insert(indices.end(), { a, b, a + 1, a + 1, b, b + 1 });   // counter-clockwise from outside
+            }
+        const size_t vertexCount = positions.size() / 3;
+        // inverse bind matrices (column-major): bone i at y = i * SEGMENT
+        std::vector<float> inverseBind;
+        for (int i = 0; i < BONES; ++i) {
+            const float m[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, float(-i * SEGMENT), 0, 1 };
+            inverseBind.insert(inverseBind.end(), m, m + 16);
+        }
+        // clip "Twist" (linear): 9 keys over 2 s
+        std::vector<float> twistTimes;
+        std::vector<std::vector<float>> twistRot(BONES);
+        for (int k = 0; k <= 8; ++k) {
+            const double t = 2.0 * k / 8;
+            twistTimes.push_back(float(t));
+            const double twist = (70.0 * PI / 180.0) * std::sin(2 * PI * t / 2.0);
+            const double sway = (12.0 * PI / 180.0) * std::sin(2 * PI * t / 2.0 + 0.6);
+            for (int b = 0; b < BONES; ++b) {
+                // q = qz(sway) * qy(twist)
+                const double cy = std::cos(twist * 0.5), sy = std::sin(twist * 0.5), cz = std::cos(sway * 0.5), sz = std::sin(sway * 0.5);
+                const double x = -sz * sy, y = cz * sy, z = sz * cy, w = cz * cy;
+                twistRot[b].insert(twistRot[b].end(), { float(x), float(y), float(z), float(w) });
+            }
+        }
+        // clip "Sway" (cubic spline, in-tangent / value / out-tangent per key): bend about X
+        std::vector<float> swayTimes = { 0.0f, 1.0f, 2.0f };
+        std::vector<float> swayRot;
+        const double angles[3] = { 0.0, 25.0 * PI / 180.0, 0.0 };
+        for (int k = 0; k < 3; ++k) {
+            const double h = angles[k] * 0.5;
+            const float zero[4] = { 0, 0, 0, 0 };
+            const float value[4] = { float(std::sin(h)), 0.0f, 0.0f, float(std::cos(h)) };
+            swayRot.insert(swayRot.end(), zero, zero + 4);
+            swayRot.insert(swayRot.end(), value, value + 4);
+            swayRot.insert(swayRot.end(), zero, zero + 4);
+        }
+        // texture: horizontal stripes (rings) with a darker seam
+        Image tex(128, 128);
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x) {
+                const bool stripe = (y / 16) % 2 == 0;
+                const double shade = x < 4 ? 0.6 : 1.0;
+                tex.Set(x, y, (stripe ? 230 : 60) * shade, (stripe ? 150 : 170) * shade, (stripe ? 40 : 220) * shade);
+            }
+        std::vector<uint8_t> png;
+        stbi_write_png_to_func(PngToMemory, &png, tex.w, tex.h, 4, tex.px.data(), tex.w * 4);
+
+        Blob bin;
+        struct View { size_t offset, length; };
+        std::vector<View> views;
+        auto view = [&](const void* data, size_t size) { views.push_back({ bin.Add(data, size), size }); return int(views.size() - 1); };
+        const int vPos = view(positions.data(), positions.size() * 4), vNor = view(normals.data(), normals.size() * 4), vUv = view(uvs.data(), uvs.size() * 4);
+        const int vJoint = view(joints.data(), joints.size() * 2), vWeight = view(weights.data(), weights.size() * 4), vIndex = view(indices.data(), indices.size() * 4);
+        const int vIbm = view(inverseBind.data(), inverseBind.size() * 4), vTwistT = view(twistTimes.data(), twistTimes.size() * 4);
+        std::vector<int> vTwistR;
+        for (int b = 0; b < BONES; ++b) vTwistR.push_back(view(twistRot[b].data(), twistRot[b].size() * 4));
+        const int vSwayT = view(swayTimes.data(), swayTimes.size() * 4), vSwayR = view(swayRot.data(), swayRot.size() * 4);
+        const int vPng = view(png.data(), png.size());
+        while (bin.bytes.size() % 4) bin.bytes.push_back(0);
+
+        std::string json = "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Phisiks assetgen (CC0)\"},\"scene\":0,\"scenes\":[{\"nodes\":[0]}],";
+        json += "\"nodes\":[{\"name\":\"Walker\",\"children\":[1,5]},";
+        json += "{\"name\":\"Bone0\",\"children\":[2]},{\"name\":\"Bone1\",\"translation\":[0,0.5,0],\"children\":[3]},";
+        json += "{\"name\":\"Bone2\",\"translation\":[0,0.5,0],\"children\":[4]},{\"name\":\"Bone3\",\"translation\":[0,0.5,0]},";
+        json += "{\"name\":\"Body\",\"mesh\":0,\"skin\":0}],";
+        json += "\"skins\":[{\"name\":\"Spine\",\"joints\":[1,2,3,4],\"inverseBindMatrices\":6}],";
+        json += "\"meshes\":[{\"name\":\"Body\",\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2,\"JOINTS_0\":3,\"WEIGHTS_0\":4},\"indices\":5,\"material\":0}]}],";
+        json += "\"materials\":[{\"name\":\"Stripes\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"metallicFactor\":0.0,\"roughnessFactor\":0.55,\"baseColorTexture\":{\"index\":0}}}],";
+        json += "\"textures\":[{\"source\":0}],\"images\":[{\"name\":\"stripes\",\"mimeType\":\"image/png\",\"bufferView\":" + std::to_string(vPng) + "}],";
+        char text[512];
+        std::string accessors = "\"accessors\":[";
+        auto accessor = [&](int bufferView, int componentType, size_t count, const char* type, const std::string& extra = std::string()) {
+            std::snprintf(text, sizeof(text), "%s{\"bufferView\":%d,\"componentType\":%d,\"count\":%zu,\"type\":\"%s\"%s}", accessors.back() == '[' ? "" : ",",
+                          bufferView, componentType, count, type, extra.c_str());
+            accessors += text;
+        };
+        float lo[3] = { 1e9f, 1e9f, 1e9f }, hi[3] = { -1e9f, -1e9f, -1e9f };
+        for (size_t i = 0; i < vertexCount; ++i) for (int k = 0; k < 3; ++k) { lo[k] = std::min(lo[k], positions[i * 3 + k]); hi[k] = std::max(hi[k], positions[i * 3 + k]); }
+        std::snprintf(text, sizeof(text), ",\"min\":[%g,%g,%g],\"max\":[%g,%g,%g]", lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+        accessor(vPos, 5126, vertexCount, "VEC3", text);                 // 0
+        accessor(vNor, 5126, vertexCount, "VEC3");                       // 1
+        accessor(vUv, 5126, vertexCount, "VEC2");                        // 2
+        accessor(vJoint, 5123, vertexCount, "VEC4");                     // 3
+        accessor(vWeight, 5126, vertexCount, "VEC4");                    // 4
+        accessor(vIndex, 5125, indices.size(), "SCALAR");                // 5
+        accessor(vIbm, 5126, BONES, "MAT4");                             // 6
+        accessor(vTwistT, 5126, twistTimes.size(), "SCALAR", ",\"min\":[0],\"max\":[2]");   // 7
+        for (int b = 0; b < BONES; ++b) accessor(vTwistR[b], 5126, twistTimes.size(), "VEC4");   // 8..11
+        accessor(vSwayT, 5126, swayTimes.size(), "SCALAR", ",\"min\":[0],\"max\":[2]");     // 12
+        accessor(vSwayR, 5126, swayRot.size() / 4, "VEC4");             // 13
+        accessors += "],";
+        json += accessors;
+        json += "\"animations\":[{\"name\":\"Twist\",\"samplers\":[";
+        for (int b = 0; b < BONES; ++b) { std::snprintf(text, sizeof(text), "%s{\"input\":7,\"output\":%d,\"interpolation\":\"LINEAR\"}", b ? "," : "", 8 + b); json += text; }
+        json += "],\"channels\":[";
+        for (int b = 0; b < BONES; ++b) { std::snprintf(text, sizeof(text), "%s{\"sampler\":%d,\"target\":{\"node\":%d,\"path\":\"rotation\"}}", b ? "," : "", b, 1 + b); json += text; }
+        json += "]},{\"name\":\"Sway\",\"samplers\":[{\"input\":12,\"output\":13,\"interpolation\":\"CUBICSPLINE\"}],\"channels\":[{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"rotation\"}}]}],";
+        json += "\"bufferViews\":[";
+        for (size_t i = 0; i < views.size(); ++i) { std::snprintf(text, sizeof(text), "%s{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu}", i ? "," : "", views[i].offset, views[i].length); json += text; }
+        json += "],\"buffers\":[{\"byteLength\":" + std::to_string(bin.bytes.size()) + "}]}";
+        while (json.size() % 4) json += ' ';
+
+        fs::create_directories(path.parent_path());
+        std::ofstream f(path, std::ios::binary);
+        auto u32 = [&](uint32_t v) { f.write(reinterpret_cast<const char*>(&v), 4); };
+        u32(0x46546C67u); u32(2); u32(uint32_t(12 + 8 + json.size() + 8 + bin.bytes.size()));
+        u32(uint32_t(json.size())); u32(0x4E4F534Au); f.write(json.data(), std::streamsize(json.size()));
+        u32(uint32_t(bin.bytes.size())); u32(0x004E4942u); f.write(reinterpret_cast<const char*>(bin.bytes.data()), std::streamsize(bin.bytes.size()));
+        return bool(f);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -200,6 +376,8 @@ int main(int argc, char** argv) {
     ok &= SaveWav(Chime(44100), 44100, out / "audio/spawn_chime.wav");
     ok &= SaveWav(Impact(44100), 44100, out / "audio/impact.wav");
     ok &= Torus(out / "meshes/torus.obj", 0.35, 0.13, 48, 24);
+    ok &= SaveWav(DroneHum(44100), 44100, out / "audio/drone_hum.wav");
+    ok &= WalkerGlb(out / "models/walker.glb");
     std::printf("assetgen: %s -> %s\n", ok ? "ok" : "FAILED", out.string().c_str());
     return ok ? 0 : 1;
 }

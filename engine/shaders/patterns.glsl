@@ -104,7 +104,7 @@ vec4 PatternPlanar(Material m, uint pattern, vec2 p, out float glow) {
 vec4 SamplePattern(Material m, vec3 objectPosMetres, vec3 objectNormal, vec2 uvScale, out float glow) {
     glow = 0.0;
     uint pattern = uint(m.emissivePattern.w + 0.5);
-    if (pattern == 0u) return vec4(m.baseRoughness.rgb, 0.0);
+    if (pattern == 0u || pattern == 7u) return vec4(m.baseRoughness.rgb, 0.0);   // 7 = splat (SampleSplat)
     vec3 p = objectPosMetres * m.params.x;
     vec3 w = pow(abs(objectNormal), vec3(8.0));
     w /= max(w.x + w.y + w.z, 1e-5);
@@ -116,9 +116,35 @@ vec4 SamplePattern(Material m, vec3 objectPosMetres, vec3 objectNormal, vec2 uvS
     return result;
 }
 
-// Albedo texture mapped tri-planar like the patterns (1.0 when the material has no texture).
-vec3 SampleAlbedoTexture(Material m, vec3 objectPosMetres, vec3 objectNormal, vec2 uvScale) {
+vec3 SrgbEncode(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }
+
+// Terrain splatting: the splatmap (albedo texture layer at mesh UVs; stored sRGB, so re-encoded to
+// the linear weights it holds) blends four layer colours, each varied by value noise at
+// `patternScale` repeats per metre. Returns rgb albedo, a roughness.
+vec4 SampleSplat(Material m, vec2 uv, vec3 worldPos) {
+    vec4 weights = vec4(1.0, 0.0, 0.0, 0.0);
+    if (m.textureParams.x >= 0.0) {
+        vec4 t = texture(u_albedoTextures, vec3(uv, m.textureParams.x));
+        weights = vec4(SrgbEncode(t.rgb), t.a);
+    }
+    weights /= max(weights.x + weights.y + weights.z + weights.w, 1e-4);
+    vec2 p = worldPos.xz * m.params.x;
+    float n1 = Fbm(p), n2 = Fbm(p * 3.7 + 9.1);
+    vec4 result = vec4(0.0);
+    for (int k = 0; k < 4; ++k) {
+        float detail = k == 0 ? m.splatDetail.x : k == 1 ? m.splatDetail.y : k == 2 ? m.splatDetail.z : m.splatDetail.w;
+        float n = k == 2 ? n2 : n1;
+        vec3 color = m.splat[k].rgb * (1.0 + detail * (n * 2.0 - 1.0) * 1.2);
+        result += weights[k] * vec4(color, m.splat[k].a);
+    }
+    return result;
+}
+
+// Albedo texture mapped tri-planar like the patterns, or at the mesh UVs (imported models);
+// 1.0 when the material has no texture.
+vec3 SampleAlbedoTexture(Material m, vec3 objectPosMetres, vec3 objectNormal, vec2 uvScale, vec2 uv) {
     if (m.textureParams.x < 0.0) return vec3(1.0);
+    if (m.textureParams.z > 0.5) return texture(u_albedoTextures, vec3(uv, m.textureParams.x)).rgb;
     float layer = m.textureParams.x;
     vec3 p = objectPosMetres * m.textureParams.y;
     vec3 w = pow(abs(objectNormal), vec3(8.0));

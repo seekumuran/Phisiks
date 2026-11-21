@@ -22,7 +22,7 @@ No crash has been observed with the Phisiks shaders: more than 10 cold compiles 
 - There is no light culling: every light is evaluated for every shaded pixel. That is fine for tens of lights; clustered lighting is not implemented.
 
 ## Audio
-- Sounds play without 3D positioning (no distance attenuation or panning yet).
+- 3D voices are stereo-panned (equal power) with inverse-square attenuation and Doppler; there is no HRTF, occlusion or reverb.
 - WAV is the only clip format.
 
 ## Simulation
@@ -48,3 +48,17 @@ Keyboard state comes from GLFW, so the focused window receives keys. When Phisik
 - **Two-way coupling latency:** the CPU backend applies particle / node reaction impulses on the next fixed step. The GPU backend reads them back without stalling, 1–3 steps later.
 - **Native backend vs PhysX:** stacks are less stable and friction slightly different (each passes the analytic unit tests within their tolerances); there is no CCD sweep beyond speculative contacts.
 - **4.1 tier shader compile:** cold compile of the 16 graphics programs took 2.9 s on Intel UHD (warm, from the binary cache: 30 ms).
+
+## P9 (3D, VFX, terrain, joints, audio, navigation, Lua)
+- **Studio UI on screen (fixed in P9):** the renderer leaves its own framebuffers bound after presenting (4.6 tier blits by name), and in P8 the ImGui pass drew into the renderer's present texture instead of the window. `UI::EndFrame` now binds the default framebuffer; the P9 runtime check reads the window back buffer and finds the LCD's black / phosphor-green pixels.
+- **Trails at high frame rates (fixed in P9):** the head point used to be the sample it was compared with, so above ~70 FPS a slow trail never committed a sample. Found by the 4.1-tier autotest (frames of 10 ms); the head is now separate from the committed samples (unit test at 240 Hz).
+- **Skinning** runs on the CPU (0.7 ms for 3 x 1,025 vertices); hundreds of skinned characters need a GPU path. Dual-quaternion skinning ignores joint scale.
+- **glTF:** sparse accessors, morph targets, cameras / lights and KHR extensions are not supported (required extensions are logged and ignored); only the base-colour texture of a material is used.
+- **Post FX** apply to window views only. SSAO derives normals from depth (faceted on curved surfaces at grazing angles); their GPU cost has not been timed per pass (the Low preset turns SSAO off and shortens the bloom chain for integrated GPUs).
+- **Decals** project onto everything inside their box (including dynamic objects passing through).
+- **Navigation:** the grid is built once (set `NavigationSurface::rebuild` after moving static geometry); foliage has no colliders; agents are kinematic and ignore rigid bodies.
+- **PhysX spring-damper** (PxDistanceJoint spring) is softer than the native implicit spring: period 0.667 s vs the analytic 0.628 s for k = 200 N/m, m = 2 kg (native: 0.628 s).
+- **Hot reload** rebuilds every program on any change (compiled from source, not via the binary cache); a failed compile keeps the previous program.
+- **Lua:** no debugger; scripts see entities by name / id only (no component reflection beyond the documented API).
+- **JSON scenes** do not store the P9 components yet.
+

@@ -3,16 +3,20 @@
 A general-purpose 3D simulation, visualisation and game engine in C++20 for Windows, Linux and macOS (OpenGL 4.6, with an OpenGL 4.1 tier for macOS and older GPUs).
 
 - **Scenes:** EnTT entity-component scenes with transform hierarchies.
-- **Physics:** rigid bodies, colliders, queries and a character controller behind a small `Phisiks::Physics` API, with two backends: NVIDIA PhysX 5 (Windows default) and the built-in native solver (macOS, Linux).
+- **Physics:** rigid bodies, colliders (incl. height fields), joints (hinge, ball-and-socket, prismatic, spring-damper; limits and motors), queries and a character controller behind a small `Phisiks::Physics` API, with two backends: NVIDIA PhysX 5 (Windows default) and the built-in native solver (macOS, Linux).
 - **Renderer:** forward PBR with GPU-driven indirect drawing (compute frustum + Hi-Z occlusion culling), directional/spot/point shadows and analytic fog, plus a persistent shader binary cache.
 - **Compute:** `Phisiks::Compute::IComputeBackend` with an OpenGL 4.6 compute backend and a multi-threaded CPU backend (OpenCL/SYCL hooks); GPU spatial hash and particles, with the same systems on the CPU worker pool on the 4.1 tier and headless.
-- **Upscaling:** FSR 1.0-style EASU + RCAS spatial upscaling (clean-room) and Low / Medium / High quality presets for integrated GPUs.
+- **Upscaling and post FX:** FSR 1.0-style EASU + RCAS spatial upscaling (clean-room), HDR bloom (mip chain), SSAO, projected decals, ribbon trails / beams / orbit paths, live GLSL hot reload, and Low / Medium / High quality presets for integrated GPUs.
+- **Animation:** glTF 2.0 / GLB import (meshes, skins, clips, PBR base colour textures), dual-quaternion skinning, Catmull-Rom / Bezier camera paths.
+- **World:** fBm or image heightmap terrain with 4-layer splatmaps and height-field collision, GPU-instanced foliage scatter.
+- **AI:** navigation grid built from static physics geometry, A* with string pulling, crowd steering (separation + time-to-collision avoidance).
+- **Scripting:** embedded, sandboxed Lua 5.4 (`Script` component: entities, physics, joints, input, scene events, file hot reload).
 - **Advanced physics:** XPBD rope, cloth and soft bodies colliding with the scene; particle emitters; two-way coupling (particles and soft bodies push rigid bodies); force fields (planetary gravity, vortex, N-body).
 - **Visualisers:** raymarched SDF / smooth-CSG shapes and vector-field arrows.
 - **Cameras:** multiple viewports and orthographic cameras, offscreen targets, a CAD-style orbit camera.
 - **Simulation:** deterministic stepped simulation (headless or offscreen) with PNG frame and CSV state export, synthetic-vision export (aligned RGB, linear depth, world normals, entity-id masks, camera CSV), a replay ring buffer with timeline scrubbing, and JSON scene files.
-- **PhisiksLab studio:** Dear ImGui hierarchy, inspector with viewport gizmos, classroom lesson switcher, live tuning, CPU/GPU/RAM telemetry and the replay timeline.
-- **Audio:** software mixer with WASAPI (Windows) or miniaudio (macOS, Linux) output.
+- **PhisiksLab studio:** Dear ImGui in an original "retro deck" skin (bevelled slate panels, LCD readouts, LED meters, equaliser sliders, transport bar): lesson playlist, hierarchy, inspector with viewport gizmos, live tuning, CPU/GPU/RAM telemetry and the replay timeline.
+- **Audio:** software mixer with WASAPI (Windows) or miniaudio (macOS, Linux) output; 3D voices with equal-power panning, inverse-square attenuation and Doppler shift.
 - **Assets:** loaded on demand; the sample assets are procedurally generated and CC0.
 - **Look:** a dark studio with a rainbow calibration-grid floor.
 

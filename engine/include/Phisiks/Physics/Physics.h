@@ -81,6 +81,13 @@ namespace Phisiks::Physics {
     std::vector<BodyId> OverlapSphere(const glm::vec3& center, float radius, const QueryOptions& options = {});
     std::vector<BodyId> OverlapBox(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation, const QueryOptions& options = {});
 
+    // ---- Joints. Destroying a body destroys its joints (their ids become stale).
+    JointId CreateJoint(const JointDesc& desc);
+    void DestroyJoint(JointId joint);                           // safe on stale ids
+    bool IsValid(JointId joint);
+    JointState GetJointState(JointId joint);
+    void SetJointMotor(JointId joint, bool enable, float speed, float maxForce);
+
     // ---- Character controller (kinematic capsule with step-up, slope limit, and pushing)
     CharacterId CreateCharacter(const CharacterDesc& desc);
     void DestroyCharacter(CharacterId character);

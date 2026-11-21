@@ -7,9 +7,12 @@
 //   3. spot / point shadow maps (shared by all views)
 //   4. per view (camera): directional shadow fit -> viewport/scissor into its target set ->
 //      forward PBR pass (HDR + entity id) -> sky -> debug lines
-//   5. per target set: MSAA resolve -> tonemap into LDR. The window set renders at renderScale x
-//      the window size and is upscaled (EASU + RCAS, or bilinear) to the window, then overlay text
-//      is drawn on top and the result is blitted to the default framebuffer.
+//      (+ additive VFX ribbons after the sky)
+//   5. per target set: MSAA resolve -> [window: depth resolve, projected decals, SSAO, bloom mip
+//      chain] -> tonemap into LDR. The window set renders at renderScale x the window size and is
+//      upscaled (EASU + RCAS, or bilinear) to the window, then overlay text is drawn on top and the
+//      result is blitted to the default framebuffer.
+// Shader hot reload: engine/shaders edits replace the embedded sources and rebuild the programs.
 // 4.1 tier: CPU culling, one instanced draw per command (u_baseInstance), storage read through
 // texture buffers, no Hi-Z; particles / XPBD / fields come from the CPU compute backend.
 #include "render/RendererInternal.h"
@@ -33,6 +36,10 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <tuple>
 #include <memory>
 #include <unordered_map>
@@ -59,15 +66,16 @@ namespace Phisiks::Render {
         struct LightGpu { glm::vec4 positionRange, directionType, colorIntensity, params; };
         struct InstanceGpu { glm::mat4 model, normalMatrix; glm::vec4 scaleMaterial; glm::uvec4 ids; glm::vec4 uvScale; };
         static_assert(sizeof(InstanceGpu) == 176, "std430 layout");
-        struct MaterialGpu { glm::vec4 baseRoughness, patternMetallic, emissivePattern, params, textureParams; };
-        static_assert(sizeof(MaterialGpu) == 80, "std430 layout");
+        struct MaterialGpu { glm::vec4 baseRoughness, patternMetallic, emissivePattern, params, textureParams, splat[4], splatDetail; };
+        static_assert(sizeof(MaterialGpu) == 160, "std430 layout");
+        struct RibbonVertex { glm::vec4 positionSide, tangentWidth, color; };
         struct DrawCommand { uint32_t count, instanceCount, firstIndex; int32_t baseVertex; uint32_t baseInstance; };
         struct CullObjectGpu { glm::vec4 sphere; glm::uvec4 meshInstance; };
         struct SdfPrimitiveGpu { glm::vec4 positionShape, rotation, params, op; };
         struct LineVertex { glm::vec3 position; glm::vec4 color; };
         struct TextVertex { glm::vec2 position; glm::vec2 texel; glm::vec4 color; };
 
-        struct MeshEntry { uint32_t firstIndex = 0, indexCount = 0; int32_t baseVertex = 0; float radius = 0.0f; };
+        struct MeshEntry { uint32_t firstIndex = 0, indexCount = 0; int32_t baseVertex = 0; float radius = 0.0f; uint32_t vertexCount = 0; };
         struct Object {
             MeshRenderer renderer;
             glm::mat4 world{ 1.0f };
@@ -86,6 +94,13 @@ namespace Phisiks::Render {
             glm::ivec2 outputSize{ 0 };        // window only: upscaled image (when size < outputSize)
             GL::Texture upscaled, output;
             GL::Framebuffer upscaledFbo, outputFbo;
+            // window only: post-processing
+            GL::Texture depthResolved, aoRaw, aoBlur;
+            GL::Framebuffer depthResolveFbo, aoRawFbo, aoBlurFbo;
+            glm::ivec2 postSize{ 0 }, aoSize{ 0 };
+            std::vector<GL::Texture> bloomMips;
+            std::vector<GL::Framebuffer> bloomFbos;
+            std::vector<glm::ivec2> bloomSizes;
             bool upscaledThisFrame = false;
             bool usedThisFrame = false;
             bool rendered = false;
@@ -175,6 +190,20 @@ namespace Phisiks::Render {
             std::vector<DrawCommand> cpuCommands;              // 4.1: drawn one by one
             std::vector<std::vector<uint8_t>> albedoImages;    // 4.1: re-uploaded when the array grows
 
+            // VFX primitives of this frame
+            std::vector<RibbonVertex> ribbons;
+            uint32_t ribbonStrips = 0;
+            GL::Buffer ribbonBuffer;
+            GLuint ribbonVao = 0;
+            std::vector<DecalDesc> decals;
+            GL::Texture black;                 // 1x1 (bloom off)
+
+            // shader hot reload
+            std::string hotReloadDirectory;
+            std::map<std::string, std::filesystem::file_time_type> hotReloadStamps;
+            double hotReloadNextPoll = 0.0;
+            ShaderReloadStatus reloadStatus;
+
             // synthetic vision (aux G-buffer of the first window view)
             bool visionRequested = false, visionReady = false;
             VisionCapture vision;
@@ -184,9 +213,11 @@ namespace Phisiks::Render {
         };
         std::unique_ptr<State> g;
 
-        void GLAD_API_PTR OnDebugMessage(GLenum, GLenum type, GLuint id, GLenum severity, GLsizei, const GLchar* message, const void*) {
+        void GLAD_API_PTR OnDebugMessage(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei, const GLchar* message, const void*) {
             if (severity == GL_DEBUG_SEVERITY_NOTIFICATION || !g) return;
-            if (type == GL_DEBUG_TYPE_ERROR) ++g->glErrors;
+            // Compile failures are reported (and handled) through the compile status: a hot-reloaded
+            // shader with a typo is not an API error.
+            if (type == GL_DEBUG_TYPE_ERROR && source != GL_DEBUG_SOURCE_SHADER_COMPILER) ++g->glErrors;
             if (type == GL_DEBUG_TYPE_ERROR || severity == GL_DEBUG_SEVERITY_HIGH) {
                 if (g->loggedDebugMessages++ < 20) Log::Error() << "OpenGL [" << id << "]: " << message;
             }
@@ -478,6 +509,7 @@ namespace Phisiks::Render {
         // Attribute layouts are set with the vertex buffer (GL::SetVertexBuffer) where it is bound.
         void SetupVertexArrays() {
             g->meshVao = GL::CreateVertexArray();
+            g->ribbonVao = GL::CreateVertexArray();
             g->lineVao = GL::CreateVertexArray();
             g->textVao = GL::CreateVertexArray();
             g->emptyVao = GL::CreateVertexArray();
@@ -499,7 +531,9 @@ namespace Phisiks::Render {
                 auto it = g->textureLayer.find(m.albedoTexture);
                 if (it != g->textureLayer.end()) layer = it->second;
             }
-            out.textureParams = glm::vec4(float(layer), m.textureScale, 0.0f, 0.0f);
+            out.textureParams = glm::vec4(float(layer), m.textureScale, m.textureUsesMeshUV ? 1.0f : 0.0f, 0.0f);
+            for (int k = 0; k < 4; ++k) out.splat[k] = glm::vec4(m.splat[k].color, m.splat[k].roughness);
+            out.splatDetail = glm::vec4(m.splat[0].detail, m.splat[1].detail, m.splat[2].detail, m.splat[3].detail);
             return out;
         }
 
@@ -601,6 +635,144 @@ namespace Phisiks::Render {
             }
             return true;
         }
+
+        // ------------------------------------------------------------------ post-processing targets (window)
+        void EnsurePostTargets(TargetSet& t, int bloomLevels, glm::ivec2 aoSize) {
+            GL::TextureDesc d;
+            d.minFilter = d.magFilter = GL_NEAREST;
+            if (t.postSize != t.size) {
+                t.postSize = t.size;
+                d.width = t.size.x;
+                d.height = t.size.y;
+                d.format = GL_DEPTH_COMPONENT32F;
+                t.depthResolved.Create("Window depth (resolved)", d);
+                t.depthResolveFbo.Create("Window depth resolve");
+                t.depthResolveFbo.AttachDepth(t.depthResolved);
+                t.depthResolveFbo.SetDrawBuffers(0);
+                t.bloomMips.clear();
+                t.bloomFbos.clear();
+                t.bloomSizes.clear();
+                t.aoSize = glm::ivec2(0);
+            }
+            if (aoSize.x > 0 && t.aoSize != aoSize) {
+                t.aoSize = aoSize;
+                d.width = aoSize.x;
+                d.height = aoSize.y;
+                d.format = GL_R8;
+                d.minFilter = d.magFilter = GL_LINEAR;
+                t.aoRaw.Create("SSAO", d);
+                t.aoBlur.Create("SSAO (blurred)", d);
+                t.aoRawFbo.Create("SSAO");
+                t.aoRawFbo.AttachColor(0, t.aoRaw);
+                t.aoRawFbo.SetDrawBuffers(1);
+                t.aoBlurFbo.Create("SSAO blur");
+                t.aoBlurFbo.AttachColor(0, t.aoBlur);
+                t.aoBlurFbo.SetDrawBuffers(1);
+            }
+            if (int(t.bloomMips.size()) < bloomLevels) {
+                d.format = GL_RGBA16F;
+                d.minFilter = d.magFilter = GL_LINEAR;
+                for (int i = int(t.bloomMips.size()); i < bloomLevels; ++i) {
+                    const glm::ivec2 size = glm::max(t.size >> (i + 1), glm::ivec2(1));
+                    d.width = size.x;
+                    d.height = size.y;
+                    GL::Texture texture;
+                    texture.Create("Bloom " + std::to_string(i), d);
+                    GL::Framebuffer fbo;
+                    fbo.Create("Bloom " + std::to_string(i));
+                    fbo.AttachColor(0, texture);
+                    fbo.SetDrawBuffers(1);
+                    t.bloomMips.push_back(std::move(texture));
+                    t.bloomFbos.push_back(std::move(fbo));
+                    t.bloomSizes.push_back(size);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ hot reload
+        // Rebuilds every program from the current sources (overrides first). A failed program keeps
+        // its previous version. Returns the number of failures.
+        uint32_t RebuildPrograms(uint32_t& rebuilt, std::string& lastError) {
+            const auto resolver = [](const std::string& name) { return Shaders::Find(name); };
+            const std::vector<Shaders::ProgramDef>& defs = Shaders::Programs();
+            uint32_t failures = 0;
+            rebuilt = 0;
+            for (size_t i = 0; i < defs.size(); ++i) {
+                if (g->compat && Shaders::IsCompute(int(i))) continue;
+                std::vector<GL::StageSource> stages;
+                ShaderPreprocessor::ResourceBindings bindings;
+                bool ok = true;
+                for (const Shaders::StageDef& stage : defs[i].stages) {
+                    const std::string* source = Shaders::Find(stage.file);
+                    if (!source) { ok = false; lastError = std::string("missing ") + stage.file; break; }
+                    const ShaderPreprocessor::Result expanded = ShaderPreprocessor::Expand(*source, resolver, defs[i].defines);
+                    if (!expanded.ok) { ok = false; lastError = std::string(stage.file) + ": " + expanded.error; break; }
+                    const GLenum glStage = stage.stage == Shaders::Stage::Vertex ? GLenum(GL_VERTEX_SHADER)
+                                        : stage.stage == Shaders::Stage::Fragment ? GLenum(GL_FRAGMENT_SHADER) : GLenum(GL_COMPUTE_SHADER);
+                    stages.push_back({ glStage, g->compat ? ShaderPreprocessor::RewriteForGL41(expanded.source, bindings) : expanded.source });
+                }
+                const GLuint program = ok ? GL::BuildProgram(defs[i].name, stages, false) : 0;
+                if (!program) {
+                    ++failures;
+                    if (ok) lastError = std::string("program '") + defs[i].name + "' failed to compile (previous version kept; see engine.log)";
+                    continue;
+                }
+                if (g->compat) GL::ApplyBindings(program, bindings);
+                g->programs[i].Adopt(program, defs[i].name);
+                ++rebuilt;
+            }
+            return failures;
+        }
+
+        bool ReadText(const std::filesystem::path& path, std::string& out) {
+            std::ifstream in(path, std::ios::binary);
+            if (!in) return false;
+            std::ostringstream s;
+            s << in.rdbuf();
+            out = s.str();
+            return true;
+        }
+
+        // Scans the watched directory; changed files become overrides. Returns true if any changed.
+        bool ScanHotReload() {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            bool changed = false;
+            uint32_t overridden = 0;
+            for (const fs::directory_entry& entry : fs::directory_iterator(g->hotReloadDirectory, ec)) {
+                if (!entry.is_regular_file(ec) || entry.path().extension() != ".glsl") continue;
+                const std::string name = entry.path().filename().string();
+                // Content is compared every scan (cheap: a few hundred KB) so saves within the
+                // file-system timestamp resolution are not missed.
+                g->hotReloadStamps[name] = entry.last_write_time(ec);
+                ++overridden;
+                std::string text;
+                if (!ReadText(entry.path(), text)) continue;
+                const std::string* current = Shaders::Find(name);
+                if (current && *current == text) continue;
+                Shaders::SetOverride(name, text);
+                Log::Info() << "Renderer: shader '" << name << "' changed on disk";
+                changed = true;
+            }
+            g->reloadStatus.filesOverridden = uint32_t(Shaders::OverrideCount());
+            (void)overridden;
+            return changed;
+        }
+
+        bool ApplyHotReload() {
+            uint32_t rebuilt = 0;
+            std::string error;
+            const uint32_t errorsBefore = g->glErrors;
+            const uint32_t failures = RebuildPrograms(rebuilt, error);
+            if (failures) g->glErrors = errorsBefore;   // some drivers also raise the compile failure as a debug "error"
+            ShaderReloadStatus& s = g->reloadStatus;
+            ++s.reloads;
+            s.programsRebuilt += rebuilt;
+            s.failures += failures;
+            if (failures) s.lastError = error;
+            Log::Info() << "Renderer: shader hot reload: " << rebuilt << " programs rebuilt, " << failures << " failed";
+            return failures == 0;
+        }
     }
 
     // ====================================================================== public API
@@ -638,6 +810,7 @@ namespace Phisiks::Render {
         entry.indexCount = uint32_t(data.indices.size());
         entry.baseVertex = int32_t(g->vertices.size());
         entry.radius = RenderMath::BoundingRadius(data);
+        entry.vertexCount = uint32_t(data.vertices.size());
         g->vertices.insert(g->vertices.end(), data.vertices.begin(), data.vertices.end());
         g->indices.insert(g->indices.end(), data.indices.begin(), data.indices.end());
         g->meshByName[name] = uint32_t(g->meshes.size());
@@ -646,6 +819,85 @@ namespace Phisiks::Render {
         return true;
     }
     bool HasMesh(const std::string& name) { return g && g->meshByName.count(name) != 0; }
+
+    bool UpdateMeshVertices(const std::string& name, const std::vector<Vertex>& vertices) {
+        if (!g) return false;
+        auto it = g->meshByName.find(name);
+        if (it == g->meshByName.end()) return false;
+        MeshEntry& e = g->meshes[it->second];
+        if (vertices.size() != e.vertexCount) return false;
+        std::copy(vertices.begin(), vertices.end(), g->vertices.begin() + e.baseVertex);
+        float radius = 0.0f;
+        for (const Vertex& v : vertices) radius = std::max(radius, glm::length(v.position));
+        e.radius = radius;
+        if (!g->meshesDirty && g->vertexBuffer.Id() != 0)
+            GL::BufferSubData(g->vertexBuffer.Id(), size_t(e.baseVertex) * sizeof(Vertex), vertices.size() * sizeof(Vertex), vertices.data());
+        return true;
+    }
+
+    bool RegisterTexture(const std::string& name, int width, int height, const std::vector<uint8_t>& rgba) {
+        if (!g || name.empty() || width <= 0 || height <= 0 || rgba.size() < size_t(width) * size_t(height) * 4) return false;
+        Assets::Image image;
+        image.width = width;
+        image.height = height;
+        image.rgba.assign(rgba.begin(), rgba.begin() + size_t(width) * height * 4);
+        Assets::Image sized;
+        if (width != TEXTURE_SIZE || height != TEXTURE_SIZE) Assets::ResizeImage(image, TEXTURE_SIZE, TEXTURE_SIZE, sized);
+        const Assets::Image& upload = sized.rgba.empty() ? image : sized;
+        int layer;
+        auto it = g->textureLayer.find(name);
+        if (it != g->textureLayer.end() && it->second >= 0) layer = it->second;
+        else {
+            EnsureAlbedoCapacity(g->albedoUsed + 1);
+            layer = g->albedoUsed++;
+            if (g->compat) g->albedoImages.resize(size_t(layer) + 1);
+        }
+        g->albedoArray.UploadLayer(layer, GL_RGBA, GL_UNSIGNED_BYTE, upload.rgba.data());
+        g->albedoArray.GenerateMipmaps();
+        if (g->compat) g->albedoImages[size_t(layer)] = upload.rgba;
+        g->textureLayer[name] = layer;
+        g->textureTickets.erase(name);
+        return true;
+    }
+
+    void DrawRibbon(const std::vector<RibbonPoint>& points) {
+        if (!g || points.size() < 2) return;
+        const size_t n = points.size();
+        auto tangent = [&](size_t i) {
+            const glm::vec3 d = points[std::min(i + 1, n - 1)].position - points[i > 0 ? i - 1 : 0].position;
+            const float len = glm::length(d);
+            return len > 1e-6f ? d / len : glm::vec3(1.0f, 0.0f, 0.0f);
+        };
+        auto vertex = [&](size_t i, float side, const glm::vec3& t) {
+            return RibbonVertex{ glm::vec4(points[i].position, side), glm::vec4(t, points[i].width), points[i].color };
+        };
+        glm::vec3 t0 = tangent(0);
+        for (size_t i = 0; i + 1 < n; ++i) {
+            const glm::vec3 t1 = tangent(i + 1);
+            const RibbonVertex a0 = vertex(i, -1.0f, t0), a1 = vertex(i, 1.0f, t0), b0 = vertex(i + 1, -1.0f, t1), b1 = vertex(i + 1, 1.0f, t1);
+            g->ribbons.insert(g->ribbons.end(), { a0, a1, b1, a0, b1, b0 });
+            t0 = t1;
+        }
+        ++g->ribbonStrips;
+    }
+
+    void DrawDecal(const DecalDesc& decal) { if (g) g->decals.push_back(decal); }
+
+    bool CaptureBackbuffer(FrameCapture& out) {
+        if (!g || !Platform::HasWindow()) return false;
+        const glm::ivec2 size = GetFramebufferSize();
+        if (size.x <= 0 || size.y <= 0) return false;
+        out.width = size.x;
+        out.height = size.y;
+        out.rgba.resize(size_t(size.x) * size.y * 4);
+        out.entityIds.clear();
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        glReadBuffer(GL_BACK);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, out.rgba.data());
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        return true;
+    }
 
     void DrawLine(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color) {
         if (!g) return;
@@ -729,14 +981,20 @@ namespace Phisiks::Render {
             case QualityPreset::Low:
                 r.renderScale = 0.667f; r.upscaler = Upscaler::FSR1; r.sharpness = 0.2f;
                 r.msaaSamples = 1; r.shadowMapSize = 1024; r.shadowDistance = 25.0f; r.occlusionCulling = false;
+                r.bloom.enabled = true; r.bloom.mipCount = 4;
+                r.ssao.enabled = false;
                 break;
             case QualityPreset::Medium:
                 r.renderScale = 0.77f; r.upscaler = Upscaler::FSR1; r.sharpness = 0.25f;
                 r.msaaSamples = 2; r.shadowMapSize = 2048; r.shadowDistance = 35.0f; r.occlusionCulling = true;
+                r.bloom.enabled = true; r.bloom.mipCount = 5;
+                r.ssao.enabled = true; r.ssao.halfResolution = true; r.ssao.samples = 8;
                 break;
             case QualityPreset::High:
                 r.renderScale = 1.0f; r.upscaler = Upscaler::FSR1; r.sharpness = 0.25f;
                 r.msaaSamples = 4; r.shadowMapSize = 2048; r.shadowDistance = 40.0f; r.occlusionCulling = true;
+                r.bloom.enabled = true; r.bloom.mipCount = 6;
+                r.ssao.enabled = true; r.ssao.halfResolution = false; r.ssao.samples = 16;
                 break;
         }
         r.shadowsEnabled = true;
@@ -801,6 +1059,41 @@ namespace Phisiks::Render {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return true;
     }
+
+
+    // ====================================================================== shader hot reload
+    bool EnableShaderHotReload(const std::string& directory) {
+        if (!g) return false;
+        std::error_code ec;
+        if (!std::filesystem::is_directory(directory, ec)) { Log::Error() << "Renderer: hot reload directory '" << directory << "' not found"; return false; }
+        g->hotReloadDirectory = directory;
+        g->hotReloadStamps.clear();
+        g->reloadStatus.enabled = true;
+        g->reloadStatus.directory = directory;
+        Log::Info() << "Renderer: watching '" << directory << "' for shader changes";
+        if (ScanHotReload()) ApplyHotReload();
+        g->hotReloadNextPoll = Time::NowSeconds() + 0.25;
+        return true;
+    }
+
+    void DisableShaderHotReload() {
+        if (!g) return;
+        const bool hadOverrides = Shaders::OverrideCount() > 0;
+        g->hotReloadDirectory.clear();
+        g->hotReloadStamps.clear();
+        g->reloadStatus.enabled = false;
+        g->reloadStatus.filesOverridden = 0;
+        Shaders::ClearOverrides();
+        if (hadOverrides) ApplyHotReload();   // back to the embedded sources
+    }
+
+    bool ReloadShadersNow() {
+        if (!g) return false;
+        if (!g->hotReloadDirectory.empty()) ScanHotReload();
+        return ApplyHotReload();
+    }
+
+    ShaderReloadStatus GetShaderReloadStatus() { return g ? g->reloadStatus : ShaderReloadStatus{}; }
 
     // ====================================================================== internal
     namespace Internal {
@@ -878,6 +1171,14 @@ namespace Phisiks::Render {
             g->ring.Create("Per-frame uploads", 1 << 20);
             g->remapBuffer.Create("Remap", 4096);
             g->sdfBuffer.Create("SDF primitives", 1024);
+            g->ribbonBuffer.Create("Ribbons", sizeof(RibbonVertex) * 1024);
+            {
+                GL::TextureDesc d;
+                d.format = GL_RGBA8;
+                g->black.Create("Black", d);
+                const uint8_t zero[4] = { 0, 0, 0, 255 };
+                g->black.Upload2D(GL_RGBA, GL_UNSIGNED_BYTE, zero);
+            }
             if (!compat) for (GLuint& b : g->cullStats) b = GL::CreateBufferObject(16, nullptr);
             Advanced::Init();
             return true;
@@ -892,6 +1193,8 @@ namespace Phisiks::Render {
             if (!g->compat) glDeleteBuffers(State::CULL_SLOTS, g->cullStats);
             g->ring.Release();
             glDeleteVertexArrays(1, &g->meshVao);
+            glDeleteVertexArrays(1, &g->ribbonVao);
+            Shaders::ClearOverrides();
             glDeleteVertexArrays(1, &g->lineVao);
             glDeleteVertexArrays(1, &g->textVao);
             glDeleteVertexArrays(1, &g->emptyVao);
@@ -973,10 +1276,17 @@ namespace Phisiks::Render {
 
         void RenderFrame() {
             if (!g) return;
+            if (!g->hotReloadDirectory.empty() && Time::NowSeconds() >= g->hotReloadNextPoll) {
+                g->hotReloadNextPoll = Time::NowSeconds() + 0.25;
+                if (ScanHotReload()) ApplyHotReload();
+            }
             const glm::ivec2 windowSize = GetFramebufferSize();
             if (windowSize.x <= 0 || windowSize.y <= 0) {   // minimized
                 g->lines.clear();
                 g->text.clear();
+                g->ribbons.clear();
+                g->decals.clear();
+                g->ribbonStrips = 0;
                 return;
             }
             const RenderSettings& settings = g->settings;
@@ -1220,6 +1530,14 @@ namespace Phisiks::Render {
                 std::memcpy(frameBytes.data() + i * stride, &f, sizeof(f));
             }
             g->frameUbo.Upload(frameBytes.data(), frameBytes.size());
+            if (!g->ribbons.empty()) {
+                g->ribbonBuffer.Upload(g->ribbons.data(), g->ribbons.size() * sizeof(RibbonVertex));
+                GL::SetVertexBuffer(g->ribbonVao, g->ribbonBuffer.Id(), sizeof(RibbonVertex), {
+                    { 0, 4, GL_FLOAT, offsetof(RibbonVertex, positionSide) }, { 1, 4, GL_FLOAT, offsetof(RibbonVertex, tangentWidth) },
+                    { 2, 4, GL_FLOAT, offsetof(RibbonVertex, color) } });
+                stats.ribbonsDrawn = g->ribbonStrips;
+                stats.ribbonVertices = uint32_t(g->ribbons.size());
+            }
 
             if (!compat) {
                 glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g->lightBuffer.Id());
@@ -1483,7 +1801,15 @@ namespace Phisiks::Render {
                 g->programs[Shaders::SKY].Use();
                 glBindVertexArray(g->emptyVao);
                 glDrawArrays(GL_TRIANGLES, 0, 3);
-                glColorMaski(1, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);   // debug lines / arrows: colour only
+                glColorMaski(1, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);   // ribbons / debug lines / arrows: colour only
+                if (!g->ribbons.empty()) {   // additive VFX ribbons (depth-tested, no depth writes)
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_ONE, GL_ONE);
+                    g->programs[Shaders::RIBBON].Use();
+                    glBindVertexArray(g->ribbonVao);
+                    glDrawArrays(GL_TRIANGLES, 0, GLsizei(g->ribbons.size()));
+                    glDisable(GL_BLEND);
+                }
                 if (!g->lines.empty() && v.target == &g->window) {
                     g->lineBuffer.Upload(g->lines.data(), g->lines.size() * sizeof(LineVertex));
                     g->programs[Shaders::LINES].Use();
@@ -1612,10 +1938,149 @@ namespace Phisiks::Render {
                 GL::ReadBuffer(fbo, GL_COLOR_ATTACHMENT1);
                 GL::Blit(fbo, t.resolveIdFbo.Id(), s.x, s.y, s.x, s.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
                 GL::ReadBuffer(fbo, GL_COLOR_ATTACHMENT0);
+
+                // Window post-processing: projected decals, SSAO (per window view), bloom mip chain.
+                float bloomIntensity = 0.0f;
+                GLuint bloomTexture = g->black.Id();
+                if (&t == &g->window && !views.empty()) {
+                    const BloomSettings& bloom = settings.bloom;
+                    const SsaoSettings& ssao = settings.ssao;
+                    const bool doDecals = settings.decals && !g->decals.empty();
+                    const bool doSsao = ssao.enabled && ssao.intensity > 0.0f;
+                    const bool doBloom = bloom.enabled && bloom.intensity > 0.0f;
+                    if (doDecals || doSsao || doBloom) {
+                        int levels = 0;
+                        if (doBloom) {
+                            levels = std::clamp(bloom.mipCount, 1, 8);
+                            while (levels > 1 && std::min(s.x >> levels, s.y >> levels) < 4) --levels;
+                        }
+                        const int aoScale = ssao.halfResolution ? 2 : 1;
+                        const glm::ivec2 aoSize = doSsao ? glm::max(s / aoScale, glm::ivec2(1)) : glm::ivec2(0);
+                        EnsurePostTargets(t, levels, aoSize);
+                        if (doDecals || doSsao) GL::Blit(fbo, t.depthResolveFbo.Id(), s.x, s.y, s.x, s.y, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+                        glBindVertexArray(g->emptyVao);
+                        glDisable(GL_DEPTH_TEST);
+                        glDepthMask(GL_FALSE);
+                        bool firstWindow = true;
+                        for (size_t vi = 0; vi < views.size(); ++vi) {
+                            const View& v = views[vi];
+                            if (v.target != &g->window) continue;
+                            glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->frameUbo.Id(), GLintptr(vi * stride), sizeof(FrameDataGpu));
+                            const glm::vec4 rect(float(v.rect.x), float(v.rect.y), float(v.rect.z), float(v.rect.w));
+                            if (doDecals) {
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.resolveColorFbo.Id());
+                                glViewport(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                                glScissor(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                                glEnable(GL_SCISSOR_TEST);
+                                glEnable(GL_CULL_FACE);
+                                glCullFace(GL_FRONT);   // back faces: also covers the camera standing inside the box
+                                glEnable(GL_BLEND);
+                                const GL::Program& p = g->programs[Shaders::DECAL];
+                                p.Use();
+                                t.depthResolved.Bind(0);
+                                glUniform4fv(p.Uniform("u_viewRect"), 1, &rect[0]);
+                                glUniform2f(p.Uniform("u_targetSize"), float(s.x), float(s.y));
+                                for (const DecalDesc& d : g->decals) {
+                                    if (d.blend == DecalBlend::Multiply) glBlendFunc(GL_DST_COLOR, GL_ZERO);
+                                    else if (d.blend == DecalBlend::Additive) glBlendFunc(GL_ONE, GL_ONE);
+                                    else glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                                    const glm::mat4 inverse = glm::inverse(d.world);
+                                    const glm::vec3 up = glm::normalize(glm::vec3(d.world[1]));
+                                    glUniformMatrix4fv(p.Uniform("u_decalWorld"), 1, GL_FALSE, &d.world[0][0]);
+                                    glUniformMatrix4fv(p.Uniform("u_decalInverse"), 1, GL_FALSE, &inverse[0][0]);
+                                    glUniform3fv(p.Uniform("u_decalUp"), 1, &up[0]);
+                                    glUniform4fv(p.Uniform("u_decalColor"), 1, &d.color[0]);
+                                    glUniform4f(p.Uniform("u_decalParams"), float(uint32_t(d.pattern)), float(uint32_t(d.blend)), d.angleFade, d.seed);
+                                    glDrawArrays(GL_TRIANGLES, 0, 36);
+                                }
+                                glDisable(GL_BLEND);
+                                glCullFace(GL_BACK);
+                                glDisable(GL_CULL_FACE);
+                                glDisable(GL_SCISSOR_TEST);
+                                if (firstWindow) stats.decalsDrawn = uint32_t(g->decals.size());
+                            }
+                            if (doSsao) {
+                                const glm::ivec4 aoRect(v.rect.x / aoScale, v.rect.y / aoScale, std::max(v.rect.z / aoScale, 1), std::max(v.rect.w / aoScale, 1));
+                                const glm::mat4 inverseProjection = glm::inverse(v.projection);
+                                const glm::vec4 params(ssao.radius, ssao.intensity, ssao.bias, float(std::clamp(ssao.samples, 4, 32)));
+                                auto setup = [&](const GL::Program& p) {
+                                    p.Use();
+                                    glUniformMatrix4fv(p.Uniform("u_inverseProjection"), 1, GL_FALSE, &inverseProjection[0][0]);
+                                    glUniformMatrix4fv(p.Uniform("u_projectionMatrix"), 1, GL_FALSE, &v.projection[0][0]);
+                                    glUniform4fv(p.Uniform("u_viewRect"), 1, &rect[0]);
+                                    glUniform2f(p.Uniform("u_targetSize"), float(s.x), float(s.y));
+                                    glUniform1f(p.Uniform("u_scale"), float(aoScale));
+                                    glUniform4fv(p.Uniform("u_params"), 1, &params[0]);
+                                };
+                                t.depthResolved.Bind(0);
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.aoRawFbo.Id());
+                                glViewport(aoRect.x, aoRect.y, aoRect.z, aoRect.w);
+                                setup(g->programs[Shaders::SSAO]);
+                                glDrawArrays(GL_TRIANGLES, 0, 3);
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.aoBlurFbo.Id());
+                                setup(g->programs[Shaders::SSAO_BLUR]);
+                                t.aoRaw.Bind(1);
+                                glDrawArrays(GL_TRIANGLES, 0, 3);
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.resolveColorFbo.Id());
+                                glViewport(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                                glEnable(GL_BLEND);
+                                glBlendFunc(GL_DST_COLOR, GL_ZERO);   // multiply the lit image by the AO
+                                setup(g->programs[Shaders::SSAO_APPLY]);
+                                t.aoBlur.Bind(1);
+                                glDrawArrays(GL_TRIANGLES, 0, 3);
+                                glDisable(GL_BLEND);
+                                stats.ssaoActive = true;
+                                stats.ssaoWidth = aoSize.x;
+                                stats.ssaoHeight = aoSize.y;
+                            }
+                            firstWindow = false;
+                        }
+                        if (doBloom) {
+                            glDisable(GL_SCISSOR_TEST);
+                            const GL::Program& pre = g->programs[Shaders::BLOOM_PREFILTER];
+                            glBindFramebuffer(GL_FRAMEBUFFER, t.bloomFbos[0].Id());
+                            glViewport(0, 0, t.bloomSizes[0].x, t.bloomSizes[0].y);
+                            pre.Use();
+                            glUniform2f(pre.Uniform("u_texel"), 1.0f / float(s.x), 1.0f / float(s.y));
+                            glUniform4f(pre.Uniform("u_threshold"), bloom.threshold, bloom.knee, settings.exposure, 1.0f);
+                            t.hdrResolved.Bind(0);
+                            glDrawArrays(GL_TRIANGLES, 0, 3);
+                            const GL::Program& down = g->programs[Shaders::BLOOM_DOWN];
+                            down.Use();
+                            for (int i = 1; i < levels; ++i) {
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.bloomFbos[i].Id());
+                                glViewport(0, 0, t.bloomSizes[i].x, t.bloomSizes[i].y);
+                                glUniform2f(down.Uniform("u_texel"), 1.0f / float(t.bloomSizes[i - 1].x), 1.0f / float(t.bloomSizes[i - 1].y));
+                                t.bloomMips[i - 1].Bind(0);
+                                glDrawArrays(GL_TRIANGLES, 0, 3);
+                            }
+                            const GL::Program& up = g->programs[Shaders::BLOOM_UP];
+                            up.Use();
+                            glEnable(GL_BLEND);
+                            glBlendFunc(GL_ONE, GL_ONE);
+                            for (int i = levels - 2; i >= 0; --i) {
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.bloomFbos[i].Id());
+                                glViewport(0, 0, t.bloomSizes[i].x, t.bloomSizes[i].y);
+                                glUniform2f(up.Uniform("u_texel"), 1.0f / float(t.bloomSizes[i + 1].x), 1.0f / float(t.bloomSizes[i + 1].y));
+                                glUniform4f(up.Uniform("u_threshold"), 0.0f, 0.0f, 0.0f, 1.0f);
+                                t.bloomMips[i + 1].Bind(0);
+                                glDrawArrays(GL_TRIANGLES, 0, 3);
+                            }
+                            glDisable(GL_BLEND);
+                            bloomTexture = t.bloomMips[0].Id();
+                            bloomIntensity = bloom.intensity;
+                            stats.bloomMips = levels;
+                        }
+                        glDepthMask(GL_TRUE);
+                    }
+                }
+
                 glBindFramebuffer(GL_FRAMEBUFFER, t.ldrFbo.Id());
                 glViewport(0, 0, s.x, s.y);
                 glDisable(GL_DEPTH_TEST);
                 g->programs[Shaders::TONEMAP].Use();
+                glUniform1f(g->programs[Shaders::TONEMAP].Uniform("u_bloomIntensity"), bloomIntensity);
+                GL::BindTexture(1, GL_TEXTURE_2D, bloomTexture);
                 t.hdrResolved.Bind(0);
                 glBindVertexArray(g->emptyVao);
                 glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -1663,6 +2128,7 @@ namespace Phisiks::Render {
             // Compose the presented image (scene + overlay text) in a renderer-owned texture, then show it.
             const GLuint present = w.presentFbo.Id();
             GL::Blit(shown, present, windowSize.x, windowSize.y, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            stats.overlayGlyphs = uint32_t(g->text.size() / 6);
             DrawTextPass(present, windowSize);
             GL::Blit(present, 0, windowSize.x, windowSize.y, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
@@ -1697,6 +2163,9 @@ namespace Phisiks::Render {
             }
             g->lines.clear();
             g->text.clear();
+            g->ribbons.clear();
+            g->decals.clear();
+            g->ribbonStrips = 0;
             g->frameStats = stats;
         }
     }

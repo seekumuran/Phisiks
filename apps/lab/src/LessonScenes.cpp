@@ -1,5 +1,6 @@
 #include "LessonScenes.h"
 #include "SceneBuilder.h"
+#include "P9Scenes.h"
 #include "Phisiks/Framework/GameContext.h"
 #include "Phisiks/Framework/SceneManager.h"
 #include "Phisiks/Math/Integrators.h"
@@ -33,11 +34,7 @@ namespace Lab {
             return text;
         }
 
-        void Caption(const std::string& line1, const std::string& line2) {
-            const glm::ivec2 size = Render::GetFramebufferSize();
-            Render::DrawScreenText(line1, glm::vec2(16.0f, float(size.y) - 58.0f), glm::vec4(0.6f, 0.9f, 1.0f, 1.0f), 2.0f);
-            Render::DrawScreenText(line2, glm::vec2(16.0f, float(size.y) - 34.0f), glm::vec4(0.8f, 0.85f, 0.9f, 1.0f), 2.0f);
-        }
+        void Caption(const std::string& line1, const std::string& line2) { ShowCaption(line1, line2); }   // studio panel or overlay
 
         void Stage(Scene& scene, GameContext& ctx, const glm::vec3& target, float distance, float yaw, float pitch) {
             SceneBuilder::AddGround(scene, 30.0f, MAT_FLOOR, 1.0f);

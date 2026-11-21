@@ -16,7 +16,7 @@ The `check_layering` target runs before the engine builds and fails the build if
 - **macOS** 12+: Xcode command-line tools, CMake, Ninja, `brew install glfw` (or let CMake fetch it). Runs on the OpenGL 4.1 tier.
 - GPU: OpenGL 4.6 core for the full tier (GPU culling and compute); any OpenGL 4.1 core GPU runs the 4.1 tier (CPU culling + CPU compute backend). `--gl41` forces the 4.1 tier anywhere. Check with `glprobe`.
 - Backends (CMake cache): `PHISIKS_PHYSICS_BACKEND` = `PhysX` (Windows default) or `Native` (Linux / macOS default); `PHISIKS_AUDIO_BACKEND` = `WASAPI` (Windows default) or `miniaudio`.
-- Third-party code in `vendor/` (not committed; see `THIRD_PARTY_NOTICES.md`). `python tools/fetch_deps.py` downloads every portable dependency at its pinned version (glm, EnTT, stb, glad (generated with glad2), Dear ImGui, ImGuizmo, miniaudio, nlohmann/json). The Windows-only prebuilt binaries (PhysX, GLFW) are placed by hand:
+- Third-party code in `vendor/` (not committed; see `THIRD_PARTY_NOTICES.md`). `python tools/fetch_deps.py` downloads every portable dependency at its pinned version (glm, EnTT, stb, glad (generated with glad2), Dear ImGui, ImGuizmo, miniaudio, nlohmann/json). Lua 5.4.7 is fetched from lua.org (SHA-256 checked) and built as the `PhisiksLua` static library. The Windows-only prebuilt binaries (PhysX, GLFW) are placed by hand:
 
   | Folder | Contents |
   |---|---|
@@ -27,7 +27,7 @@ The `check_layering` target runs before the engine builds and fails the build if
   | `stb_image/` | `stb_image.h`, `stb_image_write.h`, `stb_image.cpp` |
   | `physx/` | PhysX 5 `include/`, `lib/{release,debug}` (Windows, PhysX backend) |
   | `DLLs/` | the PhysX runtime DLLs |
-  | `imgui/`, `imguizmo/`, `miniaudio/`, `nlohmann/` | fetched by `tools/fetch_deps.py` |
+  | `imgui/`, `imguizmo/`, `miniaudio/`, `nlohmann/`, `lua/` | fetched by `tools/fetch_deps.py` |
 - Shader programs are cached as driver binaries after the first run, in `%LOCALAPPDATA%\Phisiks\ShaderCache`. Override the location with the `PHISIKS_SHADER_CACHE_DIR` environment variable; delete the folder to force a cold compile.
 
 ## Build
@@ -69,19 +69,19 @@ From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` ge
 ```
 Logs go to `<run-dir>/engine.log` (default `Build/runs/latest`). Crash dumps go to `<run-dir>/crash.dmp`.
 
-Scenes: `Sandbox`, `PhysicsTower`, `FieldLab`, and the lesson scenes `Rotors`, `Orbits`, `PBR`, `Fountain` (`N` cycles).
+Scenes: `Sandbox`, `PhysicsTower`, `FieldLab`, the lesson scenes `Rotors`, `Orbits`, `PBR`, `Fountain`, and the P9 scenes `Animation` (glTF skinning, camera path), `VFX` (bloom, SSAO, trails, beam, decals), `Terrain` (terrain, foliage, nav crowd, spatial audio) and `Joints` (joints + Lua) (`N` cycles).
 
-Studio options: `--no-studio` hides the ImGui panels, `--quality low|medium|high` applies a scalability preset, `--gl41` forces the OpenGL 4.1 tier.
+Studio options: `--no-studio` disables the ImGui panels, `--quality low|medium|high` applies a scalability preset, `--gl41` forces the OpenGL 4.1 tier, `--hot-reload [dir]` watches GLSL sources (default `engine/shaders`) and rebuilds changed programs while running. `Tab` hides / shows the panels; the bitmap HUD telemetry only appears while they are hidden.
 
 ## PhisiksLab studio (Dear ImGui)
 | Panel | What |
 |---|---|
-| Menu bar | Scene: save / load JSON (path field), reload; Lessons |
-| Classroom | one-click lessons (Transforms & Rotors, RK4 vs Euler Orbits, Friction & Raycasts, Rigid-body Stacking, PBR Lighting, GPU Culling & Particles, XPBD Soft Bodies & SDFs, Emitters & Coupling); gravity, friction, solver substeps; quality preset, render scale, upscaler, RCAS sharpness, GPU culling, Hi-Z, shadows, fog, exposure, physics debug draw |
-| Hierarchy | entity tree; click to select (or click an object in the viewport) |
-| Inspector | name, Transform (+ translate / rotate / scale gizmo, world / local), mesh renderer + live material editing, light, collider, rigidbody, force field, particle system, soft body |
-| Telemetry | OS, GPU, OpenGL tier, physics backend; CPU frame / update / physics / render ms with history; GPU ms; RAM; internal -> output resolution; culling and body counts; compute backend |
-| Timeline | record toggle, pause / play, step back / forward, scrub slider over the replay ring (30 s at 60 Hz); playing after a scrub continues from that step | The autotest visits all three and runs the GPU compute checks (culling, Hi-Z, spatial hash, XPBD, N-body, fields, SDF) on the machine's GPU; it needs OpenGL 4.6 with compute shaders and at least 16 shader-storage bindings.
+| Menu bar | `=== PHISIKS LAB ===`; Scene: save / load JSON (path field), reload; Lessons; View: hide panels (Tab) |
+| PHISIKS LAB (classroom) | lesson playlist (12 lessons, black list box, phosphor-green rows, gold selection) and the current lesson's caption; "SIM EQUALISER" vertical gradient sliders (gravity, friction, solver substeps, exposure, render scale, bloom); "RENDER DECK": quality preset, upscaler, RCAS sharpness, SSAO radius, LED toggles (culling, Hi-Z, shadows, fog, bloom, SSAO, decals, physics debug, camera fly-through), shader reload (LED: watching / failed) |
+| Scene hierarchy | entity tree in a playlist box with right-aligned descendant counts; click to select (or click an object in the viewport) |
+| Inspector | name, Transform (+ translate / rotate / scale gizmo, world / local), mesh renderer + live material editing (incl. splat layers), light, collider, rigidbody, joint (state, motor), skinned model, camera path, nav agent, Lua script (errors, reload), audio source (L/R LED meters, distance, Doppler), terrain, decal, trail, force field, particle system, soft body |
+| Telemetry | LCD sim clock + FPS / step / state; CPU / GPU / PHYS / RAM LED bar meters; frame-time spectrum analyser; OS, OpenGL tier, physics backend, resolution, culling, bodies, joints |
+| Replay timeline | transport buttons (step back, play, pause, stop = rewind to the first step, step forward, record, eject = clear), scrub slider over the replay ring (30 s at 60 Hz); playing after a scrub continues from that step | The autotest visits all three and runs the GPU compute checks (culling, Hi-Z, spatial hash, XPBD, N-body, fields, SDF) on the machine's GPU; it needs OpenGL 4.6 with compute shaders and at least 16 shader-storage bindings.
 
 ## PhisiksLab controls
 | Input | Action |

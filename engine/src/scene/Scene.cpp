@@ -1,5 +1,6 @@
 #include "Phisiks/Scene/Scene.h"
 #include "Phisiks/Core/Log.h"
+#include "Phisiks/Core/Time.h"
 #include "Phisiks/Physics/Physics.h"
 #include "Phisiks/Physics/Fields.h"
 #include "scene/SceneInternal.h"
@@ -39,6 +40,9 @@ namespace Phisiks {
         }
         void ReleaseLight(entt::registry& registry, entt::entity entity) {
             if (IRenderBackend* render = SceneInternal::Render()) render->DestroyLight(registry.get<LightRuntime>(entity).light);
+        }
+        void ReleaseJoint(entt::registry& registry, entt::entity entity) {
+            Physics::DestroyJoint(registry.get<JointRuntime>(entity).joint);   // safe when the body already took it
         }
         void ReleaseVoice(entt::registry& registry, entt::entity entity) {
             const AudioSource& source = registry.get<AudioSource>(entity);
@@ -83,6 +87,10 @@ namespace Phisiks {
                 case Physics::ShapeType::ConvexMesh:
                 case Physics::ShapeType::TriangleMesh:
                     for (glm::vec3& v : out.vertices) v *= s;
+                    break;
+                case Physics::ShapeType::HeightField:
+                    for (float& h : out.heights) h *= s.y;
+                    out.heightfieldCellSize = c.heightfieldCellSize * std::max(s.x, s.z);
                     break;
             }
             return out;
@@ -192,6 +200,8 @@ namespace Phisiks {
 
     // ====================================================================== Scene
     Scene::Scene(std::string name) : m_name(std::move(name)) {
+        static uint64_t serials = 0;
+        m_serial = ++serials;
         m_registry.on_construct<Collider>().connect<&Scene::OnPhysicsShapeChanged>(this);
         m_registry.on_update<Collider>().connect<&Scene::OnPhysicsShapeChanged>(this);
         m_registry.on_destroy<Collider>().connect<&Scene::OnPhysicsShapeChanged>(this);
@@ -202,6 +212,7 @@ namespace Phisiks {
         m_registry.on_destroy<MeshRuntime>().connect<&ReleaseMesh>();
         m_registry.on_destroy<LightRuntime>().connect<&ReleaseLight>();
         m_registry.on_destroy<AudioSource>().connect<&ReleaseVoice>();
+        m_registry.on_destroy<JointRuntime>().connect<&ReleaseJoint>();
     }
 
     Scene::~Scene() {
@@ -324,6 +335,54 @@ namespace Phisiks {
                 continue;
             }
             m_registry.emplace<PhysicsRuntime>(handle, PhysicsRuntime{ body });
+        }
+
+        // Joints: (re)created once both bodies exist (a rebuilt body takes its joints with it).
+        for (auto [handle, joint] : m_registry.view<Joint>().each()) {
+            JointRuntime* runtime = m_registry.try_get<JointRuntime>(handle);
+            if (runtime && Physics::IsValid(runtime->joint)) { joint.runtime = runtime->joint; continue; }
+            const PhysicsRuntime* own = m_registry.try_get<PhysicsRuntime>(handle);
+            if (!own || !Physics::IsValid(own->body)) continue;
+            Entity entity(this, handle);
+            Physics::BodyId other;
+            Entity connected;
+            if (!joint.connectedTo.empty()) {
+                connected = FindByName(joint.connectedTo);
+                const PhysicsRuntime* body = connected ? m_registry.try_get<PhysicsRuntime>(connected.Handle()) : nullptr;
+                if (!body || !Physics::IsValid(body->body)) continue;   // not built yet
+                other = body->body;
+            }
+            const glm::mat4 world = entity.WorldMatrix();
+            Physics::JointDesc desc;
+            desc.type = joint.type;
+            desc.bodyA = other;
+            desc.bodyB = own->body;
+            desc.anchor = glm::vec3(world * glm::vec4(joint.anchor, 1.0f));
+            desc.axis = glm::normalize(glm::mat3(world) * joint.axis);
+            desc.anchorB = desc.anchor;
+            if (joint.type == Physics::JointType::SpringDamper) {
+                // the spring runs from the connected entity's anchor (A) to this entity's anchor (B)
+                desc.anchorB = desc.anchor;
+                desc.anchor = connected ? glm::vec3(connected.WorldMatrix() * glm::vec4(joint.connectedAnchor, 1.0f)) : joint.connectedAnchor;
+            }
+            desc.enableLimits = joint.enableLimits;
+            desc.lowerLimit = joint.lowerLimit;
+            desc.upperLimit = joint.upperLimit;
+            desc.enableMotor = joint.enableMotor;
+            desc.motorSpeed = joint.motorSpeed;
+            desc.maxMotorForce = joint.maxMotorForce;
+            desc.stiffness = joint.stiffness;
+            desc.damping = joint.damping;
+            desc.restLength = joint.restLength;
+            desc.collideConnected = joint.collideConnected;
+            const Physics::JointId id = Physics::CreateJoint(desc);
+            if (!id.Valid()) {
+                if (!runtime) Log::Error() << "Scene '" << m_name << "': joint on '" << entity.GetName() << "' could not be created";
+                m_registry.emplace_or_replace<JointRuntime>(handle, JointRuntime{ id });
+                continue;
+            }
+            m_registry.emplace_or_replace<JointRuntime>(handle, JointRuntime{ id });
+            joint.runtime = id;
         }
 
         // Kinematic bodies follow their transforms.
@@ -452,6 +511,18 @@ namespace Phisiks {
         }
 
         IAudioBackend* audio = SceneInternal::Audio();
+        // Listener: the primary camera (position, orientation, velocity from its motion).
+        const float dt = std::max(Time::DeltaTime(), 1e-4f);
+        if (audio) {
+            if (Entity camera = GetPrimaryCamera()) {
+                const glm::vec3 position = camera.WorldPosition();
+                const glm::quat rotation = camera.WorldRotation();
+                const glm::vec3 velocity = m_listenerValid ? (position - m_listenerPosition) / dt : glm::vec3(0.0f);
+                audio->SetListener(position, rotation * glm::vec3(0, 0, -1), rotation * glm::vec3(0, 1, 0), velocity);
+                m_listenerPosition = position;
+                m_listenerValid = true;
+            }
+        }
         for (auto [handle, source] : m_registry.view<AudioSource>().each()) {
             if (!source.started) {
                 source.started = true;
@@ -459,11 +530,23 @@ namespace Phisiks {
             }
             if (!audio) { source.playRequested = source.stopRequested = false; source.isPlaying = false; continue; }
             if (source.stopRequested && source.voice) { audio->Stop(source.voice); source.voice = 0; }
+            const Entity entity(this, handle);
+            glm::vec3 position(0.0f), velocity(0.0f);
+            if (source.spatial) {
+                position = entity.WorldPosition();
+                const Physics::BodyId body = entity.GetBody();
+                if (body.Valid() && Physics::GetBodyType(body) == Physics::BodyType::Dynamic) velocity = Physics::GetLinearVelocity(body);
+                else if (source.hasLastPosition) velocity = (position - source.lastPosition) / dt;
+                source.lastPosition = position;
+                source.hasLastPosition = true;
+            }
             if (source.playRequested) {
                 if (source.voice) audio->Stop(source.voice);
-                source.voice = audio->Play(source.clip, source.volume, source.loop);
+                source.voice = source.spatial ? audio->PlaySpatial(source.clip, source.volume, source.loop, position, source.minDistance, source.maxDistance, source.dopplerFactor)
+                                              : audio->Play(source.clip, source.volume, source.loop);
                 if (!source.voice) Log::Warning() << "AudioSource on '" << m_registry.get<Phisiks::Name>(handle).value << "': could not play '" << source.clip << "'";
             }
+            if (source.spatial && source.voice) audio->SetVoicePosition(source.voice, position, velocity);
             source.playRequested = source.stopRequested = false;
             source.isPlaying = source.voice != 0 && audio->IsPlaying(source.voice);
         }

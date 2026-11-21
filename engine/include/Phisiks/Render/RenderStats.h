@@ -30,6 +30,13 @@ namespace Phisiks {
         int outputWidth = 0, outputHeight = 0;
         bool upscaled = false;          // internal < output: EASU + RCAS (or bilinear) ran
         bool compatTier = false;        // OpenGL 4.1 feature tier (CPU culling, CPU compute)
+        // Post-processing / VFX (last frame)
+        int bloomMips = 0;              // bloom chain levels used (0 = off)
+        bool ssaoActive = false;
+        int ssaoWidth = 0, ssaoHeight = 0;
+        uint32_t decalsDrawn = 0;
+        uint32_t ribbonsDrawn = 0, ribbonVertices = 0;
+        uint32_t overlayGlyphs = 0;     // bitmap overlay text glyphs in the presented frame
     };
 
     RenderStats GetRenderStats();    // zeros when no renderer is running (e.g. headless)

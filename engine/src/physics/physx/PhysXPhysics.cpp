@@ -30,7 +30,7 @@ namespace Phisiks::Physics {
 
         // ------------------------------------------------------------------ ids
         // value = (tag << 62) | (generation << 32) | (index + 1)
-        constexpr uint64_t TAG_BODY = 1, TAG_CHARACTER = 2;
+        constexpr uint64_t TAG_BODY = 1, TAG_CHARACTER = 2, TAG_JOINT = 3;
         uint64_t MakeId(uint64_t tag, uint32_t generation, uint32_t index) {
             return (tag << 62) | (uint64_t(generation & 0x3FFFFFFFu) << 32) | uint64_t(index + 1);
         }
@@ -43,6 +43,15 @@ namespace Phisiks::Physics {
             BodyType type = BodyType::Static;
             Layer layer = LAYER_DEFAULT;
             uint64_t userData = 0;
+            uint32_t generation = 1;
+            bool alive = false;
+        };
+        // Joints: PxRevoluteJoint (hinge), PxSphericalJoint, PxD6Joint (prismatic: X free/limited,
+        // velocity drive as the motor), PxDistanceJoint with a spring (spring-damper).
+        struct JointSlot {
+            PxJoint* joint = nullptr;
+            JointType type = JointType::BallSocket;
+            BodyId a, b;
             uint32_t generation = 1;
             bool alive = false;
         };
@@ -99,6 +108,8 @@ namespace Phisiks::Physics {
             std::vector<uint32_t> freeBodies;
             std::vector<CharacterSlot> characters;
             std::vector<uint32_t> freeCharacters;
+            std::vector<JointSlot> joints;
+            std::vector<uint32_t> freeJoints;
             std::map<std::tuple<float, float, float>, PxMaterial*> materials;
             std::array<LayerMask, 32> collisionMatrix{};
             std::vector<CollisionEvent> collisionEvents;
@@ -138,6 +149,25 @@ namespace Phisiks::Physics {
             if (index >= g.characters.size()) return nullptr;
             CharacterSlot& slot = g.characters[index];
             return (slot.alive && slot.generation == GenerationOf(id.value)) ? &slot : nullptr;
+        }
+
+        JointSlot* Resolve(JointId id) {
+            if (!g.initialized || TagOf(id.value) != TAG_JOINT) return nullptr;
+            const uint32_t index = IndexOf(id.value);
+            if (index >= g.joints.size()) return nullptr;
+            JointSlot& slot = g.joints[index];
+            return (slot.alive && slot.generation == GenerationOf(id.value)) ? &slot : nullptr;
+        }
+
+        void ReleaseJointSlot(uint32_t index) {
+            JointSlot& slot = g.joints[index];
+            if (!slot.alive) return;
+            if (slot.joint) slot.joint->release();
+            slot.joint = nullptr;
+            slot.alive = false;
+            slot.generation = (slot.generation + 1) & 0x3FFFFFFFu;
+            if (slot.generation == 0) slot.generation = 1;
+            g.freeJoints.push_back(index);
         }
 
         PxRigidDynamic* AsDynamic(BodyId id) {
@@ -210,6 +240,34 @@ namespace Phisiks::Physics {
                     PxTriangleMesh* mesh = PxCreateTriangleMesh(cooking, desc, Core::SDK()->getPhysicsInsertionCallback());
                     if (!mesh) { Log::Error() << "Physics: triangle mesh cooking failed"; return std::nullopt; }
                     return Geometry{ PxGeometryHolder(PxTriangleMeshGeometry(mesh)), mesh };
+                }
+                case ShapeType::HeightField: {
+                    const uint32_t columns = c.heightfieldColumns, rows = c.heightfieldRows;
+                    if (columns < 2 || rows < 2 || c.heights.size() != size_t(columns) * rows || c.heightfieldCellSize <= 0.0f) {
+                        Log::Error() << "Physics: invalid height field"; return std::nullopt;
+                    }
+                    // PhysX rows run along local X, columns along local Z; heights are 16-bit, scaled.
+                    float maxAbs = 1e-3f;
+                    for (float h : c.heights) maxAbs = std::max(maxAbs, std::fabs(h));
+                    const float heightScale = maxAbs / 32767.0f;
+                    std::vector<PxHeightFieldSample> samples(size_t(columns) * rows);
+                    for (uint32_t x = 0; x < columns; ++x) {
+                        for (uint32_t z = 0; z < rows; ++z) {
+                            PxHeightFieldSample& s = samples[size_t(x) * rows + z];
+                            s.height = PxI16(std::lround(c.heights[size_t(z) * columns + x] / heightScale));
+                            s.materialIndex0 = 0;
+                            s.materialIndex1 = 0;
+                        }
+                    }
+                    PxHeightFieldDesc desc;
+                    desc.format = PxHeightFieldFormat::eS16_TM;
+                    desc.nbRows = columns;
+                    desc.nbColumns = rows;
+                    desc.samples.data = samples.data();
+                    desc.samples.stride = sizeof(PxHeightFieldSample);
+                    PxHeightField* field = PxCreateHeightField(desc, Core::SDK()->getPhysicsInsertionCallback());
+                    if (!field) { Log::Error() << "Physics: height field creation failed"; return std::nullopt; }
+                    return Geometry{ PxGeometryHolder(PxHeightFieldGeometry(field, PxMeshGeometryFlags(), heightScale, c.heightfieldCellSize, c.heightfieldCellSize)), field };
                 }
             }
             return std::nullopt;
@@ -379,11 +437,13 @@ namespace Phisiks::Physics {
                 core.references = 0;
                 return false;
             }
+            PxInitExtensions(*core.physics, nullptr);   // joints
             return true;
         }
         void Release() {
             CoreState& core = CoreRef();
             if (core.references == 0 || --core.references > 0) return;
+            if (core.physics) PxCloseExtensions();
             if (core.physics) core.physics->release();
             if (core.foundation) core.foundation->release();
             core.physics = nullptr;
@@ -501,8 +561,8 @@ namespace Phisiks::Physics {
 
         bool hasSimulationShape = false;
         for (const ColliderDesc& collider : desc.colliders) {
-            if (collider.shape == ShapeType::TriangleMesh && desc.type == BodyType::Dynamic) {
-                Log::Error() << "Physics: triangle-mesh colliders are only valid on static/kinematic bodies";
+            if ((collider.shape == ShapeType::TriangleMesh || collider.shape == ShapeType::HeightField) && desc.type == BodyType::Dynamic) {
+                Log::Error() << "Physics: triangle-mesh / height-field colliders are only valid on static/kinematic bodies";
                 continue;
             }
             std::optional<Geometry> geometry = MakeGeometry(collider);
@@ -512,7 +572,13 @@ namespace Phisiks::Physics {
             if (!shape) continue;
             PxQuat localRotation = ToPx(glm::normalize(collider.localRotation));
             if (collider.shape == ShapeType::Capsule) localRotation = localRotation * CAPSULE_UP;
-            shape->setLocalPose(PxTransform(ToPx(collider.localPosition), localRotation));
+            glm::vec3 localPosition = collider.localPosition;
+            if (collider.shape == ShapeType::HeightField) {   // PhysX height fields start at the local origin; the engine centres them
+                const glm::vec3 corner(-0.5f * float(collider.heightfieldColumns - 1) * collider.heightfieldCellSize, 0.0f,
+                                       -0.5f * float(collider.heightfieldRows - 1) * collider.heightfieldCellSize);
+                localPosition += glm::normalize(collider.localRotation) * corner;
+            }
+            shape->setLocalPose(PxTransform(ToPx(localPosition), localRotation));
             if (collider.isTrigger) {
                 shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, false);
                 shape->setFlag(PxShapeFlag::eTRIGGER_SHAPE, true);
@@ -553,6 +619,9 @@ namespace Phisiks::Physics {
     void DestroyBody(BodyId id) {
         BodySlot* slot = Resolve(id);
         if (!slot) return;
+        for (uint32_t k = 0; k < g.joints.size(); ++k) {
+            if (g.joints[k].alive && (g.joints[k].a == id || g.joints[k].b == id)) ReleaseJointSlot(k);
+        }
         g.scene->removeActor(*slot->actor);
         slot->actor->release();
         slot->actor = nullptr;
@@ -780,7 +849,174 @@ namespace Phisiks::Physics {
             }
         }
         for (const CharacterSlot& slot : g.characters) if (slot.alive) ++stats.characters;
+        for (const JointSlot& slot : g.joints) if (slot.alive) ++stats.joints;
         stats.stepsSimulated = g.steps;
         return stats;
+    }
+
+    // ====================================================================== joints
+    namespace {
+        // Joint frame: origin at the anchor, local X along `axis` (PhysX twist / slide axis).
+        PxQuat FrameRotation(const glm::vec3& axis) {
+            const PxVec3 x(1.0f, 0.0f, 0.0f), a = ToPx(glm::normalize(axis));
+            const float d = x.dot(a);
+            if (d > 0.99999f) return PxQuat(PxIdentity);
+            if (d < -0.99999f) return PxQuat(PxPi, PxVec3(0.0f, 1.0f, 0.0f));
+            const PxVec3 c = x.cross(a);
+            return PxQuat(c.x, c.y, c.z, 1.0f + d).getNormalized();
+        }
+        PxTransform LocalFrame(PxRigidActor* actor, const PxTransform& world) {
+            return actor ? actor->getGlobalPose().transformInv(world) : world;
+        }
+        glm::vec3 PointVelocity(PxRigidActor* actor, const PxVec3& point) {
+            PxRigidDynamic* d = actor ? actor->is<PxRigidDynamic>() : nullptr;
+            if (!d) return glm::vec3(0.0f);
+            const PxVec3 com = d->getGlobalPose().transform(d->getCMassLocalPose().p);
+            return ToGlm(d->getLinearVelocity() + d->getAngularVelocity().cross(point - com));
+        }
+    }
+
+    JointId CreateJoint(const JointDesc& desc) {
+        if (!g.initialized) return {};
+        BodySlot* a = desc.bodyA.Valid() ? Resolve(desc.bodyA) : nullptr;
+        BodySlot* b = desc.bodyB.Valid() ? Resolve(desc.bodyB) : nullptr;
+        if ((desc.bodyA.Valid() && !a) || (desc.bodyB.Valid() && !b) || (!a && !b) || a == b) {
+            Log::Error() << "Physics: CreateJoint needs one or two distinct valid bodies";
+            return {};
+        }
+        PxPhysics& sdk = *Core::SDK();
+        PxRigidActor* actor0 = a ? a->actor : nullptr;
+        PxRigidActor* actor1 = b ? b->actor : nullptr;
+        const PxQuat frameRotation = FrameRotation(glm::length(desc.axis) > 1e-6f ? desc.axis : glm::vec3(0, 1, 0));
+        const PxTransform frameA(ToPx(desc.anchor), frameRotation);
+        const PxTransform frameB(ToPx(desc.type == JointType::SpringDamper ? desc.anchorB : desc.anchor), frameRotation);
+        const PxTransform local0 = LocalFrame(actor0, frameA), local1 = LocalFrame(actor1, frameB);
+        PxJoint* joint = nullptr;
+        switch (desc.type) {
+            case JointType::Hinge: {
+                PxRevoluteJoint* j = PxRevoluteJointCreate(sdk, actor0, local0, actor1, local1);
+                if (!j) break;
+                if (desc.enableLimits) {
+                    j->setLimit(PxJointAngularLimitPair(std::min(desc.lowerLimit, desc.upperLimit), std::max(desc.lowerLimit, desc.upperLimit)));
+                    j->setRevoluteJointFlag(PxRevoluteJointFlag::eLIMIT_ENABLED, true);
+                }
+                if (desc.enableMotor) {
+                    j->setDriveVelocity(desc.motorSpeed);
+                    j->setDriveForceLimit(std::max(desc.maxMotorForce, 0.0f));
+                    j->setRevoluteJointFlag(PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+                }
+                joint = j;
+                break;
+            }
+            case JointType::BallSocket:
+                joint = PxSphericalJointCreate(sdk, actor0, local0, actor1, local1);
+                break;
+            case JointType::Prismatic: {
+                PxD6Joint* j = PxD6JointCreate(sdk, actor0, local0, actor1, local1);
+                if (!j) break;
+                if (desc.enableLimits) {
+                    j->setMotion(PxD6Axis::eX, PxD6Motion::eLIMITED);
+                    j->setLinearLimit(PxD6Axis::eX, PxJointLinearLimitPair(std::min(desc.lowerLimit, desc.upperLimit), std::max(desc.lowerLimit, desc.upperLimit), PxSpring(0.0f, 0.0f)));
+                }
+                else j->setMotion(PxD6Axis::eX, PxD6Motion::eFREE);
+                if (desc.enableMotor) {
+                    j->setDrive(PxD6Drive::eX, PxD6JointDrive(0.0f, 1e6f, std::max(desc.maxMotorForce, 0.0f), false));
+                    j->setDriveVelocity(PxVec3(desc.motorSpeed, 0.0f, 0.0f), PxVec3(0.0f));
+                }
+                joint = j;
+                break;
+            }
+            case JointType::SpringDamper: {
+                PxDistanceJoint* j = PxDistanceJointCreate(sdk, actor0, local0, actor1, local1);
+                if (!j) break;
+                const float rest = desc.restLength >= 0.0f ? desc.restLength : glm::length(desc.anchorB - desc.anchor);
+                j->setMinDistance(rest);
+                j->setMaxDistance(rest);
+                j->setStiffness(std::max(desc.stiffness, 0.0f));
+                j->setDamping(std::max(desc.damping, 0.0f));
+                j->setDistanceJointFlags(PxDistanceJointFlag::eSPRING_ENABLED | PxDistanceJointFlag::eMIN_DISTANCE_ENABLED | PxDistanceJointFlag::eMAX_DISTANCE_ENABLED);
+                joint = j;
+                break;
+            }
+        }
+        if (!joint) { Log::Error() << "Physics: joint creation failed"; return {}; }
+        joint->setConstraintFlag(PxConstraintFlag::eCOLLISION_ENABLED, desc.collideConnected);
+        if (PxRigidDynamic* d = actor0 ? actor0->is<PxRigidDynamic>() : nullptr; d && a->type == BodyType::Dynamic) d->wakeUp();
+        if (PxRigidDynamic* d = actor1 ? actor1->is<PxRigidDynamic>() : nullptr; d && b->type == BodyType::Dynamic) d->wakeUp();
+
+        uint32_t index;
+        if (!g.freeJoints.empty()) { index = g.freeJoints.back(); g.freeJoints.pop_back(); }
+        else { index = uint32_t(g.joints.size()); g.joints.emplace_back(); }
+        JointSlot& slot = g.joints[index];
+        slot.joint = joint;
+        slot.type = desc.type;
+        slot.a = desc.bodyA;
+        slot.b = desc.bodyB;
+        slot.alive = true;
+        return JointId{ MakeId(TAG_JOINT, slot.generation, index) };
+    }
+
+    void DestroyJoint(JointId id) {
+        if (Resolve(id)) ReleaseJointSlot(IndexOf(id.value));
+    }
+
+    bool IsValid(JointId id) { return Resolve(id) != nullptr; }
+
+    JointState GetJointState(JointId id) {
+        JointState s;
+        JointSlot* slot = Resolve(id);
+        if (!slot) return s;
+        PxRigidActor* actor0 = nullptr;
+        PxRigidActor* actor1 = nullptr;
+        slot->joint->getActors(actor0, actor1);
+        const PxTransform pose0 = actor0 ? actor0->getGlobalPose() * slot->joint->getLocalPose(PxJointActorIndex::eACTOR0) : slot->joint->getLocalPose(PxJointActorIndex::eACTOR0);
+        const PxTransform pose1 = actor1 ? actor1->getGlobalPose() * slot->joint->getLocalPose(PxJointActorIndex::eACTOR1) : slot->joint->getLocalPose(PxJointActorIndex::eACTOR1);
+        s.anchorA = ToGlm(pose0.p);
+        s.anchorB = ToGlm(pose1.p);
+        const glm::vec3 axis = ToGlm(pose0.q.getBasisVector0());
+        switch (slot->type) {
+            case JointType::Hinge: {
+                PxRevoluteJoint* j = slot->joint->is<PxRevoluteJoint>();
+                s.position = j->getAngle();
+                s.speed = j->getVelocity();
+                break;
+            }
+            case JointType::Prismatic: {
+                const glm::vec3 d = s.anchorB - s.anchorA;
+                s.position = glm::dot(axis, d);
+                s.speed = glm::dot(PointVelocity(actor1, pose1.p) - PointVelocity(actor0, pose1.p), axis);
+                break;
+            }
+            case JointType::SpringDamper: {
+                const glm::vec3 d = s.anchorB - s.anchorA;
+                s.position = glm::length(d);
+                const glm::vec3 n = s.position > 1e-6f ? d / s.position : axis;
+                s.speed = glm::dot(PointVelocity(actor1, pose1.p) - PointVelocity(actor0, pose0.p), n);
+                break;
+            }
+            case JointType::BallSocket: break;
+        }
+        return s;
+    }
+
+    void SetJointMotor(JointId id, bool enable, float speed, float maxForce) {
+        JointSlot* slot = Resolve(id);
+        if (!slot) return;
+        if (PxRevoluteJoint* j = slot->joint->is<PxRevoluteJoint>()) {
+            j->setDriveVelocity(speed);
+            j->setDriveForceLimit(std::max(maxForce, 0.0f));
+            j->setRevoluteJointFlag(PxRevoluteJointFlag::eDRIVE_ENABLED, enable);
+        }
+        else if (PxD6Joint* j = slot->joint->is<PxD6Joint>()) {
+            j->setDrive(PxD6Drive::eX, PxD6JointDrive(0.0f, enable ? 1e6f : 0.0f, enable ? std::max(maxForce, 0.0f) : 0.0f, false));
+            j->setDriveVelocity(PxVec3(speed, 0.0f, 0.0f), PxVec3(0.0f));
+        }
+        PxRigidActor* actor0 = nullptr;
+        PxRigidActor* actor1 = nullptr;
+        slot->joint->getActors(actor0, actor1);
+        for (PxRigidActor* actor : { actor0, actor1 }) {
+            PxRigidDynamic* d = actor ? actor->is<PxRigidDynamic>() : nullptr;
+            if (d && !(d->getRigidBodyFlags() & PxRigidBodyFlag::eKINEMATIC)) d->wakeUp();
+        }
     }
 }

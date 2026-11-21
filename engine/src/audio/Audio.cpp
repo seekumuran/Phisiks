@@ -208,6 +208,21 @@ namespace Phisiks::Audio {
     bool IsPlaying(VoiceId voice) { return g && voice != 0 && g->mixer.IsPlaying(voice); }
     void SetVolume(VoiceId voice, float volume) { if (g) g->mixer.SetVolume(voice, volume); }
     void SetMasterVolume(float volume) { Get().mixer.SetMasterVolume(volume); }
+
+    VoiceId PlaySpatial(const std::string& clipPath, const glm::vec3& position, float volume, bool loop, float minDistance, float maxDistance, float dopplerFactor) {
+        auto clip = LoadClip(clipPath);
+        return clip ? Get().mixer.PlaySpatial(clip, volume, loop, position, minDistance, maxDistance, dopplerFactor) : 0;
+    }
+    void SetVoicePosition(VoiceId voice, const glm::vec3& position, const glm::vec3& velocity) { if (g) g->mixer.SetVoicePosition(voice, position, velocity); }
+    void SetListener(const glm::vec3& position, const glm::vec3& forward, const glm::vec3& up, const glm::vec3& velocity) {
+        Get().mixer.SetListener(position, forward, up, velocity);
+    }
+    bool GetSpatialInfo(VoiceId voice, SpatialInfo& out) {
+        SpatialVoiceState s;
+        if (!g || !g->mixer.GetSpatialState(voice, s)) return false;
+        out = SpatialInfo{ s.gainLeft, s.gainRight, s.distanceGain, s.pan, s.dopplerPitch, s.distance };
+        return true;
+    }
     bool Preload(const std::string& clipPath) { return LoadClip(clipPath) != nullptr; }
     double GetClipDuration(const std::string& clipPath) {
         auto clip = LoadClip(clipPath);

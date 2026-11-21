@@ -44,3 +44,22 @@ The window scene renders at `renderScale` × the window size. It is then upscale
 
 ## ADR-15: Studio UI in the app, ImGui integration in the engine
 `Phisiks/UI/ImGuiLayer.h` owns Dear ImGui's lifetime and its GLFW/OpenGL3 backends (GLSL 410, both tiers). The Application draws the UI after the frame is presented, so captures, exports and pixel tests never contain UI. The studio itself (`apps/lab/src/Studio.cpp`) uses only the public engine API plus `<imgui.h>` / `<ImGuizmo.h>`, which the layering check allows for apps.
+
+## ADR-16: Joints solved inside each backend, not on top of it
+PhysX joints map onto PxRevoluteJoint, PxSphericalJoint, PxD6Joint (prismatic, so the slide axis can have a velocity drive as its motor) and PxDistanceJoint with a spring. The native solver adds joint rows to its sequential-impulse loop: velocity rows (point, angular, limit and motor rows, warm started) are solved with the contacts and never add energy, positional drift is removed with the same split-impulse pseudo velocities as contacts, and the spring-damper is an implicit soft constraint (gamma / bias from the stiffness and damping), so its period matches sqrt(k/m) exactly. Destroying a body destroys its joints in both backends.
+
+## ADR-17: Post-processing on the resolved window target, decals deferred-style
+The forward renderer keeps MSAA and its entity-id pass. Post effects run after the MSAA resolve, on the single-sample HDR image of the window: depth is resolved once, projected decals are drawn as box volumes that reconstruct the scene position from that depth, SSAO (hemisphere kernel, normals from depth) is blurred and multiplied in, and bloom runs a 13-tap downsample / tent upsample mip chain that the tonemapper adds. Everything is a fragment pass, so the 4.1 tier gets the same effects. Ribbons are drawn into the MSAA target after the sky (additive, depth-tested).
+
+## ADR-18: CPU skinning with dual quaternions
+Skinned glTF meshes are deformed on the CPU and uploaded with `Render::UpdateMeshVertices`, so they go through the same instanced, GPU-culled path as every other mesh on both renderer tiers. Dual-quaternion blending keeps volume under twist (the unit test measures the twisted radius: DQ 0.250 m vs 0.204 m with linear blending, rest 0.250 m); linear blend skinning stays available for comparison.
+
+## ADR-19: Navigation from physics queries
+The navigation grid is built from raycasts and overlap boxes against the static colliders of whichever physics backend runs, so it needs no separate geometry export and works for meshes, boxes and height fields alike. Ledges (neighbour steps above the climb height) count as obstacles before the agent-radius erosion, so wall tops and narrow ledges disappear and agents keep their radius away from walls.
+
+## ADR-20: Lua as a vendored, sandboxed VM per scene
+Scripting uses the official Lua 5.4 sources (MIT), fetched like the other dependencies, rather than a custom interpreter. One VM exists per scene instance; each Script runs its chunk with its own `_ENV` table that falls back to the shared API, so scripts keep private state and can be re-run (hot reload) without losing it. Only the base / table / string / math / utf8 / coroutine libraries are opened (no io, os, package, debug), text chunks only, and an instruction-count hook stops any callback after 200 ms.
+
+## ADR-21: The studio skin is drawn, not loaded
+The retro deck look is produced by an ImGui style plus widgets that draw bevels, gradients, LCD digits and LEDs with draw lists (`Phisiks/UI/RetroDeck.h`). No skin bitmaps or third-party assets are used, the widgets take plain types (apps need no ImGui types for them), and per-frame counters let the runtime test verify the skin on the presented back buffer.
+
