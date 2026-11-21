@@ -32,6 +32,10 @@ namespace Phisiks {
 }
 
 namespace Phisiks::Physics::Advanced {
+    enum class ParticleSpawn { Box, Disk, Fill };
+    enum class ParticleRender { Sprites, Fluid };      // Fluid: screen-space fluid surface (Render::FluidSettings)
+    enum class ParticleColor { Speed, Doppler };       // Doppler: relativistic blue / red shift + beaming (engine/shaders/doppler.glsl)
+
     struct ParticleSystem {
         uint32_t count = 4096;
         glm::vec3 spawnSize{ 2.0f, 2.0f, 2.0f };   // particles start on a jittered grid in this box (around the entity)
@@ -55,6 +59,19 @@ namespace Phisiks::Physics::Advanced {
         float emitSpeed = 0.0f;
         float emitSpread = 0.25f;
         bool pushRigidBodies = true;               // two-way coupling with dynamic rigid bodies
+        // Whole-pool spawn shape. Box: a jittered n x n x n grid scaled to spawnSize (the original
+        // behaviour). Fill: an even lattice (spacing max(cbrt(volume / count), 2 radius)) filling
+        // spawnSize from the bottom up, e.g. a pool of liquid. Disk: an annulus around the entity in the world XZ plane (uniform
+        // per area, `diskThickness` tall); orbitalGM > 0 starts every particle at the circular-orbit
+        // speed sqrt(GM / r) about the world Y axis (counter-clockwise seen from above).
+        ParticleSpawn spawnShape = ParticleSpawn::Box;
+        float diskInnerRadius = 1.0f, diskOuterRadius = 4.0f, diskThickness = 0.1f;
+        float orbitalGM = 0.0f;
+        // Rendering
+        ParticleRender render = ParticleRender::Sprites;
+        ParticleColor colorMode = ParticleColor::Speed;
+        float glow = 0.0f;                         // emissive multiplier on the colour (HDR: > 1 blooms)
+        float dopplerSpeed = 10.0f;                // Doppler colouring: the "speed of light" (m/s)
     };
 
     enum class SoftBodyKind { Rope, Cloth, Box };
@@ -100,6 +117,9 @@ namespace Phisiks::Physics::Advanced {
     // both backends; the Gpu* reference helpers below need the GPU backend.
     bool ReadSoftBody(Entity entity, std::vector<glm::vec4>& positions);   // xyz, w inverse mass
     bool ReadParticles(Entity entity, std::vector<glm::vec4>& positionRadius);
+    // Non-blocking variant for per-frame gameplay use: returns the most recent completed copy (a
+    // frame or two old on the GPU backend; false until the first one arrives) and starts the next.
+    bool ReadParticlesAsync(Entity entity, std::vector<glm::vec4>& positionRadius);
     // Builds the spatial hash for `positions` on the GPU and returns, per point, the number of other
     // points within `radius` (radius <= cellSize).
     bool GpuNeighbourCounts(const std::vector<glm::vec3>& positions, float cellSize, uint32_t tableSize, float radius, std::vector<uint32_t>& counts);

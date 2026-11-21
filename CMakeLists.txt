@@ -231,6 +231,36 @@ function(phisiks_executable target)
 endfunction()
 
 # ---------------------------------------------------------------------------------------------
+# Showcases (examples/): PhisiksShowcase = the shared framework (examples/common) + the six demo
+# scenes; one executable per demo (examples/NN_name/main.cpp). PhisiksLab links the library too
+# (its SHOWCASE playlist launches the same scenes).
+# ---------------------------------------------------------------------------------------------
+file(GLOB PHISIKS_SHOWCASE_SOURCES CONFIGURE_DEPENDS
+    ${PHISIKS_ROOT}/examples/common/*.cpp ${PHISIKS_ROOT}/examples/common/*.h
+    ${PHISIKS_ROOT}/examples/0*/*.cpp ${PHISIKS_ROOT}/examples/0*/*.h)
+list(FILTER PHISIKS_SHOWCASE_SOURCES EXCLUDE REGEX "/main\\.cpp$")
+add_library(PhisiksShowcase STATIC ${PHISIKS_SHOWCASE_SOURCES})
+target_include_directories(PhisiksShowcase PUBLIC ${PHISIKS_ROOT}/examples/common)
+target_link_libraries(PhisiksShowcase PUBLIC PhisiksCore)
+source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_SHOWCASE_SOURCES})
+set(PHISIKS_SHOWCASES
+    Showcase01_StuntCar:01_game_stunt_car
+    Showcase02_FluidHarbor:02_vfx_fluid_harbor
+    Showcase03_Robotics:03_robotics_6dof_terrain
+    Showcase04_Villa:04_cad_modern_house
+    Showcase05_Vision:05_ai_synthetic_vision
+    Showcase06_BlackHole:06_science_black_hole)
+foreach(entry ${PHISIKS_SHOWCASES})
+    string(REPLACE ":" ";" parts ${entry})
+    list(GET parts 0 target)
+    list(GET parts 1 dir)
+    add_executable(${target} ${PHISIKS_ROOT}/examples/${dir}/main.cpp)
+    target_link_libraries(${target} PRIVATE PhisiksShowcase)
+    phisiks_executable(${target})
+    set_target_properties(${target} PROPERTIES FOLDER Showcases)
+endforeach()
+
+# ---------------------------------------------------------------------------------------------
 # PhisiksLab
 # ---------------------------------------------------------------------------------------------
 file(GLOB_RECURSE PHISIKS_LAB_SOURCES CONFIGURE_DEPENDS
@@ -240,6 +270,7 @@ add_executable(PhisiksLab ${PHISIKS_LAB_SOURCES})
 target_include_directories(PhisiksLab PRIVATE ${PHISIKS_ROOT}/apps/lab/src ${PHISIKS_ROOT}/tests/runtime)
 source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_LAB_SOURCES})
 phisiks_executable(PhisiksLab)
+target_link_libraries(PhisiksLab PRIVATE PhisiksShowcase)
 
 # ---------------------------------------------------------------------------------------------
 # Layering + brand check (strict, runs before the engine builds): apps/ and tests/runtime use only
@@ -281,6 +312,7 @@ add_executable(PhisiksUnitTests ${PHISIKS_UNIT_TEST_SOURCES})
 # White-box access to engine-private headers (e.g. presentation backend interfaces for recording fakes).
 target_include_directories(PhisiksUnitTests PRIVATE ${PHISIKS_ROOT}/engine/src)
 phisiks_executable(PhisiksUnitTests)
+target_link_libraries(PhisiksUnitTests PRIVATE PhisiksShowcase)   # Vehicle (examples/common)
 
 add_test(NAME PhisiksUnitTests COMMAND PhisiksUnitTests WORKING_DIRECTORY ${PHISIKS_ROOT})
 add_test(NAME Layering COMMAND ${CMAKE_COMMAND} -DPHISIKS_ROOT=${PHISIKS_ROOT} -P ${PHISIKS_ROOT}/tools/check_layering.cmake)
@@ -292,3 +324,20 @@ add_test(NAME DeterministicReplay
             -DSKIP_RENDER=${PHISIKS_TEST_SKIP_RENDER}
             -P ${PHISIKS_ROOT}/tools/test_deterministic_replay.cmake
     WORKING_DIRECTORY ${PHISIKS_ROOT})
+
+# Showcases: each executable runs its own runtime verification in a hidden window (--quick: no
+# frame-budget measurement, which depends on the GPU; run without --quick for the 60 FPS gate).
+# They need an OpenGL context, so they are skipped with -DPHISIKS_TEST_SKIP_RENDER=ON (CI runners).
+if(NOT PHISIKS_TEST_SKIP_RENDER)
+foreach(entry ${PHISIKS_SHOWCASES})
+    string(REPLACE ":" ";" parts ${entry})
+    list(GET parts 0 target)
+    add_test(NAME ${target} COMMAND ${target} --autotest --quick --hidden --run-dir ${CMAKE_BINARY_DIR}/showcase_runs/${target}
+             WORKING_DIRECTORY ${PHISIKS_ROOT})
+endforeach()
+# Synthetic-vision batch export of the LiDAR proving ground (--headless --export-vision).
+add_test(NAME Showcase05_VisionExport
+    COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:Showcase05_Vision> -DWORK=${CMAKE_BINARY_DIR}/vision_export
+            -P ${PHISIKS_ROOT}/tools/test_vision_export.cmake
+    WORKING_DIRECTORY ${PHISIKS_ROOT})
+endif()

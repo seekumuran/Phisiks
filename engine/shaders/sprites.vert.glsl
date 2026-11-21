@@ -14,17 +14,20 @@ vec4 LoadElement(uint i) { return u_elements[i]; }
 uniform uint u_stride;
 uniform float u_radius;
 uniform float u_pointScale;   // pixels per metre at distance 1 (perspective) or per metre (orthographic)
+uniform float u_radiusScale;  // drawn / simulated radius (screen-space fluid closes the gaps); 0 = 1
 
 out vec3 v_center;
 out float v_radius;
 out float v_speed;
+out vec3 v_velocity;
 
 void main() {
     uint base = uint(gl_VertexID) * u_stride;
     vec4 e = LoadElement(base);
     v_center = e.xyz;
-    v_radius = u_radius > 0.0 ? u_radius : e.w;
-    v_speed = u_stride > 1u ? length(LoadElement(base + 1u).xyz) : 0.0;
+    v_radius = (u_radius > 0.0 ? u_radius : e.w) * (u_radiusScale > 0.0 ? u_radiusScale : 1.0);
+    v_velocity = u_stride > 1u ? LoadElement(base + 1u).xyz : vec3(0.0);
+    v_speed = length(v_velocity);
     gl_Position = u_viewProjection * vec4(e.xyz, 1.0);
     gl_PointSize = clamp(2.0 * v_radius * u_pointScale / gl_Position.w, 1.0, 256.0);
 }

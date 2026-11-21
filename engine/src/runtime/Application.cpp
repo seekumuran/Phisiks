@@ -49,6 +49,9 @@ namespace Phisiks {
             Platform::WindowDesc window;
             window.title = options.windowTitle + (m_harness ? " [AUTOTEST]" : "");
             window.fullscreen = options.fullscreen;
+            window.width = options.windowWidth;
+            window.height = options.windowHeight;
+            window.vsync = options.vsync;
             window.maxGLVersion = options.maxGLVersion;
             if (!Platform::CreateMainWindow(window)) {
                 Log::Error() << "Window / OpenGL context creation failed; aborting";
@@ -244,6 +247,7 @@ namespace Phisiks {
             if (scene) scene->SyncPhysicsBodies();       // bodies for new/changed Collider+Rigidbody components
             int steps = 0;
             const float fixedDt = Time::FixedDeltaTime();
+            if (m_rendererReady) GpuTimer::Get().Begin("Simulation");   // GPU particles / XPBD of this frame's steps
             while (Time::ConsumeFixedStep()) {
                 if (!running) continue;                  // paused: discard accumulated time
                 m_game->OnFixedUpdate(m_ctx, fixedDt);
@@ -263,6 +267,7 @@ namespace Phisiks {
                     m_ctx.replay.Record(*scene, m_ctx.stats.totalFixedSteps + steps, m_ctx.stats.simulationTime + steps * double(fixedDt), &m_ctx.input, &m_ctx.camera);
                 }
             }
+            if (m_rendererReady) GpuTimer::Get().End("Simulation");
             if (scene) scene->PullPhysicsPoses();         // dynamic bodies -> transforms
             if (scene && steps > 0) Scripting::DispatchPhysicsEvents(*scene, m_ctx);   // on_collision / on_trigger
             m_ctx.stats.fixedStepsThisFrame = steps;
@@ -301,7 +306,9 @@ namespace Phisiks {
             if (UI::IsActive()) {   // studio panels on top of the presented frame (not part of captures)
                 UI::BeginFrame();
                 m_game->OnGui(m_ctx);
+                if (m_rendererReady) GpuTimer::Get().Begin("UI");
                 UI::EndFrame();
+                if (m_rendererReady) GpuTimer::Get().End("UI");
             }
             if (m_harness) m_harness->AfterRender(m_ctx);
         }

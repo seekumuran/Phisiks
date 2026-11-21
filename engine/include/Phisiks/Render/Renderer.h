@@ -13,6 +13,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
+#include <glm/gtc/type_precision.hpp>
 
 #include <cstdint>
 #include <string>
@@ -54,6 +55,33 @@ namespace Phisiks::Render {
         bool halfResolution = false;
     };
 
+    // Screen-space fluid (SSF) for particle systems drawn with ParticleRender::Fluid (window views):
+    //   1 sphere depth  particles as sphere impostors -> R32F linear view depth (+ sphere normal, speed)
+    //   2 depth blur    narrow-range bilateral Gaussian (separable, blurIterations x H + V): neighbours are clamped to
+    //                   +-blurDepthFalloff of the centre, so silhouettes stay sharp
+    //   3 normals       view-space normals reconstructed from the smoothed depth
+    //   4 shading       refraction of the scene behind, Beer-Lambert absorption over the water depth
+    //                   (scene depth - fluid depth), Fresnel sky reflection + sun specular, whitewater
+    //                   foam from the particle speed (HDR, so it feeds bloom)
+    // `breakdown` wipes through the stages: 0 raw particles, 1 depth, 2 normals, 3 final water; a
+    // fractional value shows the next stage left of the wipe line (e.g. 2.5: half normals, half water).
+    struct FluidSettings {
+        bool enabled = true;
+        float particleScale = 1.7f;        // rendered sphere radius / particle radius (closes gaps)
+        float blurRadius = 0.12f;          // metres (converted to pixels per depth)
+        float maxBlurPixels = 48.0f;       // at 1080p (scaled with the view height); 12 taps per side, strided
+        float blurDepthFalloff = 0.10f;    // metres
+        int blurIterations = 2;            // separable H + V passes applied this many times (1..3)
+        bool halfResolution = true;        // passes 1-3 at half the scene resolution (4x less fill), shading at full
+        glm::vec3 absorption{ 0.42f, 0.09f, 0.055f };   // per metre: red is absorbed first
+        glm::vec3 deepColor{ 0.010f, 0.060f, 0.085f };  // light scattered back by deep water (linear)
+        float refraction = 0.035f;         // screen offset (fraction of the view height) per unit normal
+        float foamSpeed = 2.2f;            // m/s where whitewater starts (full at 2x)
+        float foamIntensity = 1.6f;        // HDR brightness of the foam
+        glm::vec3 rawColor{ 0.25f, 0.6f, 1.0f };   // breakdown stage 0 sphere colour
+        float breakdown = 3.0f;
+    };
+
     // Spatial upscaling of the window image from renderScale x the window size.
     enum class Upscaler : uint32_t { Bilinear = 0, FSR1 = 1 };   // FSR1: edge-adaptive EASU + RCAS sharpening
 
@@ -82,6 +110,8 @@ namespace Phisiks::Render {
         BloomSettings bloom;
         SsaoSettings ssao;
         bool decals = true;                // projected decals (Render::DrawDecal / Decal components)
+        FluidSettings fluid;
+        bool wireframe = false;            // meshes and soft bodies as lines (breakdown / debugging views)
     };
     RenderSettings& Settings();
 
@@ -243,6 +273,13 @@ namespace Phisiks::Render {
         std::string directory;
     };
     ShaderCacheStats GetShaderCacheStats();
+
+    // False colour of an entity id (Entity::Id() + 1) in Camera::entityIdColors targets (sRGB bytes).
+    inline glm::u8vec3 EntityIdColor(uint32_t idPlusOne) {
+        if (idPlusOne == 0) return glm::u8vec3(13, 13, 15);
+        const uint32_t h = idPlusOne * 2654435761u;
+        return glm::u8vec3(uint8_t(64 + ((h >> 8) & 0xFF) * 191 / 255), uint8_t(64 + ((h >> 16) & 0xFF) * 191 / 255), uint8_t(64 + ((h >> 24) & 0xFF) * 191 / 255));
+    }
 
     // GL texture (RGBA8, tonemapped) of an offscreen camera target (Camera::target), 0 if none yet.
     uint32_t GetTargetTexture(const std::string& name);

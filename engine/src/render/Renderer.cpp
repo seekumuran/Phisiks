@@ -16,6 +16,7 @@
 // 4.1 tier: CPU culling, one instanced draw per command (u_baseInstance), storage read through
 // texture buffers, no Hi-Z; particles / XPBD / fields come from the CPU compute backend.
 #include "render/RendererInternal.h"
+#include "Phisiks/Core/Profiler.h"
 #include "render/RenderMath.h"
 #include "render/ShaderCache.h"
 #include "render/ShaderPrograms.h"
@@ -101,8 +102,13 @@ namespace Phisiks::Render {
             std::vector<GL::Texture> bloomMips;
             std::vector<GL::Framebuffer> bloomFbos;
             std::vector<glm::ivec2> bloomSizes;
+            // window only: screen-space fluid
+            GL::Texture fluidRaw, fluidRawNormal, fluidZ, fluidBlur[2], fluidNormals, fluidScene;
+            GL::Framebuffer fluidFbo, fluidBlurFbo[2], fluidNormalFbo, fluidSceneFbo;
+            glm::ivec2 fluidSize{ 0 };
             bool upscaledThisFrame = false;
             bool usedThisFrame = false;
+            bool entityIdColors = false;       // offscreen: tonemap shows entity-id false colours
             bool rendered = false;
         };
 
@@ -687,6 +693,45 @@ namespace Phisiks::Render {
                     t.bloomSizes.push_back(size);
                 }
             }
+        }
+
+        // ------------------------------------------------------------------ screen-space fluid targets (window)
+        void EnsureFluidTargets(TargetSet& t, int scale) {
+            const glm::ivec2 size = glm::max((t.size + (scale - 1)) / scale, glm::ivec2(1));
+            if (t.fluidSize == size) return;
+            t.fluidSize = size;
+            GL::TextureDesc d;
+            d.width = size.x;
+            d.height = size.y;
+            d.minFilter = d.magFilter = GL_NEAREST;
+            d.format = GL_R32F;
+            t.fluidRaw.Create("SSF depth", d);
+            t.fluidBlur[0].Create("SSF depth blur H", d);
+            t.fluidBlur[1].Create("SSF depth blur V", d);
+            d.format = GL_RGBA16F;
+            t.fluidRawNormal.Create("SSF sphere normal + speed", d);
+            d.minFilter = d.magFilter = GL_LINEAR;
+            t.fluidNormals.Create("SSF normals", d);
+            t.fluidScene.Create("SSF scene copy", d);   // at the fluid resolution: refraction is blurred anyway
+            d.minFilter = d.magFilter = GL_NEAREST;
+            d.format = GL_DEPTH_COMPONENT32F;
+            t.fluidZ.Create("SSF z", d);
+            t.fluidFbo.Create("SSF depth");
+            t.fluidFbo.AttachColor(0, t.fluidRaw);
+            t.fluidFbo.AttachColor(1, t.fluidRawNormal);
+            t.fluidFbo.AttachDepth(t.fluidZ);
+            t.fluidFbo.SetDrawBuffers(2);
+            for (int i = 0; i < 2; ++i) {
+                t.fluidBlurFbo[i].Create(i == 0 ? "SSF blur H" : "SSF blur V");
+                t.fluidBlurFbo[i].AttachColor(0, t.fluidBlur[i]);
+                t.fluidBlurFbo[i].SetDrawBuffers(1);
+            }
+            t.fluidNormalFbo.Create("SSF normals");
+            t.fluidNormalFbo.AttachColor(0, t.fluidNormals);
+            t.fluidNormalFbo.SetDrawBuffers(1);
+            t.fluidSceneFbo.Create("SSF scene copy");
+            t.fluidSceneFbo.AttachColor(0, t.fluidScene);
+            t.fluidSceneFbo.SetDrawBuffers(1);
         }
 
         // ------------------------------------------------------------------ hot reload
@@ -1371,6 +1416,7 @@ namespace Phisiks::Render {
                     size = glm::max(cam.targetSize, glm::ivec2(16));
                     EnsureTargetSet(*target, size, cam.target);
                     target->usedThisFrame = true;
+                    target->entityIdColors = cam.entityIdColors;
                 }
                 const glm::vec4 vp = glm::clamp(cam.viewport, glm::vec4(0.0f), glm::vec4(1.0f));
                 glm::ivec4 rect(int(vp.x * size.x), int(vp.y * size.y), int(vp.z * size.x), int(vp.w * size.y));
@@ -1560,6 +1606,7 @@ namespace Phisiks::Render {
             glBindVertexArray(g->meshVao);
             if (!views.empty()) glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->frameUbo.Id(), 0, sizeof(FrameDataGpu));
 
+            GpuTimer::Get().Begin("Prepass");   // GPU culling + spot / point shadow maps
             // ---------------------------------------------------------- GPU culling (frustum + Hi-Z occlusion)
             const int statsSlot = int(g->cullFrame % State::CULL_SLOTS);
             stats.gpuCulling = gpuCulling;
@@ -1663,6 +1710,7 @@ namespace Phisiks::Render {
                 glDisable(GL_POLYGON_OFFSET_FILL);
             }
 
+            GpuTimer::Get().End("Prepass");
             // ---------------------------------------------------------- visualiser inputs (once per frame)
             uint32_t fieldSamples = 0, fieldSampleCount = 0;
             if (g->fieldViz.enabled && Advanced::Available()) {
@@ -1694,7 +1742,46 @@ namespace Phisiks::Render {
             clearSet(g->window);
             for (auto& [name, set] : g->offscreen) if (set.usedThisFrame) clearSet(set);
 
+            // Sphere sprites of particle systems / rope nodes. which = 0: colour pass (fluid systems are
+            // skipped on window views while the screen-space fluid passes draw them), 1: fluid only.
+            const bool fluidOn = settings.fluid.enabled;
+            uint32_t fluidParticleCount = 0;
+            for (const Advanced::SpriteDraw& d : spriteDraws) if (d.fluid) fluidParticleCount += d.count;
+            auto drawSprites = [&](const GL::Program& program, const View& v, int which, float radiusScale, int resolutionDivisor = 1) -> uint32_t {
+                glEnable(GL_PROGRAM_POINT_SIZE);
+                program.Use();
+                const Camera& cam = v.input->camera;
+                const float rectHeight = float(v.rect.w) / float(resolutionDivisor);
+                const float pointScale = cam.projection == Projection::Orthographic ? rectHeight / std::max(cam.orthoHeight, 1e-3f)
+                                                                                      : rectHeight / (2.0f * std::tan(cam.verticalFov * 0.5f));
+                if (which == 1) glUniform1f(program.Uniform("u_fluidScale"), float(resolutionDivisor));
+                glUniform1f(program.Uniform("u_pointScale"), pointScale);
+                glUniform1f(program.Uniform("u_radiusScale"), radiusScale);
+                glBindVertexArray(g->emptyVao);
+                uint32_t drawn = 0;
+                for (const Advanced::SpriteDraw& d : spriteDraws) {
+                    const bool asFluid = d.fluid && fluidOn && v.target == &g->window;
+                    if ((which == 0 && asFluid) || (which == 1 && !asFluid)) continue;
+                    if (compat) g->tboAux.Bind(13, GL_RGBA32F, d.buffer);
+                    else glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.buffer);
+                    glUniform1ui(program.Uniform("u_stride"), d.stride);
+                    glUniform1f(program.Uniform("u_radius"), d.radius);
+                    glUniform3fv(program.Uniform("u_color"), 1, &d.color[0]);
+                    glUniform3fv(program.Uniform("u_fastColor"), 1, &d.fastColor[0]);
+                    glUniform1f(program.Uniform("u_fastSpeed"), d.fastSpeed);
+                    glUniform1ui(program.Uniform("u_entityId"), d.entityId + 1);
+                    glUniform1i(program.Uniform("u_colorMode"), int(d.colorMode));
+                    glUniform1f(program.Uniform("u_glow"), d.glow);
+                    glUniform1f(program.Uniform("u_dopplerSpeed"), d.dopplerSpeed);
+                    glDrawArrays(GL_POINTS, 0, GLsizei(d.count));
+                    drawn += d.count;
+                }
+                glDisable(GL_PROGRAM_POINT_SIZE);
+                return drawn;
+            };
+
             // ---------------------------------------------------------- views
+            GpuTimer::Get().Begin("Scene");   // GPU zones (non-blocking timestamps): Profiler "GPU: Scene / Post / SSF"
             bool visionDone = false;
             for (size_t i = 0; i < views.size(); ++i) {
                 View& v = views[i];
@@ -1728,6 +1815,7 @@ namespace Phisiks::Render {
                 g->albedoArray.Bind(8);
                 glBindVertexArray(g->meshVao);
                 g->programs[Shaders::FORWARD].Use();
+                if (settings.wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
                 DrawCommands(g->programs[Shaders::FORWARD], v.firstCommand, v.commandCount);
 
                 // XPBD cloth / soft bodies (two-sided), straight from the solver buffers
@@ -1745,32 +1833,9 @@ namespace Phisiks::Render {
                     stats.softBodiesDrawn = uint32_t(softDraws.size());
                     glEnable(GL_CULL_FACE);
                 }
+                if (settings.wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
                 // GPU particles and rope nodes as shaded sphere sprites
-                if (!spriteDraws.empty()) {
-                    glEnable(GL_PROGRAM_POINT_SIZE);
-                    const GL::Program& sprites = g->programs[Shaders::SPRITES];
-                    sprites.Use();
-                    const Camera& cam = v.input->camera;
-                    const float pointScale = cam.projection == Projection::Orthographic ? float(v.rect.w) / std::max(cam.orthoHeight, 1e-3f)
-                                                                                          : float(v.rect.w) / (2.0f * std::tan(cam.verticalFov * 0.5f));
-                    glUniform1f(sprites.Uniform("u_pointScale"), pointScale);
-                    glBindVertexArray(g->emptyVao);
-                    uint32_t drawn = 0;
-                    for (const Advanced::SpriteDraw& d : spriteDraws) {
-                        if (compat) g->tboAux.Bind(13, GL_RGBA32F, d.buffer);
-                        else glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, d.buffer);
-                        glUniform1ui(sprites.Uniform("u_stride"), d.stride);
-                        glUniform1f(sprites.Uniform("u_radius"), d.radius);
-                        glUniform3fv(sprites.Uniform("u_color"), 1, &d.color[0]);
-                        glUniform3fv(sprites.Uniform("u_fastColor"), 1, &d.fastColor[0]);
-                        glUniform1f(sprites.Uniform("u_fastSpeed"), d.fastSpeed);
-                        glUniform1ui(sprites.Uniform("u_entityId"), d.entityId + 1);
-                        glDrawArrays(GL_POINTS, 0, GLsizei(d.count));
-                        drawn += d.count;
-                    }
-                    stats.particlesDrawn = drawn;
-                    glDisable(GL_PROGRAM_POINT_SIZE);
-                }
+                if (!spriteDraws.empty()) stats.particlesDrawn = drawSprites(g->programs[Shaders::SPRITES], v, 0, 1.0f);
                 // Analytical SDF / CSG visualiser (raymarched, writes depth and the entity id)
                 if (g->sdf.enabled && !g->sdf.primitives.empty()) {
                     glDisable(GL_CULL_FACE);
@@ -1875,6 +1940,7 @@ namespace Phisiks::Render {
                 }
             }
 
+            GpuTimer::Get().End("Scene");
             // ---------------------------------------------------------- Hi-Z pyramid for next frame's occlusion culling
             if (settings.gpuCulling && settings.occlusionCulling && !compat && !views.empty()) {
                 const glm::ivec2 windowSize = sceneSize;   // the pyramid follows the scene resolution
@@ -1948,7 +2014,8 @@ namespace Phisiks::Render {
                     const bool doDecals = settings.decals && !g->decals.empty();
                     const bool doSsao = ssao.enabled && ssao.intensity > 0.0f;
                     const bool doBloom = bloom.enabled && bloom.intensity > 0.0f;
-                    if (doDecals || doSsao || doBloom) {
+                    const bool doFluid = fluidOn && fluidParticleCount > 0;
+                    if (doDecals || doSsao || doBloom || doFluid) {
                         int levels = 0;
                         if (doBloom) {
                             levels = std::clamp(bloom.mipCount, 1, 8);
@@ -1957,7 +2024,9 @@ namespace Phisiks::Render {
                         const int aoScale = ssao.halfResolution ? 2 : 1;
                         const glm::ivec2 aoSize = doSsao ? glm::max(s / aoScale, glm::ivec2(1)) : glm::ivec2(0);
                         EnsurePostTargets(t, levels, aoSize);
-                        if (doDecals || doSsao) GL::Blit(fbo, t.depthResolveFbo.Id(), s.x, s.y, s.x, s.y, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+                        const int fluidScale = settings.fluid.halfResolution ? 2 : 1;
+                        if (doFluid) EnsureFluidTargets(t, fluidScale);
+                        if (doDecals || doSsao || doFluid) GL::Blit(fbo, t.depthResolveFbo.Id(), s.x, s.y, s.x, s.y, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
                         glBindVertexArray(g->emptyVao);
                         glDisable(GL_DEPTH_TEST);
                         glDepthMask(GL_FALSE);
@@ -2033,6 +2102,92 @@ namespace Phisiks::Render {
                                 stats.ssaoWidth = aoSize.x;
                                 stats.ssaoHeight = aoSize.y;
                             }
+                            if (doFluid) {
+                                if (firstWindow) GpuTimer::Get().Begin("SSF");
+                                // Screen-space fluid: 1 sphere depth, 2 narrow-range depth blur (H, V), 3 normals, 4 shading.
+                                const FluidSettings& fl = settings.fluid;
+                                const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                                glDisable(GL_SCISSOR_TEST);
+                                glDepthMask(GL_TRUE);   // clears honour the depth mask (off during post-processing)
+                                GL::ClearColor(t.fluidFbo.Id(), 0, zero4);
+                                GL::ClearColor(t.fluidFbo.Id(), 1, zero4);
+                                GL::ClearDepth(t.fluidFbo.Id(), 1.0f);
+                                for (int i = 0; i < 2; ++i) GL::ClearColor(t.fluidBlurFbo[i].Id(), 0, zero4);
+                                GL::ClearColor(t.fluidNormalFbo.Id(), 0, zero4);
+                                const glm::ivec4 fr(v.rect.x / fluidScale, v.rect.y / fluidScale, std::max(v.rect.z / fluidScale, 1), std::max(v.rect.w / fluidScale, 1));
+                                const glm::vec4 fluidRect(fr);
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.fluidFbo.Id());
+                                glViewport(fr.x, fr.y, fr.z, fr.w);
+                                glScissor(fr.x, fr.y, fr.z, fr.w);
+                                glEnable(GL_SCISSOR_TEST);
+                                glDisable(GL_BLEND);
+                                glDisable(GL_CULL_FACE);
+                                glEnable(GL_DEPTH_TEST);
+                                glDepthFunc(GL_LESS);
+                                glDepthMask(GL_TRUE);
+                                t.depthResolved.Bind(0);
+                                const uint32_t drawnFluid = drawSprites(g->programs[Shaders::SPRITES_FLUID], v, 1, fl.particleScale, fluidScale);
+                                glDisable(GL_DEPTH_TEST);
+                                glDepthMask(GL_FALSE);
+                                glBindVertexArray(g->emptyVao);
+                                const Camera& cam = v.input->camera;
+                                const float pixelsPerMeter = (cam.projection == Projection::Orthographic ? float(v.rect.w) / std::max(cam.orthoHeight, 1e-3f)
+                                                                                                          : v.projection[1][1] * 0.5f * float(v.rect.w)) / float(fluidScale);
+                                const float heightScale = float(v.rect.w) / 1080.0f;
+                                const GL::Program& blur = g->programs[Shaders::FLUID_BLUR];
+                                blur.Use();
+                                glUniform4fv(blur.Uniform("u_viewRect"), 1, &fluidRect[0]);
+                                glUniform1f(blur.Uniform("u_worldRadius"), fl.blurRadius);
+                                glUniform1f(blur.Uniform("u_pixelsPerMeter"), pixelsPerMeter);
+                                glUniform1f(blur.Uniform("u_maxRadius"), std::max(1.0f, fl.maxBlurPixels * heightScale / float(fluidScale)));
+                                glUniform1f(blur.Uniform("u_falloff"), fl.blurDepthFalloff);
+                                const int iterations = std::clamp(fl.blurIterations, 1, 3);
+                                for (int pass = 0; pass < 2 * iterations; ++pass) {
+                                    const bool horizontal = pass % 2 == 0;
+                                    glBindFramebuffer(GL_FRAMEBUFFER, t.fluidBlurFbo[horizontal ? 0 : 1].Id());
+                                    glUniform2f(blur.Uniform("u_direction"), horizontal ? 1.0f : 0.0f, horizontal ? 0.0f : 1.0f);
+                                    (pass == 0 ? t.fluidRaw : (horizontal ? t.fluidBlur[1] : t.fluidBlur[0])).Bind(0);
+                                    glDrawArrays(GL_TRIANGLES, 0, 3);
+                                }
+                                const GL::Program& normals = g->programs[Shaders::FLUID_NORMALS];
+                                normals.Use();
+                                glUniform4fv(normals.Uniform("u_viewRect"), 1, &fluidRect[0]);
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.fluidNormalFbo.Id());
+                                t.fluidBlur[1].Bind(0);
+                                glDrawArrays(GL_TRIANGLES, 0, 3);
+                                glDisable(GL_SCISSOR_TEST);
+                                GL::Blit(t.resolveColorFbo.Id(), t.fluidSceneFbo.Id(), s.x, s.y, t.fluidSize.x, t.fluidSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+                                glEnable(GL_SCISSOR_TEST);
+                                const GL::Program& composite = g->programs[Shaders::FLUID_COMPOSITE];
+                                composite.Use();
+                                glUniform4fv(composite.Uniform("u_viewRect"), 1, &rect[0]);
+                                glUniform1f(composite.Uniform("u_fluidScale"), float(fluidScale));
+                                glUniform1f(composite.Uniform("u_breakdown"), std::clamp(fl.breakdown, 0.0f, 3.0f));
+                                glUniform3fv(composite.Uniform("u_absorption"), 1, &fl.absorption[0]);
+                                glUniform3fv(composite.Uniform("u_deepColor"), 1, &fl.deepColor[0]);
+                                glUniform1f(composite.Uniform("u_refraction"), fl.refraction);
+                                glUniform2f(composite.Uniform("u_foam"), fl.foamSpeed, fl.foamIntensity);
+                                glUniform3fv(composite.Uniform("u_rawColor"), 1, &fl.rawColor[0]);
+                                glUniform2f(composite.Uniform("u_depthRange"), std::max(cam.nearPlane, 0.5f), 30.0f);
+                                t.fluidScene.Bind(0);
+                                t.fluidBlur[1].Bind(1);
+                                t.fluidNormals.Bind(2);
+                                t.fluidRawNormal.Bind(3);
+                                t.fluidRaw.Bind(4);
+                                t.depthResolved.Bind(5);
+                                glBindFramebuffer(GL_FRAMEBUFFER, t.resolveColorFbo.Id());
+                                glViewport(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                                glScissor(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                                glDrawArrays(GL_TRIANGLES, 0, 3);
+                                glDisable(GL_SCISSOR_TEST);
+                                stats.fluidActive = true;
+                                stats.fluidPasses += uint32_t(3 + 2 * iterations);
+                                if (firstWindow) {
+                                    stats.fluidParticles = drawnFluid;
+                                    stats.particlesDrawn += drawnFluid;
+                                    GpuTimer::Get().End("SSF");
+                                }
+                            }
                             firstWindow = false;
                         }
                         if (doBloom) {
@@ -2078,6 +2233,14 @@ namespace Phisiks::Render {
                 glBindFramebuffer(GL_FRAMEBUFFER, t.ldrFbo.Id());
                 glViewport(0, 0, s.x, s.y);
                 glDisable(GL_DEPTH_TEST);
+                if (t.entityIdColors && &t != &g->window) {
+                    g->programs[Shaders::TONEMAP_IDS].Use();
+                    t.idResolved.Bind(2);
+                    glBindVertexArray(g->emptyVao);
+                    glDrawArrays(GL_TRIANGLES, 0, 3);
+                    t.rendered = true;
+                    return;
+                }
                 g->programs[Shaders::TONEMAP].Use();
                 glUniform1f(g->programs[Shaders::TONEMAP].Uniform("u_bloomIntensity"), bloomIntensity);
                 GL::BindTexture(1, GL_TEXTURE_2D, bloomTexture);
@@ -2088,7 +2251,9 @@ namespace Phisiks::Render {
             };
             if (views.empty()) glBindBufferRange(GL_UNIFORM_BUFFER, 0, g->frameUbo.Id(), 0, sizeof(FrameDataGpu));   // exposure for tonemap
             for (auto& [name, set] : g->offscreen) if (set.usedThisFrame) finish(set);
+            GpuTimer::Get().Begin("Post");
             finish(g->window);
+            GpuTimer::Get().End("Post");
 
             // Vision readback (internal resolution, aligned with the tonemapped colour).
             if (visionDone) {
@@ -2110,6 +2275,7 @@ namespace Phisiks::Render {
             }
             g->visionRequested = false;
 
+            GpuTimer::Get().Begin("Output");   // upscaler + overlay text + present
             // Upscale the window image (EASU + RCAS or bilinear) to the window size.
             TargetSet& w = g->window;
             GLuint shown = w.ldrFbo.Id();
@@ -2132,6 +2298,7 @@ namespace Phisiks::Render {
             DrawTextPass(present, windowSize);
             GL::Blit(present, 0, windowSize.x, windowSize.y, windowSize.x, windowSize.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
+            GpuTimer::Get().End("Output");
             glBindVertexArray(0);
             glEnable(GL_DEPTH_TEST);
             g->ring.EndFrame();

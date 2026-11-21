@@ -7,6 +7,9 @@ Phisiks is a general-purpose 3D simulation, visualisation and game engine:
 
 Every phase ends with a clean Release build, all unit and runtime checks green, a commit and a tag. Phase history and measurements are in `PHASE_LOG.md`.
 
+## Feature freeze (P10, `p10-showcase`)
+The core engine API (`engine/include/Phisiks`) is frozen as of P10: from here on, changes to the engine are bug fixes, performance work, platform bring-up (the first Linux / macOS CI runs) and the open follow-ups below; new features go into games, `examples/` and tools on top of the public API. Breaking API changes need an ADR.
+
 ## Done
 
 | Phase | Tag | Delivered |
@@ -21,6 +24,7 @@ Every phase ends with a clean Release build, all unit and runtime checks green, 
 | P7 / P7b | `p7-compute` | `Phisiks::Compute` (OpenGL 4.6 compute + SSBOs, `IComputeBackend` with OpenCL/SYCL hooks); persistent-mapped ring buffer; GPU frustum + Hi-Z occlusion culling writing the indirect commands; GPU spatial hash and particles; `Phisiks::Physics::Advanced` GPU XPBD (rope, cloth, soft bodies) with scene colliders; force fields (uniform, planetary, vortex, N-body) on rigid bodies, particles and XPBD; raymarched SDF/CSG and vector-field arrow visualisers; FieldLab scene |
 | P9 | `p9-3d-vfx` | Retro deck studio skin (zero HUD overlap); glTF 2.0 / GLB importer, dual-quaternion skinning, spline camera paths; HDR bloom, SSAO, ribbon trails / beams / orbit paths, projected decals, live GLSL hot reload; heightmap terrain with splatmaps and height-field collision, instanced foliage; joints (hinge, ball-socket, prismatic, spring-damper) on both physics backends; 3D audio (panning, inverse-square, Doppler); navigation grid + A* + crowd steering; embedded Lua 5.4 scripting |
 | P8 | `p8-studio` | Windows / Linux / macOS builds (platform layer, CMake presets, CI); native rigid-body backend; OpenGL 4.1 renderer tier + multi-threaded CPU compute backend; PhisiksLab ImGui studio (hierarchy, inspector, gizmos, classroom lessons, telemetry, timeline); JSON scenes; replay ring buffer with scrubbing; synthetic-vision export; FSR 1.0-style EASU + RCAS upscaling and quality presets; particle emitters; two-way particle / soft-body to rigid-body coupling |
+| P10 | `p10-showcase` | **Core engine feature freeze.** Six industry showcases in `examples/` on a shared framework (camera shots, view modes, RetroDeck telemetry, runtime harness): stunt car + destructible towers, screen-space fluid harbor with buoyancy, 6-DOF arm + rover, glass villa with time of day and CAD views, LiDAR / segmentation proving ground with vision export, black-hole disk with an integrator split-test; engine additions: 4-pass screen-space fluid, wireframe, disk / fill particle spawns, Doppler particle colouring, entity-id colour targets, non-blocking particle readback, GPU zone timers |
 
 ## Next
 
@@ -46,10 +50,13 @@ From P9:
 - **Scenes:** JSON scene files do not yet store the P9 components (Joint, SkinnedModel, Terrain, Script, ...).
 - **Joints:** no breakable joints, no articulation (reduced-coordinate) solver; PhysX prismatic is a D6 joint.
 
-### P10 candidates
-- Template projects in `examples/`: 3D game, headless simulation + data export, interactive visualiser.
-- GPU skinning and animation blending / state machines; polygon navmesh.
-- Vulkan or Metal backend evaluation for macOS beyond OpenGL 4.1.
+From P10:
+- **Frame budgets:** on this machine (Intel UHD Graphics, 1920x1080, Medium preset) five of the six showcases average 60 FPS or more on the OpenGL 4.6 tier (FluidHarbor and Vision only just: 60.6 / 60.8 FPS) and Villa does not (58.4 FPS); on the 4.1 tier all six run at 80-102 FPS. None has been measured on the i3 / 8 GB target laptop. The forward renderer shades every light per pixel (no light culling); the 4.6 tier's GPU-driven path is slower than the 4.1 tier's CPU culling on this iGPU in every showcase, which needs profiling.
+- **Screen-space fluid:** a granular particle model (spatial-hash separation), not SPH / PBF pressure; the surface is smooth from typical views but shows particles at grazing close-ups; window views only.
+- **Showcases:** buoyancy uses a particle-column surface estimate; the robot arm's links are gravity-compensated and the gripper attaches the crate kinematically; the rover is a raycast vehicle (no articulated rocker-bogie joints); the segmentation view colours instances, classes come from the export's class table.
+
+### After the freeze
+- Linux / macOS CI bring-up; GPU skinning; light culling (clustered or tiled forward); SPH / PBF fluid; polygon navmesh; Vulkan or Metal evaluation.
 
 ## Principles
 - **Public API in `engine/include/Phisiks`, everything else private.** A strict build check enforces it: apps and tests include only `Phisiks/...`, glm, EnTT and the standard library.

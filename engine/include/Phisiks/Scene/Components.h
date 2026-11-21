@@ -67,6 +67,9 @@ namespace Phisiks {
         int order = 0;                       // lower draws first
         std::string target;                  // empty = window, else an offscreen target name
         glm::ivec2 targetSize{ 512, 512 };   // offscreen target resolution
+        // Offscreen targets only: show entity-id false colours instead of the lit image (instance
+        // segmentation preview; colour = Render::EntityIdColor(id), background dark grey).
+        bool entityIdColors = false;
         bool enabled = true;
         bool primary = true;
     };

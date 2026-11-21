@@ -18,6 +18,7 @@
 #include "LessonScenes.h"
 #include "P9Scenes.h"
 #include "SandboxScenes.h"
+#include "Showcase.h"
 #include "Studio.h"
 
 #include <cstdlib>
@@ -34,6 +35,7 @@ namespace {
             Lab::RegisterScenes(scenes);
             Lab::RegisterLessonScenes(scenes);
             Lab::RegisterP9Scenes(scenes);
+            Showcase::RegisterAll(scenes);   // the six P10 showcases (also standalone executables)
         }
         void OnStart(Phisiks::GameContext&) override {
             Lab::RegisterMaterials();
@@ -46,7 +48,8 @@ namespace {
                 m_lastScene = ctx.CurrentScene();
                 Lab::Studio::OnSceneLoaded(ctx);
             }
-            if (ctx.input.Pressed(Phisiks::Action::ToggleViewLayout) && ctx.CurrentScene()) {
+            Showcase::HandleInput(ctx);   // keys 1-5 / 0 / M / F3 inside showcase scenes
+            if (ctx.input.Pressed(Phisiks::Action::ToggleViewLayout) && ctx.CurrentScene() && !Showcase::Current(ctx)) {
                 Lab::SetQuadView(*ctx.CurrentScene(), !Lab::IsQuadView(*ctx.CurrentScene()));
             }
         }
@@ -110,6 +113,7 @@ int main(int argc, char** argv) {
     game.quality = quality;
     std::unique_ptr<Phisiks::ITestHarness> harness;
     if (autotest) harness = std::make_unique<Phisiks::AutoTest>(options.runDirectory);
+    Showcase::SetTestMode(autotest);
 
     Phisiks::Application app;
     if (!app.Init(options, game, std::move(harness))) {

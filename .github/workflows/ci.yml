@@ -4,7 +4,8 @@
 # Windows PhysX build needs the vendored SDK binaries and is checked locally, see docs/BUILD.md).
 # Runners have no GPU: the headless unit tests and the headless deterministic-replay test run
 # everywhere; Linux additionally tries the runtime autotest on Mesa llvmpipe (software OpenGL,
-# 4.1 tier) under Xvfb, reported but not blocking.
+# 4.1 tier) under Xvfb, reported but not blocking. PHISIKS_TEST_SKIP_RENDER=ON also skips the six
+# showcase autotests and the vision export test (they need an OpenGL context).
 name: ci
 
 on:

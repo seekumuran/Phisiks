@@ -37,6 +37,9 @@ namespace Phisiks {
         uint32_t decalsDrawn = 0;
         uint32_t ribbonsDrawn = 0, ribbonVertices = 0;
         uint32_t overlayGlyphs = 0;     // bitmap overlay text glyphs in the presented frame
+        bool fluidActive = false;       // screen-space fluid passes ran (window)
+        uint32_t fluidParticles = 0;    // particles rendered as fluid
+        uint32_t fluidPasses = 0;       // SSF draw passes (depth, 2 blur, normals, shading per window view)
     };
 
     RenderStats GetRenderStats();    // zeros when no renderer is running (e.g. headless)

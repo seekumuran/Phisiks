@@ -152,7 +152,15 @@ namespace Phisiks::Advanced {
             uint32_t alive = 0;
             uint64_t emitted = 0;
             uint32_t rng = 1;
-            void Release() { FreeBuffer(state[0]); FreeBuffer(state[1]); FreeBuffer(accel); FreeBuffer(renderBuffer); hash.Release(); }
+            // asynchronous readback (ReadParticlesAsync): GPU-side copy + fence, read once signalled
+            GLuint staging = 0;
+            GLsync stagingFence = nullptr;
+            std::vector<glm::vec4> lastRead;
+            bool hasRead = false;
+            void Release() {
+                FreeBuffer(state[0]); FreeBuffer(state[1]); FreeBuffer(accel); FreeBuffer(renderBuffer); FreeBuffer(staging); hash.Release();
+                if (stagingFence) { glDeleteSync(stagingFence); stagingFence = nullptr; }
+            }
         };
 
         struct Soft {
@@ -264,6 +272,36 @@ namespace Phisiks::Advanced {
             if (p->emitter) {
                 for (uint32_t i = 0; i < p->count; ++i) { data[i * 2] = DEAD_POSITION; data[i * 2 + 1] = glm::vec4(0.0f, 0.0f, 0.0f, ps.mass); }
                 p->birth.assign(p->count, -1.0f);
+            }
+            else if (ps.spawnShape == ParticleSpawn::Fill) {
+                uint32_t seed = p->rng;
+                const glm::vec3 size = glm::max(ps.spawnSize, glm::vec3(1e-3f));
+                const float spacing = std::max(float(std::cbrt(double(size.x) * size.y * size.z / double(p->count))), 2.0f * ps.radius);
+                const int nx = std::max(1, int(size.x / spacing)), nz = std::max(1, int(size.z / spacing));
+                const glm::vec3 low = origin - size * 0.5f;
+                for (uint32_t i = 0; i < p->count; ++i) {
+                    const int ix = int(i) % nx, iz = (int(i) / nx) % nz, iy = int(i) / (nx * nz);
+                    const glm::vec3 jitter = (RandomUnit(seed) - 0.5f) * (0.04f * spacing);
+                    data[i * 2] = glm::vec4(low + (glm::vec3(float(ix), float(iy), float(iz)) + 0.5f) * spacing + jitter, ps.radius);
+                    data[i * 2 + 1] = glm::vec4(ps.initialVelocity, ps.mass);
+                }
+                p->alive = p->count;
+            }
+            else if (ps.spawnShape == ParticleSpawn::Disk) {
+                uint32_t seed = p->rng;
+                const float r0 = std::max(ps.diskInnerRadius, 1e-3f), r1 = std::max(ps.diskOuterRadius, r0 + 1e-3f);
+                for (uint32_t i = 0; i < p->count; ++i) {
+                    const glm::vec3 u = RandomUnit(seed);
+                    const float r = std::sqrt(r0 * r0 + u.x * (r1 * r1 - r0 * r0));   // uniform per area
+                    const float a = u.y * 6.28318531f;
+                    const glm::vec3 radial(std::cos(a), 0.0f, std::sin(a));
+                    const glm::vec3 position = origin + radial * r + glm::vec3(0.0f, (u.z - 0.5f) * ps.diskThickness, 0.0f);
+                    glm::vec3 velocity = ps.initialVelocity;
+                    if (ps.orbitalGM > 0.0f) velocity += glm::vec3(radial.z, 0.0f, -radial.x) * std::sqrt(ps.orbitalGM / r);   // CCW from +Y
+                    data[i * 2] = glm::vec4(position, ps.radius);
+                    data[i * 2 + 1] = glm::vec4(velocity, ps.mass);
+                }
+                p->alive = p->count;
             }
             else {
                 const int n = int(std::ceil(std::cbrt(double(p->count))));
@@ -834,7 +872,13 @@ namespace Phisiks::Advanced {
         }
         for (auto& [id, p] : g->particles) {
             const GLuint buffer = g->cpu ? p->renderBuffer : p->state[p->current];
-            if (buffer) sprites.push_back({ buffer, p->count, 2, 0.0f, p->params.color, p->params.fastColor, p->params.fastSpeed, id });
+            if (!buffer) continue;
+            SpriteDraw d{ buffer, p->count, 2, 0.0f, p->params.color, p->params.fastColor, p->params.fastSpeed, id };
+            d.fluid = p->params.render == ParticleRender::Fluid;
+            d.colorMode = uint32_t(p->params.colorMode);
+            d.glow = p->params.glow;
+            d.dopplerSpeed = p->params.dopplerSpeed;
+            sprites.push_back(d);
         }
     }
 
@@ -934,6 +978,40 @@ namespace Phisiks::Physics::Advanced {
         }
         positionRadius.resize(p.count);
         for (uint32_t i = 0; i < p.count; ++i) positionRadius[i] = raw[i * 2];
+        return true;
+    }
+
+    bool ReadParticlesAsync(Entity entity, std::vector<glm::vec4>& positionRadius) {
+        if (!W::g) return false;
+        auto it = W::g->particles.find(entity.Id());
+        if (it == W::g->particles.end()) return false;
+        W::Particles& p = *it->second;
+        if (W::g->cpu) {   // CPU backend: the state is in memory already
+            positionRadius.resize(p.count);
+            for (uint32_t i = 0; i < p.count; ++i) positionRadius[i] = p.cpu[p.current][i * 2];
+            return true;
+        }
+        const size_t bytes = size_t(p.count) * 2 * sizeof(glm::vec4);
+        if (p.stagingFence) {
+            const GLenum status = glClientWaitSync(p.stagingFence, 0, 0);
+            if (status == GL_ALREADY_SIGNALED || status == GL_CONDITION_SATISFIED) {
+                glDeleteSync(p.stagingFence);
+                p.stagingFence = nullptr;
+                std::vector<glm::vec4> raw(size_t(p.count) * 2);
+                glGetNamedBufferSubData(p.staging, 0, GLsizeiptr(bytes), raw.data());   // complete: no stall
+                p.lastRead.resize(p.count);
+                for (uint32_t i = 0; i < p.count; ++i) p.lastRead[i] = raw[i * 2];
+                p.hasRead = true;
+            }
+        }
+        if (!p.stagingFence) {   // start the next copy (GPU side, no wait)
+            if (!p.staging) p.staging = W::MakeBuffer(bytes);
+            glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+            glCopyNamedBufferSubData(p.state[p.current], p.staging, 0, 0, GLsizeiptr(bytes));
+            p.stagingFence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        }
+        if (!p.hasRead) return false;
+        positionRadius = p.lastRead;
         return true;
     }
 

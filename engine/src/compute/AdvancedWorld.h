@@ -33,6 +33,9 @@ namespace Phisiks::Advanced {
         glm::vec3 color{ 1.0f }, fastColor{ 1.0f };
         float fastSpeed = 1.0f;
         uint32_t entityId = 0;
+        bool fluid = false;                  // ParticleRender::Fluid (screen-space fluid on window views)
+        uint32_t colorMode = 0;              // ParticleColor
+        float glow = 0.0f, dopplerSpeed = 10.0f;
     };
     void CollectDraws(std::vector<SoftBodyDraw>& softBodies, std::vector<SpriteDraw>& sprites);
 

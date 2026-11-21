@@ -28,6 +28,8 @@ namespace Phisiks {
         std::string initialScene;                          // must be registered by the game
         std::string runDirectory = "Build/runs/latest";    // logs, screenshots, reports, crash dumps
         bool fullscreen = false;
+        int windowWidth = 0, windowHeight = 0;             // client size (0 = 75 % of the primary monitor)
+        bool vsync = false;
         uint64_t maxFrames = 0;                            // 0 = unlimited (safety cap for automated runs)
 
         // Simulation / recording

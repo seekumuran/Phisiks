@@ -50,7 +50,7 @@ function(phisiks_check_includes dirs allow_local out_count)
 endfunction()
 
 phisiks_check_includes("engine/include" FALSE public_violations)
-phisiks_check_includes("apps;tests/runtime" TRUE app_violations)
+phisiks_check_includes("apps;examples;tests/runtime" TRUE app_violations)
 
 set(unit_violations 0)
 file(GLOB unit_files "${PHISIKS_ROOT}/tests/unit/*.cpp" "${PHISIKS_ROOT}/tests/unit/*.h")

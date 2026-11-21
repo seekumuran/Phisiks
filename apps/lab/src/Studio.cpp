@@ -1,4 +1,5 @@
 #include "Studio.h"
+#include "Showcase.h"
 #include "Phisiks/AI/Navigation.h"
 #include "Phisiks/Animation/Animation.h"
 #include "Phisiks/Audio/Audio.h"
@@ -349,6 +350,16 @@ namespace Lab::Studio {
                 }
             }
             Retro::EndPlaylist();
+            ImGui::TextColored(Gold(), "SHOWCASE PLAYLIST");
+            if (Retro::BeginPlaylist("##showcases", (ImGui::GetTextLineHeight() + 4.0f) * 4.5f)) {
+                int n = 1;
+                for (const Showcase::DemoInfo& demo : Showcase::Demos()) {
+                    const bool current = scene && scene->Name() == demo.scene;
+                    if (Retro::PlaylistRow(n++, demo.title, demo.industry, current) && ctx.scenes) ctx.scenes->Request(demo.scene);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n(also: %s)", demo.blurb, demo.executable);
+                }
+            }
+            Retro::EndPlaylist();
             if (!g_caption1.empty()) {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.85f, 1.0f, 1.0f));
                 ImGui::TextWrapped("%s", g_caption1.c_str());
@@ -532,6 +543,10 @@ namespace Lab::Studio {
         if (!UI::IsActive()) return;
         if (!ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) UI::SetPanelsVisible(!UI::PanelsVisible());
         if (!UI::PanelsVisible()) return;
+        if (Showcase::Current(ctx)) {   // showcase scenes bring their own RetroDeck HUD
+            Showcase::DrawGui(ctx, "Sandbox");
+            return;
+        }
         Scene* scene = ctx.CurrentScene();
         MenuBar(ctx, scene);
         Classroom(ctx, scene);

@@ -9,6 +9,8 @@
 //     meshes/torus.obj          torus with normals and UVs (R 0.35 m, r 0.13 m)
 //     audio/drone_hum.wav       2 s seamless hum loop (spatial-audio demo), 44.1 kHz mono 16-bit
 //     models/walker.glb         skinned 4-bone tube, embedded PNG, clips "Twist" (linear) / "Sway" (cubic)
+//     audio/engine_loop.wav     1 s seamless engine rumble loop (stunt-car showcase), 44.1 kHz mono 16-bit
+//     audio/siren.wav           2 s seamless two-tone siren loop (guard bots), 44.1 kHz mono 16-bit
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -206,6 +208,33 @@ namespace {
         return out;
     }
 
+    // Engine: 55 Hz firing fundamental with odd/even harmonics and a 6 Hz cylinder "chug"; every
+    // component completes whole cycles in 1 s, so the loop is seamless.
+    std::vector<double> EngineLoop(int rate) {
+        std::vector<double> out(size_t(rate), 0.0);
+        for (size_t i = 0; i < out.size(); ++i) {
+            const double t = double(i) / rate;
+            const double chug = 0.75 + 0.25 * std::sin(2 * PI * 6.0 * t);
+            double v = 0.0;
+            for (int h = 1; h <= 8; ++h) v += std::sin(2 * PI * 55.0 * h * t + 0.7 * h) / (h * (h % 2 ? 1.0 : 1.6));
+            out[i] = 0.42 * chug * v;
+        }
+        return out;
+    }
+
+    // Siren: 650 Hz / 850 Hz alternating every 0.5 s (whole cycles per half: phase-continuous).
+    std::vector<double> Siren(int rate) {
+        std::vector<double> out(size_t(rate) * 2, 0.0);
+        double phase = 0.0;
+        for (size_t i = 0; i < out.size(); ++i) {
+            const double t = double(i) / rate;
+            const double f = std::fmod(t, 1.0) < 0.5 ? 650.0 : 850.0;
+            phase += 2 * PI * f / rate;
+            out[i] = 0.35 * (std::sin(phase) + 0.3 * std::sin(2.0 * phase) + 0.12 * std::sin(3.0 * phase));
+        }
+        return out;
+    }
+
     // ------------------------------------------------------------------ glTF 2.0 binary (GLB)
     // models/walker.glb: a 2 m segmented tube skinned to a 4-bone chain, with an embedded PNG
     // (stripes) and two clips: "Twist" (LINEAR: each bone twists 70 deg about Y and sways) and
@@ -378,6 +407,8 @@ int main(int argc, char** argv) {
     ok &= Torus(out / "meshes/torus.obj", 0.35, 0.13, 48, 24);
     ok &= SaveWav(DroneHum(44100), 44100, out / "audio/drone_hum.wav");
     ok &= WalkerGlb(out / "models/walker.glb");
+    ok &= SaveWav(EngineLoop(44100), 44100, out / "audio/engine_loop.wav");
+    ok &= SaveWav(Siren(44100), 44100, out / "audio/siren.wav");
     std::printf("assetgen: %s -> %s\n", ok ? "ok" : "FAILED", out.string().c_str());
     return ok ? 0 : 1;
 }

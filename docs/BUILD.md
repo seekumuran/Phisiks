@@ -3,6 +3,7 @@
 Layout:
 - `engine/`: the PhisiksCore library. `include/Phisiks` is the public API, `src` is private, and `shaders` holds GLSL that is embedded at build time.
 - `apps/lab`: PhisiksLab.
+- `examples/`: the six P10 showcases (`NN_name/`, one executable each) and their shared framework `examples/common` (library `PhisiksShowcase`, also linked into PhisiksLab).
 - `tests/unit`: headless unit tests.
 - `tests/runtime`: the runtime verification harness built into PhisiksLab.
 - `assets/`: CC0 sample assets.
@@ -54,6 +55,7 @@ From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` ge
 | File | What |
 |---|---|
 | `PhisiksLab.exe` | Interactive sample app on the Phisiks forward PBR renderer |
+| `Showcase01_StuntCar.exe` .. `Showcase06_BlackHole.exe` | The six showcases (see `README.md`); `--autotest` runs their runtime verification |
 | `PhisiksUnitTests.exe` | Headless unit tests (also run by ctest) |
 | `assetgen.exe [dir]` | Regenerates the CC0 sample assets (default `assets/`) |
 | `glprobe.exe` | GPU capability check (`--all` lists extensions) |
@@ -68,6 +70,8 @@ From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` ge
 .\Build\bin\Release\PhisiksLab.exe --autotest --run-dir Build/runs/mytest   # exit code = failed checks
 ```
 Logs go to `<run-dir>/engine.log` (default `Build/runs/latest`). Crash dumps go to `<run-dir>/crash.dmp`.
+
+Showcase scenes (also as standalone executables): `StuntCar`, `FluidHarbor`, `Robotics`, `Villa`, `Vision`, `BlackHole` (PhisiksLab: SHOWCASE playlist, or `--scene <name>`).
 
 Scenes: `Sandbox`, `PhysicsTower`, `FieldLab`, the lesson scenes `Rotors`, `Orbits`, `PBR`, `Fountain`, and the P9 scenes `Animation` (glTF skinning, camera path), `VFX` (bloom, SSAO, trails, beam, decals), `Terrain` (terrain, foliage, nav crowd, spatial audio) and `Joints` (joints + Lua) (`N` cycles).
 
@@ -121,3 +125,15 @@ Runtime assets live in `assets/` (textures, audio, meshes):
 - Regenerate them with `.\Build\bin\Release\assetgen.exe assets`.
 - Textures decode on a background thread and stream into the renderer when ready.
 - OBJ meshes and WAV clips load on first use.
+
+## Showcases
+```powershell
+.\Build\bin\Release\Showcase02_FluidHarbor.exe                       # 1920x1080, Medium preset
+.\Build\bin\Release\Showcase03_Robotics.exe --quality low --gl41     # the macOS / old-iGPU path on any GPU
+.\Build\bin\Release\Showcase06_BlackHole.exe --hot-reload             # edit engine/shaders/doppler.glsl while it runs
+.\Build\bin\Release\Showcase05_Vision.exe --headless --export-vision --export-dir Build/vision --export-every 30 --max-frames 600
+.\Build\bin\Release\Showcase01_StuntCar.exe --autotest                # report: Build/runs/StuntCar/showcase_report.txt
+```
+`--autotest` runs the demo's own steps, the five camera shots, the five view modes, a 300-frame frame-budget measurement (average must stay under 16.7 ms; `--quick` skips it) and the budgets (0 OpenGL errors, working set under 2.5 GB). ctest runs every showcase with `--quick --hidden` plus the vision export check (`tools/test_vision_export.cmake`).
+
+Vision export layout (`<export-dir>/vision/`): `frame_NNNNNN_rgb.png`, `_depth.pfm` (linear metres), `_normal.png` (world normals), `_id.png` (entity id + 1, little-endian RGBA), `cameras.csv` (intrinsics + view matrix per frame), `entities.csv` (id, name), `classes.csv` (id, name, class) and `lidar_sweep_NNNN.csv` (x, y, z, distance, channel, azimuth step, entity id, class).

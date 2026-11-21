@@ -7,6 +7,7 @@
 #include "FieldLab.h"
 #include "SceneBuilder.h"
 #include "P9Scenes.h"
+#include "Showcase.h"
 #include "Phisiks/AI/Navigation.h"
 #include "Phisiks/Animation/Animation.h"
 #include "Phisiks/Framework/DebugOverlay.h"
@@ -293,7 +294,7 @@ namespace Phisiks {
             const Render::ShaderCacheStats cache = Render::GetShaderCacheStats();
             const bool compat = Render::GetRendererInfo().compatTier;
             Expect("shader programs built (cache or compile), none failed",
-                   cache.programs == (compat ? 24u : 41u) && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
+                   cache.programs == (compat ? 29u : 46u) && cache.failures == 0 && cache.loadedFromCache + cache.compiled == cache.programs && cache.written == cache.compiled,
                    F("%.0f programs: %.0f from cache, %.0f compiled, ", cache.programs, cache.loadedFromCache, cache.compiled) + F("%.0f written, %.0f failed", cache.written, cache.failures));
             const RenderStats render = GetRenderStats();
             Expect("indirect drawing: at most one command per mesh type", render.drawCommands <= render.meshesLoaded && render.instancesDrawn >= 10,
@@ -1942,6 +1943,23 @@ namespace Phisiks {
                 }
             }
         }, 20.0 });
+
+        m_steps.push_back({ "P10: showcase playlist (the six demos inside PhisiksLab)", [this](GameContext& ctx) {
+            const auto& demos = Showcase::Demos();
+            const size_t i = size_t(m_phase / 2);
+            if (i >= demos.size()) {
+                Expect("all six showcase scenes load, run and unload in the Lab", m_scratch[1] == float(demos.size()) && Render::GetGLErrorCount() == 0,
+                       F("%.0f of %.0f showcases ran 40 frames, ", m_scratch[1], double(demos.size())) + F("%.0f GL errors", Render::GetGLErrorCount()));
+                return true;
+            }
+            if (m_phase % 2 == 0) { if (i == 0) m_scratch[1] = 0.0f; ctx.scenes->Request(demos[i].scene); m_stepFrames = 0; m_scratch[0] = 0; ++m_phase; return false; }
+            if (ctx.scenes->CurrentName() != demos[i].scene) return false;
+            if (++m_scratch[0] < 40) return false;
+            if (Showcase::Current(ctx) && ctx.stats.fixedStepsThisFrame >= 0) m_scratch[1] += 1.0f;
+            Screenshot(std::string("p10_") + demos[i].scene);
+            ++m_phase;
+            return false;
+        }, 120.0 });
 
         m_steps.push_back({ "Scene transition back to Sandbox", [this](GameContext& ctx) {
             if (m_phase == 0) { ctx.scenes->Request("Sandbox"); m_phase = 1; return false; }
