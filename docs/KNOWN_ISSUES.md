@@ -80,7 +80,8 @@ Keyboard state comes from GLFW, so the focused window receives keys. When Phisik
 - **Removed with the P10 demos:** the stunt-car `Vehicle` helper (and its unit test) and the vision-export ctest. Vision capture itself (`Render::RequestVisionCapture`, `--export-vision`) is unchanged and still covered by the PhisiksLab runtime test.
 
 ## P12 release packages
-- **Only the Windows archive was built and tested** (locally: PhysX and portable configurations). `release.yml` (Ubuntu 22.04 / GCC 12, macOS universal, Windows runner) has not run yet, so the Linux and macOS archives are unverified, including whether GCC 12 and the static GLFW (X11 + Wayland) build cleanly.
+- **Only the Windows archive was run end to end** (locally: PhysX and portable configurations). On the first `release.yml` run the Windows-runner and Ubuntu 22.04 / GCC 12 builds configured, built, passed the headless ctest and packaged; the archive check then failed on a script bug (fixed). The Linux archive has not been launched on a Linux desktop.
+- **No macOS download:** the release workflow builds Windows and Linux only (GitHub rejected the `macos-14` runner configuration). macOS builds locally with the `macos-release` preset, unverified.
 - **CI archives use the native physics backend** on every OS, including Windows: the PhysX SDK binaries are vendored by hand and not available on the runners. A PhysX Windows archive is built locally (`cpack` from the `vs2026-x64` preset); both are named `Phisiks-1.0.0-win64.zip`.
 - **Not signed:** Windows SmartScreen may warn on first launch; macOS Gatekeeper blocks the unsigned binaries until the quarantine flag is removed (`xattr -dr com.apple.quarantine <folder>`, in `QUICKSTART.txt`). macOS programs are plain executables, not `.app` bundles.
 - **Console window:** the Windows programs are console applications (log output goes to the console), so double-clicking also opens a console window.

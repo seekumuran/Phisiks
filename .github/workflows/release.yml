@@ -1,11 +1,11 @@
-# Release: on a version tag (v1.0.0, ...) build Release binaries on Windows, Linux and macOS,
-# package them with CPack into portable archives and publish them on the GitHub Release page.
+# Release: on a version tag (v1.0.0, ...) build Release binaries on Windows and Linux, package
+# them with CPack into portable archives and publish them on the GitHub Release page.
 #
-#   Phisiks-<version>-win64.zip          Windows x64   (MSVC, native physics + miniaudio, app-local MSVC runtime)
+#   Phisiks-<version>-win64.zip           Windows x64  (MSVC, native physics + miniaudio, app-local MSVC runtime)
 #   Phisiks-<version>-linux-x86_64.tar.gz Linux x64    (GCC 12 on Ubuntu 22.04: glibc 2.35+)
-#   Phisiks-<version>-macos.zip          macOS 11+     (universal arm64 + x86_64, OpenGL 4.1 tier, unsigned)
 #
-# All three use the portable backends (the vendored PhysX SDK binaries are not available on the
+# macOS is not built here (the macos-14 runner configuration was rejected); build it locally with the
+# macos-release preset. Both builds use the portable backends (the vendored PhysX SDK binaries are not available on the
 # runners) and build GLFW from source as a static library (PHISIKS_BUNDLED_GLFW), so the archives
 # need nothing but the OS and its OpenGL driver. Runners have no GPU: the headless tests run before
 # packaging; the rendered autotests are run locally (docs/BUILD.md, "Release package").
@@ -31,9 +31,6 @@ jobs:
           - os: ubuntu-22.04
             name: linux
             configure: cmake -S . -B Build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DPHISIKS_PHYSICS_BACKEND=Native -DPHISIKS_AUDIO_BACKEND=miniaudio -DPHISIKS_BUNDLED_GLFW=ON -DPHISIKS_TEST_SKIP_RENDER=ON
-          - os: macos-14
-            name: macos
-            configure: cmake -S . -B Build/release -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DPHISIKS_PHYSICS_BACKEND=Native -DPHISIKS_AUDIO_BACKEND=miniaudio -DPHISIKS_BUNDLED_GLFW=ON -DPHISIKS_TEST_SKIP_RENDER=ON
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -55,9 +52,6 @@ jobs:
           sudo apt-get install -y ninja-build gcc-12 g++-12 libgl1-mesa-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev libxkbcommon-dev wayland-protocols
-      - name: Tools (macOS)
-        if: matrix.name == 'macos'
-        run: brew install ninja
 
       - name: Third-party sources
         run: python3 tools/fetch_deps.py || python tools/fetch_deps.py
@@ -71,33 +65,40 @@ jobs:
         run: cpack --config Build/release/CPackConfig.cmake -C Release
 
       - name: Check the archive contents
+        # bash -eo pipefail: no command here may fail on purpose. The archive is found with a
+        # nullglob array (each OS produces only one format) and extracted with "cmake -E tar",
+        # which reads .zip and .tar.gz on every runner.
         run: |
+          shopt -s nullglob
           cd dist
-          archive=$(ls Phisiks-*.zip Phisiks-*.tar.gz 2>/dev/null | head -n 1)
+          archives=(Phisiks-*.zip Phisiks-*.tar.gz)
+          echo "dist/: $(ls)"
+          if [ ${#archives[@]} -ne 1 ]; then echo "expected one archive, found ${#archives[@]}: ${archives[*]}"; exit 1; fi
+          archive=${archives[0]}
           echo "archive: $archive"
-          mkdir check
-          case "$archive" in
-            *.zip) (cd check && unzip -q "../$archive") ;;
-            *)     tar -xzf "$archive" -C check ;;
-          esac
-          root=$(ls -d check/Phisiks-*)
-          ext=""; [ "${{ matrix.name }}" = "windows" ] && ext=".exe"
+          rm -rf check && mkdir check
+          (cd check && cmake -E tar xf "../$archive")
+          roots=(check/Phisiks-*/)
+          if [ ${#roots[@]} -ne 1 ]; then echo "expected one top-level folder, found: $(ls check)"; exit 1; fi
+          root=${roots[0]%/}
+          echo "root: $root"
+          ext=""
+          if [ "${{ matrix.name }}" = "windows" ]; then ext=".exe"; fi
+          missing=0
           for exe in PhisiksLab Showcase01_RoboticArm Showcase02_PoolFluid Showcase03_BlackHole Showcase04_TurbineCad glprobe; do
-            test -f "$root/$exe$ext" || { echo "missing $exe$ext"; exit 1; }
+            if [ ! -f "$root/$exe$ext" ]; then echo "missing $exe$ext"; missing=1; fi
           done
-          for f in QUICKSTART.txt LICENSE THIRD_PARTY_NOTICES.md README.md assets/shaders/black_hole.frag.glsl \
-                   assets/meshes/hero assets/scripts shaders/tonemap.frag.glsl; do
-            test -e "$root/$f" || { echo "missing $f"; exit 1; }
+          for f in QUICKSTART.txt LICENSE THIRD_PARTY_NOTICES.md README.md assets/shaders/black_hole.frag.glsl                    assets/meshes/hero assets/scripts shaders/tonemap.frag.glsl; do
+            if [ ! -e "$root/$f" ]; then echo "missing $f"; missing=1; fi
           done
           if [ "${{ matrix.name }}" = "linux" ]; then
             ldd "$root/PhisiksLab" | tee ldd.txt
-            ! grep -q "not found" ldd.txt
+            if grep -q "not found" ldd.txt; then echo "unresolved shared libraries"; missing=1; fi
+            rm -f ldd.txt
           fi
-          if [ "${{ matrix.name }}" = "macos" ]; then
-            otool -L "$root/PhisiksLab"
-            lipo -info "$root/PhisiksLab"
-          fi
-          rm -rf check ldd.txt
+          rm -rf check
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "archive OK"
       - uses: actions/upload-artifact@v4
         with:
           name: phisiks-${{ matrix.name }}

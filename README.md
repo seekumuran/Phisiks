@@ -43,7 +43,7 @@ Executables look for `assets/` next to themselves, then in the working directory
 
 ## No build tools? No problem
 
-Grab the portable archive for your OS from the GitHub Releases page: `Phisiks-<version>-win64.zip`, `-linux-x86_64.tar.gz`, or `-macos.zip`. Unzip anywhere and run `PhisiksLab`. `QUICKSTART.txt` has the controls, for when you inevitably forget them.
+Grab the portable archive for your OS from the GitHub Releases page: `Phisiks-<version>-win64.zip` or `-linux-x86_64.tar.gz` (no macOS download yet; build it with the `macos-release` preset). Unzip anywhere and run `PhisiksLab`. `QUICKSTART.txt` has the controls, for when you inevitably forget them.
 
 ## The showcases
 

@@ -62,7 +62,7 @@ cmake --install Build/vs2026 --config Release --prefix C:\Temp\Phisiks   # the s
 ```sh
 cmake --preset linux-release -DPHISIKS_BUNDLED_GLFW=ON              # static GLFW: no libglfw needed on the target
 cmake --build --preset linux-release
-cpack --config Build/linux-release/CPackConfig.cmake               # -> dist/Phisiks-1.0.0-linux-x86_64.tar.gz (macOS: -macos.zip)
+cpack --config Build/linux-release/CPackConfig.cmake               # -> dist/Phisiks-1.0.0-linux-x86_64.tar.gz (macOS, built locally: -macos.zip)
 ```
 Archive layout (one top-level `Phisiks-1.0.0-<os>/` folder, everything flat next to the executables):
 
@@ -77,7 +77,7 @@ Archive layout (one top-level `Phisiks-1.0.0-<os>/` folder, everything flat next
 
 Path resolution: `Assets::Resolve` tries `assets/` next to the executable first, then `assets/` in the working directory (the repository root for development builds); `Assets::ResolveDirectory` and `--hot-reload` do the same (the default `engine/shaders` falls back to the package's `shaders/`). Run outputs (`--run-dir`, default `Build/runs/...`) stay relative to the working directory.
 
-`.github/workflows/release.yml` runs on `v*` tags: Windows (MSVC 2022), Ubuntu 22.04 (GCC 12, glibc 2.35+) and macOS 14 (universal arm64 + x86_64, deployment target 11.0) build the portable backends (native physics + miniaudio; the PhysX SDK binaries are not on the runners) with a static GLFW, run the headless ctest, run `cpack`, check the archive contents (executables, assets, `ldd` on Linux), and a final job attaches the three archives plus `SHA256SUMS.txt` to the GitHub Release. The tag must match the CMake version (`v1.0.0`).
+`.github/workflows/release.yml` runs on `v*` tags: Windows (MSVC 2022) and Ubuntu 22.04 (GCC 12, glibc 2.35+) build the portable backends (native physics + miniaudio; the PhysX SDK binaries are not on the runners) with a static GLFW, run the headless ctest, run `cpack`, check the archive contents (executables, assets, `ldd` on Linux), and a final job attaches the two archives plus `SHA256SUMS.txt` to the GitHub Release. The tag must match the CMake version (`v1.0.0`). macOS is not part of the release workflow (GitHub rejected the `macos-14` runner configuration); build it locally with the `macos-release` preset.
 
 ## Outputs (`Build/bin/<Config>/`)
 | File | What |

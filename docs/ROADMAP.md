@@ -38,7 +38,7 @@ From P7 (still open):
 - **Backends:** OpenCL and SYCL implementations of `IComputeBackend`.
 
 From P8:
-- **Platforms:** the Linux and macOS builds exist (CMake presets, `ci.yml`) but have not been run yet; the first CI run will be the first real compile with GCC / Apple Clang. Linux PhysX via vcpkg is wired in CMake but untested. The same holds for `release.yml` (P12): its Linux / macOS / Windows-runner packaging has not run yet; only the local Windows archives were built and tested.
+- **Platforms:** the Linux and macOS builds exist (CMake presets, `ci.yml`) but have not been run yet; the first CI run will be the first real compile with GCC / Apple Clang. Linux PhysX via vcpkg is wired in CMake but untested. `release.yml` (P12) builds Windows and Linux only (macOS dropped: runner configuration rejected); on its first run both compiled, passed the headless tests and packaged, and only the local Windows archives have been launched.
 - **Native physics:** convex hulls use their bounding box for inertia; boxes and convex shapes resting on triangle meshes rely on an incremental manifold (less stable stacks than PhysX).
 - **Replay:** covers transforms, rigid bodies, camera and input actions; particles and XPBD soft bodies are not snapshotted (they keep their current state when scrubbing); inputs are recorded, not re-injected for re-simulation.
 - **Vision export:** depth / normals / ids cover meshes and soft bodies; particle sprites and the SDF visualiser appear only in the colour image.
