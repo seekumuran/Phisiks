@@ -49,7 +49,7 @@ cmake --preset linux-release
 cmake --build --preset linux-release
 ctest --preset linux-release            # add -DPHISIKS_TEST_SKIP_RENDER=ON at configure time without a display
 ```
-CI (`.github/workflows/ci.yml`) builds and tests the portable configuration on Ubuntu 24.04, macOS 14 and Windows Server 2022.
+CI (`.github/workflows/ci.yml`) builds and tests the portable configuration on Ubuntu 24.04 and Windows Server 2022 (macOS is built locally; GitHub rejected the `macos-14` runner configuration).
 From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` gets rewritten into a path.
 
 ## Release package (`cmake --install` / `cpack`)
