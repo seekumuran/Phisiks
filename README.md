@@ -1,10 +1,6 @@
-Here's a looser, funnier take. I kept every fact that matters (build steps, controls, the showcases, docs) and cut the padding.
-
 # Phisiks
 
 Phisiks is a 3D simulation, visualisation and game engine in C++20. It runs on Windows, Linux and macOS.
-
-The engine is feature-frozen at **P10** (`p10-showcase`). No more new features, which means the bugs you find from here on are officially "character-building."
 
 ## What's in the box
 
