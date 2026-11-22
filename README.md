@@ -37,7 +37,11 @@ cmake --build --preset linux-release
 ctest --preset linux-release
 ./Build/bin-linux-release/Release/Showcase03_BlackHole
 ```
-Run every executable from the repository root (it contains `assets/` and `engine/shaders/`). Details: `docs/BUILD.md`.
+The executables find `assets/` next to themselves first, then in the working directory, so a development build runs from the repository root. Details: `docs/BUILD.md`.
+
+## Download and run (no build tools)
+
+Each version tag (`v1.0.0`, ...) publishes portable archives on the GitHub Release page (`.github/workflows/release.yml`): `Phisiks-<version>-win64.zip`, `Phisiks-<version>-linux-x86_64.tar.gz`, `Phisiks-<version>-macos.zip`. Extract one anywhere and start `PhisiksLab` or one of the four `Showcase0N_*` programs from any folder; `QUICKSTART.txt` inside lists the controls and options. To make the archive yourself: `cpack --config Build/vs2026/CPackConfig.cmake -C Release` -> `dist/Phisiks-1.0.0-win64.zip` (see `docs/BUILD.md`, "Release package").
 
 ## Showcases (`examples/`)
 

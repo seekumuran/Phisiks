@@ -78,3 +78,12 @@ Keyboard state comes from GLFW, so the focused window receives keys. When Phisik
 - **Robot arm** joints are kinematic servos (velocity-limited), not physics joints; the gripped part is pinned to the tool every tick rather than held by friction. IK is numerical (DLS) and can stop at a joint limit for unreachable targets (the residual is shown).
 - **See-through materials** (`MaterialDesc::opacity`) are not sorted and draw both faces in one blended pass: fine for a few shells, not for many overlapping transparent objects. They cast no shadows and write no ids / depth (CAD ink and picking see the parts behind them).
 - **Removed with the P10 demos:** the stunt-car `Vehicle` helper (and its unit test) and the vision-export ctest. Vision capture itself (`Render::RequestVisionCapture`, `--export-vision`) is unchanged and still covered by the PhisiksLab runtime test.
+
+## P12 release packages
+- **Only the Windows archive was built and tested** (locally: PhysX and portable configurations). `release.yml` (Ubuntu 22.04 / GCC 12, macOS universal, Windows runner) has not run yet, so the Linux and macOS archives are unverified, including whether GCC 12 and the static GLFW (X11 + Wayland) build cleanly.
+- **CI archives use the native physics backend** on every OS, including Windows: the PhysX SDK binaries are vendored by hand and not available on the runners. A PhysX Windows archive is built locally (`cpack` from the `vs2026-x64` preset); both are named `Phisiks-1.0.0-win64.zip`.
+- **Not signed:** Windows SmartScreen may warn on first launch; macOS Gatekeeper blocks the unsigned binaries until the quarantine flag is removed (`xattr -dr com.apple.quarantine <folder>`, in `QUICKSTART.txt`). macOS programs are plain executables, not `.app` bundles.
+- **Console window:** the Windows programs are console applications (log output goes to the console), so double-clicking also opens a console window.
+- **Run outputs** (`--run-dir`, the Lab's scene save path `Build/scenes/scene.json`) are relative to the working directory; a read-only install folder works as long as the working directory is writable.
+- **Executable names** are the CMake target names (`Showcase01_RoboticArm`, ...), not the `examples/` folder names (`01_robotics_6dof_arm`, ...).
+

@@ -3,11 +3,12 @@
 Layout:
 - `engine/`: the PhisiksCore library. `include/Phisiks` is the public API, `src` is private, and `shaders` holds GLSL that is embedded at build time.
 - `apps/lab`: PhisiksLab.
-- `examples/`: the six P10 showcases (`NN_name/`, one executable each) and their shared framework `examples/common` (library `PhisiksShowcase`, also linked into PhisiksLab).
+- `examples/`: the four P11 hero showcases (`NN_name/`, one executable each) and their shared framework `examples/common` (library `PhisiksShowcase`, also linked into PhisiksLab).
 - `tests/unit`: headless unit tests.
 - `tests/runtime`: the runtime verification harness built into PhisiksLab.
 - `assets/`: CC0 sample assets.
 - `tools/`: assetgen, glprobe, stacksample and the CMake check scripts.
+- `packaging/`: files that only go into the release archive (`QUICKSTART.txt`).
 
 The `check_layering` target runs before the engine builds and fails the build if apps or tests bypass the public API.
 
@@ -51,6 +52,33 @@ ctest --preset linux-release            # add -DPHISIKS_TEST_SKIP_RENDER=ON at c
 CI (`.github/workflows/ci.yml`) builds and tests the portable configuration on Ubuntu 24.04, macOS 14 and Windows Server 2022.
 From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` gets rewritten into a path.
 
+## Release package (`cmake --install` / `cpack`)
+A self-contained folder that runs without build tools, zipped by CPack (version 1.0.0 from `project()`):
+```powershell
+cmake --build --preset release
+cpack --config Build/vs2026/CPackConfig.cmake -C Release          # -> dist/Phisiks-1.0.0-win64.zip
+cmake --install Build/vs2026 --config Release --prefix C:\Temp\Phisiks   # the same files, unzipped
+```
+```sh
+cmake --preset linux-release -DPHISIKS_BUNDLED_GLFW=ON              # static GLFW: no libglfw needed on the target
+cmake --build --preset linux-release
+cpack --config Build/linux-release/CPackConfig.cmake               # -> dist/Phisiks-1.0.0-linux-x86_64.tar.gz (macOS: -macos.zip)
+```
+Archive layout (one top-level `Phisiks-1.0.0-<os>/` folder, everything flat next to the executables):
+
+| Entry | What |
+|---|---|
+| `PhisiksLab`, `Showcase01_RoboticArm` .. `Showcase04_TurbineCad`, `glprobe` | the programs (no unit tests, assetgen or stacksample) |
+| `PhysX*_64.dll`, `PVDRuntime_64.dll` | Windows PhysX backend only (from `vendor/DLLs`) |
+| `vcruntime140*.dll`, `msvcp140*.dll`, `concrt140.dll` | MSVC runtime, app-local (`InstallRequiredSystemLibraries`; the UCRT is part of Windows 10+) |
+| `assets/` | meshes, textures, models, audio, post-pass shaders (`assets/shaders`), Lua scripts (`assets/scripts`) |
+| `shaders/` | engine GLSL sources (embedded in the executables; used by `--hot-reload` and the Lab's hot-reload test) |
+| `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`, `QUICKSTART.txt` | licences, overview, controls and launch guide |
+
+Path resolution: `Assets::Resolve` tries `assets/` next to the executable first, then `assets/` in the working directory (the repository root for development builds); `Assets::ResolveDirectory` and `--hot-reload` do the same (the default `engine/shaders` falls back to the package's `shaders/`). Run outputs (`--run-dir`, default `Build/runs/...`) stay relative to the working directory.
+
+`.github/workflows/release.yml` runs on `v*` tags: Windows (MSVC 2022), Ubuntu 22.04 (GCC 12, glibc 2.35+) and macOS 14 (universal arm64 + x86_64, deployment target 11.0) build the portable backends (native physics + miniaudio; the PhysX SDK binaries are not on the runners) with a static GLFW, run the headless ctest, run `cpack`, check the archive contents (executables, assets, `ldd` on Linux), and a final job attaches the three archives plus `SHA256SUMS.txt` to the GitHub Release. The tag must match the CMake version (`v1.0.0`).
+
 ## Outputs (`Build/bin/<Config>/`)
 | File | What |
 |---|---|
@@ -62,7 +90,7 @@ From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` ge
 | `stacksample.exe <pid>` | Symbolized stacks of a running process (hang diagnosis) |
 | `*.dll` | PhysX runtime, copied after each build |
 
-## Run (working directory: the project root, which contains `assets/`)
+## Run (development build: from the project root, which contains `assets/`)
 ```powershell
 .\Build\bin\Release\PhisiksLab.exe                              # interactive
 .\Build\bin\Release\PhisiksLab.exe --scene PhysicsTower
@@ -71,7 +99,7 @@ From Git Bash, pass MSBuild switches with dashes (e.g. `-- -m`), because `/m` ge
 ```
 Logs go to `<run-dir>/engine.log` (default `Build/runs/latest`). Crash dumps go to `<run-dir>/crash.dmp`.
 
-Showcase scenes (also as standalone executables): `RoboticArm`, `PoolFluid`, `BlackHole`, `TurbineCad` (PhisiksLab: SHOWCASE playlist, or `--scene <name>`). They load `assets/meshes/hero/*.obj` (regenerate with `assetgen`) and `assets/shaders/*.frag.glsl`, so run them from the repository root (ctest does).
+Showcase scenes (also as standalone executables): `RoboticArm`, `PoolFluid`, `BlackHole`, `TurbineCad` (PhisiksLab: SHOWCASE playlist, or `--scene <name>`). They load `assets/meshes/hero/*.obj` (regenerate with `assetgen`) and `assets/shaders/*.frag.glsl` (next to the executable in a release package, otherwise from the working directory: run development builds from the repository root, as ctest does).
 
 Scenes: `Sandbox`, `PhysicsTower`, `FieldLab`, the lesson scenes `Rotors`, `Orbits`, `PBR`, `Fountain`, and the P9 scenes `Animation` (glTF skinning, camera path), `VFX` (bloom, SSAO, trails, beam, decals), `Terrain` (terrain, foliage, nav crowd, spatial audio) and `Joints` (joints + Lua) (`N` cycles).
 

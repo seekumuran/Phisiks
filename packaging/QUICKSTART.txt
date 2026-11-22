@@ -1,0 +1,65 @@
+PHISIKS 1.0.0 - QUICK START
+===========================
+
+Extract the archive anywhere and run the programs in this folder. No installer and no build
+tools are needed. The programs find assets/ and shaders/ next to themselves, so they work from
+any working directory (double-click, a shortcut, or a terminal).
+
+  PhisiksLab              interactive studio: sandbox, lessons, P9 scenes, SHOWCASE playlist
+  Showcase01_RoboticArm   6-DOF industrial arm: FK / IK, pick-and-place, joint + Cartesian jog
+  Showcase02_PoolFluid    tiled pool with a buoyant ball, refraction, Fresnel, caustics
+  Showcase03_BlackHole    ray-traced Schwarzschild black hole with a particle accretion disk
+  Showcase04_TurbineCad   turbine assembly with exploded view and see-through casing
+  glprobe                 checks whether your GPU / driver can run Phisiks
+
+(Windows: the files end in .exe. Linux / macOS: run them as ./PhisiksLab etc.)
+
+REQUIREMENTS
+  - A GPU with OpenGL 4.6 (full feature tier) or OpenGL 4.1 (macOS; start with --gl41 elsewhere).
+    Run glprobe if a program does not start.
+  - Windows 10 / 11 x64. Everything needed (including the Visual C++ runtime) is in this folder.
+  - Linux x64: OpenGL drivers (Mesa or vendor), X11 or Wayland, ALSA / PulseAudio / PipeWire.
+  - macOS 11+: the programs are not signed. After extracting, run once in Terminal:
+        xattr -dr com.apple.quarantine <this folder>
+    macOS always uses the OpenGL 4.1 tier.
+
+SHOWCASE CONTROLS (all four demos)
+  1 .. 5             cinematic camera shots; 0 = back to the free camera
+  M                  cycle view: Final -> Wireframe -> SDF & Vector Fields -> Raw Particles -> CAD 4-way
+  F3                 CAD 4-way view (perspective + orthographic top / front / side)
+  Tab                hide / show the console panels
+  RMB / MMB / wheel  orbit / pan / zoom
+  Esc                pause (then Q quits)
+  PoolFluid          left-click the water to make ripples
+  The panels on screen (menu bar, telemetry, control groups) drive each demo: jog joints,
+  scrub the replay timeline, drop the ball, change black-hole mass / inclination / integrator,
+  explode the turbine, change casing opacity, and so on.
+
+PHISIKSLAB CONTROLS
+  WASD / arrows  move          Shift  sprint          Space  jump        Mouse  look
+  E              interact      LMB    push / damage   V      cycle camera (first / third person, free fly)
+  F4             orbit camera  F3     quad view       F1     overlay     F2     physics debug draw
+  R              reload scene  N      next scene      Tab    hide / show the studio panels
+  Esc            pause (Q quits while paused)
+  The SHOWCASE playlist in the studio launches the four demos inside PhisiksLab.
+
+USEFUL OPTIONS (all programs)
+  --quality low|medium|high   scalability preset (low = 720p internal + FSR 1 upscale, for laptops)
+  --gl41                      force the OpenGL 4.1 tier
+  --fullscreen                fullscreen window
+  --width W --height H        window size (showcases; default 1920 x 1080)
+  --autotest                  run the built-in verification; the exit code is the number of failed
+                              checks (showcases: add --quick to skip the frame-rate measurement)
+  --run-dir <dir>             where logs, reports and screenshots go (default: Build/runs/... under
+                              the current working directory)
+  --hot-reload [dir]          live-edit GLSL: edit the files in shaders/ (engine) or
+                              assets/shaders/ (showcase post passes) while the program runs
+  PhisiksLab --scene <name>   start in a scene: Sandbox, PhysicsTower, FieldLab, Rotors, Orbits, PBR,
+                              Fountain, Animation, VFX, Terrain, Joints, RoboticArm, PoolFluid,
+                              BlackHole, TurbineCad
+
+FOLDER CONTENTS
+  assets/    meshes, textures, models, audio, post-pass shaders, Lua scripts (CC0, see assets/LICENSE.md)
+  shaders/   engine GLSL sources (already built into the programs; used by --hot-reload)
+  LICENSE    MIT licence          THIRD_PARTY_NOTICES.md   third-party libraries and their licences
+  README.md  project overview

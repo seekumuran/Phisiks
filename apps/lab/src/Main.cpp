@@ -8,7 +8,7 @@
 //   --quality    scalability preset (Low = 720p internal -> FSR 1 upscale, for i3 / UHD laptops)
 //   --no-studio  hide the Dear ImGui studio panels (on by default whenever a window exists)
 //   --hot-reload [dir]  watch GLSL sources (default engine/shaders) and rebuild changed programs live
-// Run from the repository root (asset paths are relative to it).
+// Assets resolve next to the executable first (release package), then in the working directory (repository root).
 
 #include "Phisiks/Framework/GameContext.h"
 #include "Phisiks/Render/Renderer.h"
@@ -35,7 +35,7 @@ namespace {
             Lab::RegisterScenes(scenes);
             Lab::RegisterLessonScenes(scenes);
             Lab::RegisterP9Scenes(scenes);
-            Showcase::RegisterAll(scenes);   // the six P10 showcases (also standalone executables)
+            Showcase::RegisterAll(scenes);   // the four P11 showcases (also standalone executables)
         }
         void OnStart(Phisiks::GameContext&) override {
             Lab::RegisterMaterials();

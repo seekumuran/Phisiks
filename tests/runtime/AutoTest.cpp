@@ -1764,7 +1764,9 @@ namespace Phisiks {
                     std::error_code ec;
                     fs::remove_all(dir, ec);
                     fs::create_directories(dir, ec);
-                    fs::copy("engine/shaders", dir, fs::copy_options::overwrite_existing, ec);
+                    std::string source = Assets::ResolveDirectory("engine/shaders");   // repository
+                    if (source.empty()) source = Assets::ResolveDirectory("shaders");    // release package
+                    fs::copy(source, dir, fs::copy_options::overwrite_existing, ec);
                     std::ifstream in(tonemap, std::ios::binary);
                     std::stringstream text;
                     text << in.rdbuf();
@@ -1944,11 +1946,11 @@ namespace Phisiks {
             }
         }, 20.0 });
 
-        m_steps.push_back({ "P10: showcase playlist (the six demos inside PhisiksLab)", [this](GameContext& ctx) {
+        m_steps.push_back({ "P10: showcase playlist (the four demos inside PhisiksLab)", [this](GameContext& ctx) {
             const auto& demos = Showcase::Demos();
             const size_t i = size_t(m_phase / 2);
             if (i >= demos.size()) {
-                Expect("all six showcase scenes load, run and unload in the Lab", m_scratch[1] == float(demos.size()) && Render::GetGLErrorCount() == 0,
+                Expect("all four showcase scenes load, run and unload in the Lab", m_scratch[1] == float(demos.size()) && Render::GetGLErrorCount() == 0,
                        F("%.0f of %.0f showcases ran 40 frames, ", m_scratch[1], double(demos.size())) + F("%.0f GL errors", Render::GetGLErrorCount()));
                 return true;
             }

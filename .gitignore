@@ -10,3 +10,7 @@
 
 # Local shader cache fallback (when %LOCALAPPDATA% is unavailable)
 /.phisiks_cache/
+
+# Release packaging (cpack output and staging)
+/dist/
+_CPack_Packages/

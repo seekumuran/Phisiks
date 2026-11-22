@@ -15,10 +15,13 @@
 #                                             built-in solver (macOS and Linux default)
 #   PHISIKS_AUDIO_BACKEND    WASAPI | miniaudio
 #   PHISIKS_OUTPUT_DIR       executables go to <dir>/<config> (default Build/bin)
+#   PHISIKS_BUNDLED_GLFW     ON: always build GLFW from source as a static library (release packages:
+#                            no libglfw shared library needed on the user's machine)
+# Release package: cmake --install / cpack (see "Install + package" below and docs/BUILD.md).
 # Dependencies: vendor/ (python tools/fetch_deps.py downloads the portable ones; see docs/BUILD.md).
 
 cmake_minimum_required(VERSION 3.25)
-project(Phisiks LANGUAGES C CXX)
+project(Phisiks VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,13 +75,17 @@ if(WIN32 AND EXISTS ${PHISIKS_VENDOR}/GLFW/lib)
     target_link_directories(phisiks_glfw INTERFACE ${PHISIKS_VENDOR}/GLFW/lib/${PHISIKS_LIBCFG})
     target_link_libraries(phisiks_glfw INTERFACE glfw3 opengl32 user32 gdi32 shell32)
 else()
-    find_package(glfw3 3.3 QUIET)
-    if(NOT glfw3_FOUND)
+    option(PHISIKS_BUNDLED_GLFW "Build GLFW from source (static) instead of using a system GLFW" OFF)
+    if(NOT PHISIKS_BUNDLED_GLFW)
+        find_package(glfw3 3.3 QUIET)
+    endif()
+    if(PHISIKS_BUNDLED_GLFW OR NOT glfw3_FOUND)
         include(FetchContent)
         set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
         set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
         set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
         set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(glfw GIT_REPOSITORY https://github.com/glfw/glfw.git GIT_TAG 3.4 GIT_SHALLOW TRUE)
         FetchContent_MakeAvailable(glfw)
     endif()
@@ -335,3 +342,66 @@ foreach(entry ${PHISIKS_SHOWCASES})
              WORKING_DIRECTORY ${PHISIKS_ROOT})
 endforeach()
 endif()
+
+# ---------------------------------------------------------------------------------------------
+# Install + package: a self-contained, portable release folder (no build tools needed to run).
+#   cmake --install Build/vs2026 --config Release --prefix <dir>
+#   cpack --config Build/vs2026/CPackConfig.cmake -C Release      -> dist/Phisiks-1.0.0-win64.zip
+# Layout (everything flat next to the executables; assets resolve relative to the executable):
+#   PhisiksLab, Showcase01_RoboticArm .. Showcase04_TurbineCad, glprobe
+#   *.dll / runtime libraries (PhysX on Windows when that backend is built, the MSVC runtime)
+#   assets/   meshes, textures, models, audio, post-pass shaders (assets/shaders), Lua (assets/scripts)
+#   shaders/  the engine GLSL sources (embedded in the executables; used by --hot-reload)
+#   LICENSE, THIRD_PARTY_NOTICES.md, README.md, QUICKSTART.txt
+# ---------------------------------------------------------------------------------------------
+set(PHISIKS_PACKAGE_TARGETS PhisiksLab glprobe)
+foreach(entry ${PHISIKS_SHOWCASES})
+    string(REPLACE ":" ";" parts ${entry})
+    list(GET parts 0 target)
+    list(APPEND PHISIKS_PACKAGE_TARGETS ${target})
+endforeach()
+install(TARGETS ${PHISIKS_PACKAGE_TARGETS} RUNTIME DESTINATION .)
+if(PHISIKS_RUNTIME_DLLS)
+    install(FILES ${PHISIKS_RUNTIME_DLLS} DESTINATION .)                      # vendored PhysX DLLs
+endif()
+if(WIN32)
+    # Imported shared libraries (e.g. a vcpkg PhysX), if any.
+    install(FILES $<TARGET_RUNTIME_DLLS:PhisiksLab> DESTINATION . OPTIONAL)
+    # The MSVC C/C++ runtime, app-local (no Visual C++ Redistributable install needed).
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
+    set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)                                      # UCRT ships with Windows 10+
+    include(InstallRequiredSystemLibraries)
+endif()
+# Executables find shared libraries placed next to them (none are needed by default).
+if(APPLE)
+    set_target_properties(${PHISIKS_PACKAGE_TARGETS} PROPERTIES INSTALL_RPATH "@executable_path")
+elseif(UNIX)
+    set_target_properties(${PHISIKS_PACKAGE_TARGETS} PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
+install(DIRECTORY ${PHISIKS_ROOT}/assets/ DESTINATION assets)
+install(DIRECTORY ${PHISIKS_ROOT}/engine/shaders/ DESTINATION shaders FILES_MATCHING PATTERN "*.glsl")
+install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md
+              ${PHISIKS_ROOT}/packaging/QUICKSTART.txt DESTINATION .)
+
+if(WIN32)
+    set(PHISIKS_PACKAGE_SYSTEM win64)
+    set(PHISIKS_PACKAGE_GENERATOR ZIP)
+elseif(APPLE)
+    set(PHISIKS_PACKAGE_SYSTEM macos)
+    set(PHISIKS_PACKAGE_GENERATOR ZIP)
+else()
+    set(PHISIKS_PACKAGE_SYSTEM linux-${CMAKE_SYSTEM_PROCESSOR})
+    set(PHISIKS_PACKAGE_GENERATOR TGZ)
+endif()
+set(CPACK_PACKAGE_NAME Phisiks)
+set(CPACK_PACKAGE_VENDOR "The Phisiks authors")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Phisiks: real-time physics + rendering engine, PhisiksLab studio and four showcases")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_RESOURCE_FILE_LICENSE ${PHISIKS_ROOT}/LICENSE)
+set(CPACK_GENERATOR ${PHISIKS_PACKAGE_GENERATOR})
+set(CPACK_PACKAGE_FILE_NAME "Phisiks-${PROJECT_VERSION}-${PHISIKS_PACKAGE_SYSTEM}")
+set(CPACK_PACKAGE_DIRECTORY ${PHISIKS_ROOT}/dist)
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)                                       # one Phisiks-1.0.0-<os>/ folder
+set(CPACK_ARCHIVE_COMPONENT_INSTALL OFF)
+set(CPACK_STRIP_FILES ON)
+include(CPack)

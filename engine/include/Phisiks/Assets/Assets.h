@@ -1,8 +1,8 @@
 #pragma once
 // Phisiks::Assets: file lookup and on-demand loading.
 //
-// Paths are relative to the asset roots ("assets/" in the working directory, then next to the
-// executable, plus any added with AddSearchPath). Images decode on a background worker
+// Paths are relative to the asset roots: any added with AddSearchPath, then "assets/" next to the
+// executable (a release package), then "assets/" in the working directory (the repository root). Images decode on a background worker
 // (RequestImage / PollImage); the renderer uploads them on the main thread when ready.
 // Meshes (OBJ) and audio clips (WAV) load synchronously on first use and are cached by their users.
 
@@ -15,6 +15,8 @@
 namespace Phisiks::Assets {
     void AddSearchPath(const std::string& directory);         // searched before the defaults
     std::string Resolve(const std::string& path);             // existing file path, or "" if not found
+    // Existing directory: absolute, or relative to the executable's folder, then the working directory.
+    std::string ResolveDirectory(const std::string& path);
     bool ReadBytes(const std::string& path, std::vector<uint8_t>& out);
 
     struct Image {

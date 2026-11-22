@@ -1220,10 +1220,13 @@ namespace Phisiks::Render {
 
 
     // ====================================================================== shader hot reload
-    bool EnableShaderHotReload(const std::string& directory) {
+    bool EnableShaderHotReload(const std::string& requested) {
         if (!g) return false;
-        std::error_code ec;
-        if (!std::filesystem::is_directory(directory, ec)) { Log::Error() << "Renderer: hot reload directory '" << directory << "' not found"; return false; }
+        // Relative paths: next to the executable first, then the working directory. A release
+        // package ships the engine GLSL sources as "shaders/" beside the executables.
+        std::string directory = Assets::ResolveDirectory(requested);
+        if (directory.empty() && requested == "engine/shaders") directory = Assets::ResolveDirectory("shaders");
+        if (directory.empty()) { Log::Error() << "Renderer: hot reload directory '" << requested << "' not found"; return false; }
         g->hotReloadDirectory = directory;
         g->hotReloadStamps.clear();
         g->reloadStatus.enabled = true;

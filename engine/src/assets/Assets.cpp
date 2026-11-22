@@ -99,12 +99,25 @@ namespace Phisiks::Assets {
             std::lock_guard<std::mutex> lock(S().mutex);
             roots = S().extraRoots;
         }
-        roots.push_back(fs::current_path(ec) / "assets");
+        // The executable's own folder first (an extracted release archive works from any working
+        // directory), then the working directory (a development build run from the repository root).
         roots.push_back(ExecutableDirectory() / "assets");
+        roots.push_back(fs::current_path(ec) / "assets");
         roots.push_back(fs::current_path(ec));
         for (const fs::path& root : roots) {
             const fs::path candidate = root / p;
             if (fs::is_regular_file(candidate, ec)) return candidate.string();
+        }
+        return {};
+    }
+
+    std::string ResolveDirectory(const std::string& path) {
+        std::error_code ec;
+        const fs::path p(path);
+        if (p.is_absolute()) return fs::is_directory(p, ec) ? p.string() : std::string();
+        for (const fs::path& root : { ExecutableDirectory(), fs::current_path(ec) }) {
+            const fs::path candidate = root / p;
+            if (fs::is_directory(candidate, ec)) return candidate.string();
         }
         return {};
     }
