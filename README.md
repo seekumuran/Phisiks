@@ -1,6 +1,6 @@
 # Phisiks
 
-Phisiks is a 3D simulation, visualisation and game engine in C++20. It runs on Windows, Linux and macOS.
+Phisiks is a 3D simulation, visualisation and game engine in C++20. It runs on Windows and Linux.
 
 ## What's in the box
 
