@@ -91,6 +91,9 @@ void main() {
     float fog = FogAmount(u_cameraPosition.xyz, toFragment / max(distance, 1e-4), distance);
     color = mix(color, u_fogColor.rgb, fog);
 
-    o_color = vec4(color, 1.0);
+    // See-through materials (blended pass): opacity rises towards the silhouette (x-ray ghost).
+    float alpha = m.textureParams.w;
+    if (alpha < 0.999) alpha = clamp(alpha + (1.0 - alpha) * pow(1.0 - NoV, 3.0) * 0.75, 0.0, 1.0);
+    o_color = vec4(color, alpha);
     o_entity = inst.ids.x;
 }

@@ -21,11 +21,6 @@ using namespace Phisiks;
 
 namespace Showcase {
     namespace {
-        std::string F(const char* format, double a = 0, double b = 0, double c = 0, double d = 0, double e = 0) {
-            char text[512];
-            std::snprintf(text, sizeof(text), format, a, b, c, d, e);
-            return text;
-        }
         double WallSeconds(std::chrono::steady_clock::time_point start) {
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         }

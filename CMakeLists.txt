@@ -231,7 +231,7 @@ function(phisiks_executable target)
 endfunction()
 
 # ---------------------------------------------------------------------------------------------
-# Showcases (examples/): PhisiksShowcase = the shared framework (examples/common) + the six demo
+# Showcases (examples/): PhisiksShowcase = the shared framework (examples/common) + the four hero demo
 # scenes; one executable per demo (examples/NN_name/main.cpp). PhisiksLab links the library too
 # (its SHOWCASE playlist launches the same scenes).
 # ---------------------------------------------------------------------------------------------
@@ -244,12 +244,10 @@ target_include_directories(PhisiksShowcase PUBLIC ${PHISIKS_ROOT}/examples/commo
 target_link_libraries(PhisiksShowcase PUBLIC PhisiksCore)
 source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_SHOWCASE_SOURCES})
 set(PHISIKS_SHOWCASES
-    Showcase01_StuntCar:01_game_stunt_car
-    Showcase02_FluidHarbor:02_vfx_fluid_harbor
-    Showcase03_Robotics:03_robotics_6dof_terrain
-    Showcase04_Villa:04_cad_modern_house
-    Showcase05_Vision:05_ai_synthetic_vision
-    Showcase06_BlackHole:06_science_black_hole)
+    Showcase01_RoboticArm:01_robotics_6dof_arm
+    Showcase02_PoolFluid:02_vfx_pool_fluid
+    Showcase03_BlackHole:03_science_black_hole
+    Showcase04_TurbineCad:04_cad_turbine_cutaway)
 foreach(entry ${PHISIKS_SHOWCASES})
     string(REPLACE ":" ";" parts ${entry})
     list(GET parts 0 target)
@@ -286,8 +284,8 @@ add_dependencies(PhisiksCore check_layering)
 # Tools
 # ---------------------------------------------------------------------------------------------
 # assetgen: regenerates the CC0 sample assets in assets/ (deterministic; outputs are committed).
-add_executable(assetgen ${PHISIKS_ROOT}/tools/assetgen/assetgen.cpp)
-target_include_directories(assetgen PRIVATE ${PHISIKS_VENDOR}/stb_image)
+add_executable(assetgen ${PHISIKS_ROOT}/tools/assetgen/assetgen.cpp ${PHISIKS_ROOT}/tools/assetgen/HeroMeshes.cpp)
+target_include_directories(assetgen PRIVATE ${PHISIKS_VENDOR}/stb_image ${PHISIKS_VENDOR}/glm)
 phisiks_output(assetgen)
 
 # glprobe: checks whether the current GPU/driver meets the renderer's requirements.
@@ -312,7 +310,8 @@ add_executable(PhisiksUnitTests ${PHISIKS_UNIT_TEST_SOURCES})
 # White-box access to engine-private headers (e.g. presentation backend interfaces for recording fakes).
 target_include_directories(PhisiksUnitTests PRIVATE ${PHISIKS_ROOT}/engine/src)
 phisiks_executable(PhisiksUnitTests)
-target_link_libraries(PhisiksUnitTests PRIVATE PhisiksShowcase)   # Vehicle (examples/common)
+target_link_libraries(PhisiksUnitTests PRIVATE PhisiksShowcase)   # demo kinematics / solvers (examples/)
+target_include_directories(PhisiksUnitTests PRIVATE ${PHISIKS_ROOT}/examples)
 
 add_test(NAME PhisiksUnitTests COMMAND PhisiksUnitTests WORKING_DIRECTORY ${PHISIKS_ROOT})
 add_test(NAME Layering COMMAND ${CMAKE_COMMAND} -DPHISIKS_ROOT=${PHISIKS_ROOT} -P ${PHISIKS_ROOT}/tools/check_layering.cmake)
@@ -335,9 +334,4 @@ foreach(entry ${PHISIKS_SHOWCASES})
     add_test(NAME ${target} COMMAND ${target} --autotest --quick --hidden --run-dir ${CMAKE_BINARY_DIR}/showcase_runs/${target}
              WORKING_DIRECTORY ${PHISIKS_ROOT})
 endforeach()
-# Synthetic-vision batch export of the LiDAR proving ground (--headless --export-vision).
-add_test(NAME Showcase05_VisionExport
-    COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:Showcase05_Vision> -DWORK=${CMAKE_BINARY_DIR}/vision_export
-            -P ${PHISIKS_ROOT}/tools/test_vision_export.cmake
-    WORKING_DIRECTORY ${PHISIKS_ROOT})
 endif()

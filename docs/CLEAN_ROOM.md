@@ -34,7 +34,8 @@ Phisiks began as a refactor of an existing, unlicensed game code base. Phases P0
 | Scene / ECS (EnTT), hierarchy, physics + presentation sync | `engine/src/scene/*` | P3, P5 |
 | Renderer, GL wrappers, shader cache, multi-view, overlay font | `engine/src/render/**` | P4, P5 |
 | Shaders (40 GLSL files: graphics, compute, post FX) | `engine/shaders/*.glsl` | P4, P5, P7, P8, P9 |
-| Retro deck studio skin (procedurally drawn widgets; no skin assets) | `engine/src/ui/RetroDeck.cpp`, `apps/lab/src/Studio.cpp` | P9 |
+| Retro deck studio skin (procedurally drawn widgets; no skin assets) | `engine/src/ui/RetroDeck.cpp`, `apps/lab/src/Studio.cpp` | P9, P11 (dark console restyle) |
+| Hero showcase meshes (procedural mesh kit), post-pass shaders (pool water, Schwarzschild lensing from the Binet equation, CAD ink), arm / pool / disk solvers | `tools/assetgen/HeroMeshes.cpp`, `assets/shaders/*`, `examples/0*/*` | P11 |
 | glTF 2.0 importer (written from the Khronos specification), skeletal animation, dual-quaternion skinning, splines | `engine/src/animation/*` | P9 |
 | Bloom (13-tap down / tent up mip chain), SSAO (hemisphere kernel), projected decals, ribbons, shader hot reload | `engine/shaders/{bloom,ssao,decal,ribbon}*.glsl`, `engine/src/render/Renderer.cpp`, `engine/src/vfx/*` | P9 |
 | Terrain (fBm heightmaps, splatmaps, scatter, procedural foliage meshes); height-field colliders in both backends | `engine/src/world/*`, `engine/src/physics/**` | P9 |

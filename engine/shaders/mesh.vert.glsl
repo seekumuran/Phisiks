@@ -13,6 +13,9 @@ layout(std430, binding = 9) readonly buffer RemapBuffer { uint u_remap[]; };
 uint LoadRemap() { return u_remap[uint(gl_BaseInstance + gl_InstanceID)]; }
 #endif
 
+// 0: every instance; 1: opaque materials only; 2: see-through materials only (opacity < 1).
+uniform int u_alphaPass;
+
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec2 a_uv;
@@ -32,6 +35,13 @@ void main() {
     // Draw commands index a remap list (written by CPU or GPU culling) that holds the instances.
     uint instance = LoadRemap();
     Instance inst = LoadInstance(instance);
+    if (u_alphaPass != 0) {
+        bool seeThrough = LoadMaterial(uint(inst.scaleMaterial.w + 0.5)).textureParams.w < 0.999;
+        if (seeThrough == (u_alphaPass == 1)) {   // not drawn in this pass: every vertex outside the clip volume
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            return;
+        }
+    }
     vec4 world = inst.model * vec4(a_position, 1.0);
     v_worldPos = world.xyz;
 #ifdef SHADOW_PASS

@@ -106,6 +106,10 @@ namespace Phisiks::Render {
             GL::Texture fluidRaw, fluidRawNormal, fluidZ, fluidBlur[2], fluidNormals, fluidScene;
             GL::Framebuffer fluidFbo, fluidBlurFbo[2], fluidNormalFbo, fluidSceneFbo;
             glm::ivec2 fluidSize{ 0 };
+            // window only: custom post passes read a copy of the HDR colour
+            GL::Texture customScene;
+            GL::Framebuffer customSceneFbo;
+            glm::ivec2 customSize{ 0 };
             bool upscaledThisFrame = false;
             bool usedThisFrame = false;
             bool entityIdColors = false;       // offscreen: tonemap shows entity-id false colours
@@ -209,6 +213,19 @@ namespace Phisiks::Render {
             std::map<std::string, std::filesystem::file_time_type> hotReloadStamps;
             double hotReloadNextPoll = 0.0;
             ShaderReloadStatus reloadStatus;
+
+            // custom post passes (asset GLSL files) + float data textures
+            struct PostPassEntry {
+                PostPass desc;
+                GL::Program program;
+                std::string builtShader;          // shader path the program was built from
+                std::filesystem::file_time_type stamp{};
+                PostPassStatus status;
+            };
+            std::map<std::string, PostPassEntry> postPasses;
+            struct DataTexture { GL::Texture texture; int width = 0, height = 0, channels = 0; bool linear = true, repeat = false; };
+            std::unordered_map<std::string, DataTexture> dataTextures;
+            bool anyTransparent = false;
 
             // synthetic vision (aux G-buffer of the first window view)
             bool visionRequested = false, visionReady = false;
@@ -537,7 +554,7 @@ namespace Phisiks::Render {
                 auto it = g->textureLayer.find(m.albedoTexture);
                 if (it != g->textureLayer.end()) layer = it->second;
             }
-            out.textureParams = glm::vec4(float(layer), m.textureScale, m.textureUsesMeshUV ? 1.0f : 0.0f, 0.0f);
+            out.textureParams = glm::vec4(float(layer), m.textureScale, m.textureUsesMeshUV ? 1.0f : 0.0f, std::clamp(m.opacity, 0.0f, 1.0f));
             for (int k = 0; k < 4; ++k) out.splat[k] = glm::vec4(m.splat[k].color, m.splat[k].roughness);
             out.splatDetail = glm::vec4(m.splat[0].detail, m.splat[1].detail, m.splat[2].detail, m.splat[3].detail);
             return out;
@@ -804,11 +821,64 @@ namespace Phisiks::Render {
             return changed;
         }
 
+        // Builds a custom post pass from its asset file (fullscreen vertex shader + the file). A failure
+        // keeps the previous program.
+        bool BuildPostPass(State::PostPassEntry& e) {
+            PostPassStatus& st = e.status;
+            e.builtShader = e.desc.shader;
+            const std::string path = Assets::Resolve(e.desc.shader);
+            std::string text;
+            if (path.empty() || !ReadText(path, text)) {
+                st.error = "shader file '" + e.desc.shader + "' not found";
+                ++st.failures;
+                Log::Error() << "Renderer: post pass '" << e.desc.name << "': " << st.error;
+                return false;
+            }
+            std::error_code ec;
+            e.stamp = std::filesystem::last_write_time(path, ec);
+            const auto resolver = [](const std::string& name) { return Shaders::Find(name); };
+            const std::string* vertex = Shaders::Find("fullscreen.vert.glsl");
+            const ShaderPreprocessor::Result vs = ShaderPreprocessor::Expand(vertex ? *vertex : std::string(), resolver);
+            const ShaderPreprocessor::Result fs = ShaderPreprocessor::Expand(text, resolver);
+            if (!vs.ok || !fs.ok) {
+                st.error = e.desc.shader + ": " + (fs.ok ? vs.error : fs.error);
+                ++st.failures;
+                Log::Error() << "Renderer: post pass '" << e.desc.name << "': " << st.error;
+                return false;
+            }
+            ShaderPreprocessor::ResourceBindings bindings;
+            std::vector<GL::StageSource> stages;
+            stages.push_back({ GL_VERTEX_SHADER, g->compat ? ShaderPreprocessor::RewriteForGL41(vs.source, bindings) : vs.source });
+            stages.push_back({ GL_FRAGMENT_SHADER, g->compat ? ShaderPreprocessor::RewriteForGL41(fs.source, bindings) : fs.source });
+            const uint32_t errorsBefore = g->glErrors;
+            const GLuint program = GL::BuildProgram("post:" + e.desc.name, stages, false);
+            if (!program) {
+                g->glErrors = errorsBefore;   // a compile failure is reported through the status, not as a GL error
+                st.error = "'" + e.desc.shader + "' failed to compile (previous version kept; see engine.log)";
+                ++st.failures;
+                return false;
+            }
+            if (g->compat) GL::ApplyBindings(program, bindings);
+            e.program.Adopt(program, "post:" + e.desc.name);
+            st.ready = true;
+            st.error.clear();
+            ++st.builds;
+            Log::Info() << "Renderer: post pass '" << e.desc.name << "' built from " << e.desc.shader;
+            return true;
+        }
+
+        uint32_t RebuildPostPasses() {
+            uint32_t failures = 0;
+            for (auto& [name, e] : g->postPasses) failures += BuildPostPass(e) ? 0u : 1u;
+            return failures;
+        }
+
         bool ApplyHotReload() {
             uint32_t rebuilt = 0;
             std::string error;
             const uint32_t errorsBefore = g->glErrors;
-            const uint32_t failures = RebuildPrograms(rebuilt, error);
+            uint32_t failures = RebuildPrograms(rebuilt, error);
+            failures += RebuildPostPasses();
             if (failures) g->glErrors = errorsBefore;   // some drivers also raise the compile failure as a debug "error"
             ShaderReloadStatus& s = g->reloadStatus;
             ++s.reloads;
@@ -1045,6 +1115,49 @@ namespace Phisiks::Render {
         r.shadowsEnabled = true;
         r.gpuCulling = true;
     }
+
+    // ====================================================================== custom post passes
+    void SetPostPass(const PostPass& pass) {
+        if (!g || pass.name.empty()) return;
+        auto [it, inserted] = g->postPasses.try_emplace(pass.name);
+        State::PostPassEntry& e = it->second;
+        const bool rebuild = inserted || e.builtShader != pass.shader;
+        e.desc = pass;
+        e.status.exists = true;
+        if (rebuild) BuildPostPass(e);
+    }
+    void RemovePostPass(const std::string& name) { if (g) g->postPasses.erase(name); }
+    void ClearPostPasses() { if (g) g->postPasses.clear(); }
+    PostPassStatus GetPostPassStatus(const std::string& name) {
+        if (!g) return {};
+        auto it = g->postPasses.find(name);
+        return it == g->postPasses.end() ? PostPassStatus{} : it->second.status;
+    }
+
+    bool SetDataTexture(const std::string& name, int width, int height, int channels, const float* data, bool linear, bool repeat) {
+        if (!g || name.empty() || width <= 0 || height <= 0 || channels < 1 || channels > 4 || !data) return false;
+        State::DataTexture& t = g->dataTextures[name];
+        static const GLenum internal[4] = { GL_R32F, GL_RG32F, GL_RGB32F, GL_RGBA32F };
+        static const GLenum format[4] = { GL_RED, GL_RG, GL_RGB, GL_RGBA };
+        if (t.width != width || t.height != height || t.channels != channels || t.linear != linear || t.repeat != repeat || t.texture.Id() == 0) {
+            GL::TextureDesc d;
+            d.width = width;
+            d.height = height;
+            d.format = internal[channels - 1];
+            d.minFilter = d.magFilter = linear ? GL_LINEAR : GL_NEAREST;
+            d.wrap = repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+            t.texture.Create("Data texture " + name, d);
+            t.width = width;
+            t.height = height;
+            t.channels = channels;
+            t.linear = linear;
+            t.repeat = repeat;
+        }
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        t.texture.Upload2D(format[channels - 1], GL_FLOAT, data);
+        return true;
+    }
+    void RemoveDataTexture(const std::string& name) { if (g) g->dataTextures.erase(name); }
     const char* ToString(QualityPreset preset) {
         switch (preset) {
             case QualityPreset::Low: return "Low";
@@ -1324,6 +1437,17 @@ namespace Phisiks::Render {
             if (!g->hotReloadDirectory.empty() && Time::NowSeconds() >= g->hotReloadNextPoll) {
                 g->hotReloadNextPoll = Time::NowSeconds() + 0.25;
                 if (ScanHotReload()) ApplyHotReload();
+                for (auto& [name, e] : g->postPasses) {   // post pass files live with the assets
+                    std::error_code ec;
+                    const std::string path = Assets::Resolve(e.desc.shader);
+                    if (path.empty()) continue;
+                    const auto stamp = std::filesystem::last_write_time(path, ec);
+                    if (!ec && stamp != e.stamp) {
+                        Log::Info() << "Renderer: post pass shader '" << e.desc.shader << "' changed on disk";
+                        BuildPostPass(e);
+                        ++g->reloadStatus.reloads;
+                    }
+                }
             }
             const glm::ivec2 windowSize = GetFramebufferSize();
             if (windowSize.x <= 0 || windowSize.y <= 0) {   // minimized
@@ -1370,7 +1494,17 @@ namespace Phisiks::Render {
             // ---------------------------------------------------------- materials
             std::vector<MaterialGpu> materials;
             materials.reserve(g->materials.size());
-            for (const MaterialDesc& m : g->materials) materials.push_back(ToGpu(m));
+            g->anyTransparent = false;
+            for (const MaterialDesc& m : g->materials) {
+                materials.push_back(ToGpu(m));
+                if (m.opacity < 0.999f) g->anyTransparent = true;
+            }
+            // u_alphaPass (mesh.vert): 0 draw everything, 1 opaque only (+ no shadows from see-through
+            // materials), 2 see-through only (the blended pass after the sky).
+            for (int id : { int(Shaders::FORWARD), int(Shaders::SHADOW), int(Shaders::SHADOW_POINT) }) {
+                const GL::Program& program = g->programs[id];
+                glProgramUniform1i(program.Id(), program.Uniform("u_alphaPass"), g->anyTransparent ? 1 : 0);
+            }
             g->materialBuffer.Upload(materials.data(), materials.size() * sizeof(MaterialGpu));
 
             // ---------------------------------------------------------- lights + shadow assignment
@@ -1867,6 +2001,21 @@ namespace Phisiks::Render {
                 glBindVertexArray(g->emptyVao);
                 glDrawArrays(GL_TRIANGLES, 0, 3);
                 glColorMaski(1, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);   // ribbons / debug lines / arrows: colour only
+                if (g->anyTransparent) {   // see-through materials: blended, both faces, no depth / id writes
+                    const GL::Program& forward = g->programs[Shaders::FORWARD];
+                    forward.Use();
+                    const GLint alphaPass = forward.Uniform("u_alphaPass");
+                    glUniform1i(alphaPass, 2);
+                    glEnable(GL_BLEND);
+                    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+                    glBindVertexArray(g->meshVao);
+                    if (settings.wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                    DrawCommands(forward, v.firstCommand, v.commandCount);
+                    if (settings.wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                    glUniform1i(alphaPass, 1);
+                    glDisable(GL_BLEND);
+                    stats.transparentPasses += 1;
+                }
                 if (!g->ribbons.empty()) {   // additive VFX ribbons (depth-tested, no depth writes)
                     glEnable(GL_BLEND);
                     glBlendFunc(GL_ONE, GL_ONE);
@@ -2015,7 +2164,11 @@ namespace Phisiks::Render {
                     const bool doSsao = ssao.enabled && ssao.intensity > 0.0f;
                     const bool doBloom = bloom.enabled && bloom.intensity > 0.0f;
                     const bool doFluid = fluidOn && fluidParticleCount > 0;
-                    if (doDecals || doSsao || doBloom || doFluid) {
+                    std::vector<State::PostPassEntry*> customPasses;
+                    for (auto& [name, e] : g->postPasses) if (e.desc.enabled && e.status.ready && e.program.Valid()) customPasses.push_back(&e);
+                    std::stable_sort(customPasses.begin(), customPasses.end(), [](const State::PostPassEntry* a, const State::PostPassEntry* b) { return a->desc.order < b->desc.order; });
+                    const bool doCustom = !customPasses.empty();
+                    if (doDecals || doSsao || doBloom || doFluid || doCustom) {
                         int levels = 0;
                         if (doBloom) {
                             levels = std::clamp(bloom.mipCount, 1, 8);
@@ -2026,7 +2179,19 @@ namespace Phisiks::Render {
                         EnsurePostTargets(t, levels, aoSize);
                         const int fluidScale = settings.fluid.halfResolution ? 2 : 1;
                         if (doFluid) EnsureFluidTargets(t, fluidScale);
-                        if (doDecals || doSsao || doFluid) GL::Blit(fbo, t.depthResolveFbo.Id(), s.x, s.y, s.x, s.y, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+                        if (doDecals || doSsao || doFluid || doCustom) GL::Blit(fbo, t.depthResolveFbo.Id(), s.x, s.y, s.x, s.y, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+                        if (doCustom && t.customSize != s) {
+                            t.customSize = s;
+                            GL::TextureDesc d;
+                            d.width = s.x;
+                            d.height = s.y;
+                            d.format = GL_RGBA16F;
+                            d.minFilter = d.magFilter = GL_LINEAR;
+                            t.customScene.Create("Post pass scene copy", d);
+                            t.customSceneFbo.Create("Post pass scene copy");
+                            t.customSceneFbo.AttachColor(0, t.customScene);
+                            t.customSceneFbo.SetDrawBuffers(1);
+                        }
                         glBindVertexArray(g->emptyVao);
                         glDisable(GL_DEPTH_TEST);
                         glDepthMask(GL_FALSE);
@@ -2187,6 +2352,38 @@ namespace Phisiks::Render {
                                     stats.particlesDrawn += drawnFluid;
                                     GpuTimer::Get().End("SSF");
                                 }
+                            }
+                            if (doCustom) {
+                                if (firstWindow) GpuTimer::Get().Begin("Custom");
+                                glBindVertexArray(g->emptyVao);
+                                glDisable(GL_BLEND);
+                                glDisable(GL_DEPTH_TEST);
+                                for (State::PostPassEntry* e : customPasses) {
+                                    glDisable(GL_SCISSOR_TEST);
+                                    GL::Blit(t.resolveColorFbo.Id(), t.customSceneFbo.Id(), s.x, s.y, s.x, s.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                                    const GL::Program& p = e->program;
+                                    p.Use();
+                                    t.customScene.Bind(0);
+                                    t.depthResolved.Bind(1);
+                                    t.idResolved.Bind(2);
+                                    for (int k = 0; k < 4; ++k) {
+                                        auto it = e->desc.textures[k].empty() ? g->dataTextures.end() : g->dataTextures.find(e->desc.textures[k]);
+                                        if (it != g->dataTextures.end()) it->second.texture.Bind(GLuint(3 + k));
+                                        else g->black.Bind(GLuint(3 + k));
+                                    }
+                                    glUniform4fv(p.Uniform("u_viewRect"), 1, &rect[0]);
+                                    glUniform2f(p.Uniform("u_targetSize"), float(s.x), float(s.y));
+                                    glUniform4fv(p.Uniform("u_params"), 16, &e->desc.params[0][0]);
+                                    glBindFramebuffer(GL_FRAMEBUFFER, t.resolveColorFbo.Id());
+                                    glViewport(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                                    glScissor(v.rect.x, v.rect.y, v.rect.z, v.rect.w);
+                                    glEnable(GL_SCISSOR_TEST);
+                                    glDrawArrays(GL_TRIANGLES, 0, 3);
+                                    ++e->status.runs;
+                                    ++stats.customPasses;
+                                }
+                                glDisable(GL_SCISSOR_TEST);
+                                if (firstWindow) GpuTimer::Get().End("Custom");
                             }
                             firstWindow = false;
                         }

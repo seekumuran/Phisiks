@@ -11,6 +11,8 @@
 //     models/walker.glb         skinned 4-bone tube, embedded PNG, clips "Twist" (linear) / "Sway" (cubic)
 //     audio/engine_loop.wav     1 s seamless engine rumble loop (stunt-car showcase), 44.1 kHz mono 16-bit
 //     audio/siren.wav           2 s seamless two-tone siren loop (guard bots), 44.1 kHz mono 16-bit
+//     meshes/hero/*.obj         P11 hero showcase meshes (robot arm, turbine assembly, pool basin,
+//                               studio cyclorama, frame arrow): see HeroMeshes.cpp
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -25,6 +27,8 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+
+bool HeroMeshes(const fs::path& out);   // HeroMeshes.cpp
 
 namespace {
     constexpr double PI = 3.14159265358979323846;
@@ -409,6 +413,7 @@ int main(int argc, char** argv) {
     ok &= WalkerGlb(out / "models/walker.glb");
     ok &= SaveWav(EngineLoop(44100), 44100, out / "audio/engine_loop.wav");
     ok &= SaveWav(Siren(44100), 44100, out / "audio/siren.wav");
+    ok &= HeroMeshes(out);
     std::printf("assetgen: %s -> %s\n", ok ? "ok" : "FAILED", out.string().c_str());
     return ok ? 0 : 1;
 }

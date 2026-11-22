@@ -17,3 +17,10 @@ vec3 DopplerShift(vec3 baseColor, vec3 velocity, vec3 toCamera, float c) {
     vec3 tint = shift > 0.0 ? mix(vec3(1.0), blue, shift) : mix(vec3(1.0), red, -shift);
     return baseColor * tint * min(D * D * D, 8.0);
 }
+
+// Relativistic Doppler factor D = 1 / (gamma (1 - beta cos theta)) of an emitter moving at `beta`
+// (fraction of c) at angle theta (cos) to the direction towards the observer (black-hole disk).
+float DopplerFactor(float beta, float cosTheta) {
+    beta = clamp(beta, 0.0, 0.95);
+    return sqrt(1.0 - beta * beta) / (1.0 - beta * cosTheta);
+}

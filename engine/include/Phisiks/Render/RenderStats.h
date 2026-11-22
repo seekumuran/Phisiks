@@ -40,6 +40,8 @@ namespace Phisiks {
         bool fluidActive = false;       // screen-space fluid passes ran (window)
         uint32_t fluidParticles = 0;    // particles rendered as fluid
         uint32_t fluidPasses = 0;       // SSF draw passes (depth, 2 blur, normals, shading per window view)
+        uint32_t customPasses = 0;      // custom post passes executed (passes x window views)
+        uint32_t transparentPasses = 0; // see-through material passes (one per view while any material has opacity < 1)
     };
 
     RenderStats GetRenderStats();    // zeros when no renderer is running (e.g. headless)

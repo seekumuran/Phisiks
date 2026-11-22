@@ -1,9 +1,8 @@
 // P10: particle spawn shapes (disk on circular orbits, even fill), the non-blocking particle
-// readback, entity-id false colours, the showcase raycast vehicle, the integrator split-test of the
+// readback, entity-id false colours, the integrator split-test of the
 // black-hole showcase, and the local (scaled) units of Joint anchors.
 #include "TestFramework.h"
 
-#include "Vehicle.h"
 
 #include "compute/AdvancedWorld.h"
 #include "Phisiks/Math/Integrators.h"
@@ -127,60 +126,6 @@ TEST_CASE("Render: entity-id false colours are deterministic and well separated"
     CHECK(colours.size() >= 995);
     CHECK(Render::EntityIdColor(0) == glm::u8vec3(13, 13, 15));
     CHECK(Render::EntityIdColor(42) == Render::EntityIdColor(42));
-}
-
-TEST_CASE("Vehicle: raycast spring-damper suspension settles at m g / 4k and drives") {
-    CHECK(Physics::Init());
-    {
-        Scene scene("Vehicle");
-        Entity ground = scene.CreateEntity("Ground");
-        ground.Get<Transform>().position = glm::vec3(0.0f, -0.5f, 0.0f);
-        ground.Get<Transform>().scale = glm::vec3(200.0f, 1.0f, 200.0f);
-        ground.Add<Collider>();
-        Entity chassis = scene.CreateEntity("Car");
-        chassis.Get<Transform>().position = glm::vec3(0.0f, 1.0f, 0.0f);
-        chassis.Get<Transform>().scale = glm::vec3(1.9f, 0.5f, 4.2f);
-        chassis.Add<Collider>();
-        Rigidbody rb;
-        rb.mass = 1200.0f;
-        rb.angularDamping = 0.6f;
-        chassis.Add<Rigidbody>(rb);
-        scene.SyncPhysicsBodies();
-        Showcase::Vehicle car;
-        std::vector<Showcase::WheelDesc> wheels;
-        for (int i = 0; i < 4; ++i) {
-            Showcase::WheelDesc w;
-            w.mount = glm::vec3(i % 2 ? 0.85f : -0.85f, -0.05f, i < 2 ? -1.35f : 1.35f);
-            w.radius = 0.36f;
-            w.steer = i < 2;
-            wheels.push_back(w);
-        }
-        Showcase::VehicleDesc desc;
-        car.Setup(chassis, desc, wheels);
-        auto run = [&](int steps, float throttle, float steer) {
-            for (int i = 0; i < steps; ++i) {
-                scene.SyncPhysicsBodies();
-                car.FixedUpdate(1.0f / 60.0f, throttle, steer, 0.0f);
-                Physics::Step(1.0f / 60.0f);
-                scene.PullPhysicsPoses();
-            }
-        };
-        run(180, 0.0f, 0.0f);
-        float mean = 0.0f;
-        for (const Showcase::WheelState& w : car.Wheels()) mean += w.compression * 0.25f;
-        const float expected = 1200.0f * 9.81f / (4.0f * desc.stiffness);
-        std::printf("    vehicle: sag %.4f m (theory %.4f), %d wheels grounded\n", mean, expected, car.GroundedWheels());
-        CHECK(car.GroundedWheels() == 4);
-        CHECK(std::abs(mean - expected) < expected * 0.05f);
-        run(120, 1.0f, 0.0f);
-        CHECK(car.ForwardSpeed() > 5.0f);
-        CHECK(chassis.WorldPosition().z < -3.0f);                     // forward is -Z
-        const glm::vec3 before = chassis.WorldRotation() * glm::vec3(0, 0, -1);
-        run(60, 0.5f, 1.0f);                                          // steer right
-        const glm::vec3 after = chassis.WorldRotation() * glm::vec3(0, 0, -1);
-        CHECK(glm::cross(before, after).y < -0.05f);                  // turned clockwise seen from above = right
-    }
-    Physics::Shutdown();
 }
 
 TEST_CASE("Integrators: pseudo-Newtonian split-test (Euler spirals out, Verlet and RK4 hold the orbit)") {

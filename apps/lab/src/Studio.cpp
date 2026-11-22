@@ -1,4 +1,5 @@
 #include "Studio.h"
+#include "SandboxScenes.h"
 #include "Showcase.h"
 #include "Phisiks/AI/Navigation.h"
 #include "Phisiks/Animation/Animation.h"
@@ -64,8 +65,9 @@ namespace Lab::Studio {
             { "Joints & Lua Scripting", "Joints", "LUA", "Hinge / ball / prismatic / spring joints on both physics backends, driven by Lua scripts." },
         };
 
-        ImVec4 Gold() { return ImVec4(Retro::GOLD[0], Retro::GOLD[1], Retro::GOLD[2], 1.0f); }
-        ImVec4 Phosphor() { return ImVec4(Retro::PHOSPHOR[0], Retro::PHOSPHOR[1], Retro::PHOSPHOR[2], 1.0f); }
+        // Text on the dark console panels (headings and readouts in amber).
+        ImVec4 Gold() { return ImVec4(Retro::HEADING[0], Retro::HEADING[1], Retro::HEADING[2], 1.0f); }
+        ImVec4 Phosphor() { return ImVec4(Retro::READOUT[0], Retro::READOUT[1], Retro::READOUT[2], 1.0f); }
 
         Entity Selected(Scene& scene) { return g_selected ? scene.FromId(g_selected - 1) : Entity(); }
 
@@ -361,7 +363,7 @@ namespace Lab::Studio {
             }
             Retro::EndPlaylist();
             if (!g_caption1.empty()) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.85f, 1.0f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, Gold());
                 ImGui::TextWrapped("%s", g_caption1.c_str());
                 ImGui::PopStyleColor();
                 ImGui::TextWrapped("%s", g_caption2.c_str());
@@ -496,10 +498,10 @@ namespace Lab::Studio {
             Retro::EndPanel();
         }
 
+        // Console menu bar: File | View | Simulation | CAD | Help.
         void MenuBar(GameContext& ctx, Scene* scene) {
-            if (!ImGui::BeginMainMenuBar()) return;
-            ImGui::TextColored(Gold(), "=== PHISIKS LAB ===");
-            if (ImGui::BeginMenu("Scene")) {
+            if (!Retro::BeginMenuBar("PHISIKS LAB")) return;
+            if (ImGui::BeginMenu("File")) {
                 char path[260];
                 std::snprintf(path, sizeof(path), "%s", g_path.c_str());
                 ImGui::SetNextItemWidth(280.0f);
@@ -516,16 +518,37 @@ namespace Lab::Studio {
                 if (ImGui::MenuItem("Reload scene") && ctx.scenes) ctx.scenes->RequestReload();
                 ImGui::EndMenu();
             }
-            if (ImGui::BeginMenu("Lessons")) {
-                for (const Lesson& lesson : LESSONS) if (ImGui::MenuItem(lesson.title) && ctx.scenes) ctx.scenes->Request(lesson.scene);
-                ImGui::EndMenu();
-            }
             if (ImGui::BeginMenu("View")) {
                 if (ImGui::MenuItem("Hide studio panels", "Tab")) UI::SetPanelsVisible(false);
+                if (ImGui::MenuItem("Telemetry overlay", "F1", ctx.overlayVisible)) ctx.overlayVisible = !ctx.overlayVisible;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Simulation")) {
+                const bool paused = ctx.state == GameState::Paused;
+                if (ImGui::MenuItem(paused ? "Resume" : "Pause", "Esc")) ctx.state = paused ? GameState::Running : GameState::Paused;
+                ImGui::Separator();
+                if (ImGui::BeginMenu("Lessons")) {
+                    for (const Lesson& lesson : LESSONS) if (ImGui::MenuItem(lesson.title) && ctx.scenes) ctx.scenes->Request(lesson.scene);
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("Showcases")) {
+                    for (const Showcase::DemoInfo& demo : Showcase::Demos()) if (ImGui::MenuItem(demo.title, demo.industry) && ctx.scenes) ctx.scenes->Request(demo.scene);
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("CAD")) {
+                const bool quad = scene && IsQuadView(*scene);
+                if (ImGui::MenuItem("4-way orthographic views", "F3", quad) && scene) SetQuadView(*scene, !quad);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Help")) {
+                ImGui::TextDisabled("Tab  panels   F1  telemetry   F2  physics debug   F3  4-way views");
+                ImGui::TextDisabled("RMB drag orbit   MMB pan   wheel zoom   LMB select / gizmo");
                 ImGui::EndMenu();
             }
             if (!g_status.empty()) ImGui::TextDisabled("  %s", g_status.c_str());
-            ImGui::EndMainMenuBar();
+            Retro::EndMenuBar();
         }
     }
 

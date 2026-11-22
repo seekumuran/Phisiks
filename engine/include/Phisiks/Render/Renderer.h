@@ -169,6 +169,10 @@ namespace Phisiks::Render {
         float textureScale = 1.0f;         // texture repeats per metre (tri-planar)
         bool textureUsesMeshUV = false;    // sample albedoTexture at the mesh UVs instead of tri-planar (imported models)
         SplatLayer splat[4];               // Pattern::Splat layers (R, G, B, A of the splatmap)
+        // < 1: see-through ("ghosted") surface, drawn after the opaque scene and the sky with alpha
+        // blending, both faces, no depth / entity-id writes and no shadow; the opacity rises towards
+        // the silhouette (x-ray look). Not sorted: meant for a few shells (CAD casings, glass).
+        float opacity = 1.0f;
     };
     bool RegisterMaterial(const std::string& name, const MaterialDesc& desc);   // replaces an existing one
     bool HasMaterial(const std::string& name);
@@ -344,5 +348,44 @@ namespace Phisiks::Render {
         float arrowScale = 0.05f;           // metres per (m/s^2)
         float maxLength = 0.6f;
     };
-    void SetFieldVisualization(const FieldVisualization& field);          // GL_DEBUG_TYPE_ERROR messages since the renderer started
+    void SetFieldVisualization(const FieldVisualization& field);
+
+    // ---------------------------------------------------------------- custom post passes
+    // A fullscreen fragment program from an asset file (GLSL 4.60 core; `#include "common.glsl"` and
+    // the other engine shader files resolve, e.g. "doppler.glsl"; the 4.1 tier rewrites it like the
+    // engine's own shaders). Every enabled pass runs on each window view after the scene, decals,
+    // SSAO and the screen-space fluid and before bloom, in ascending `order`; its output replaces the
+    // HDR colour inside the view (sample the input to keep it). Inputs:
+    //   layout(binding = 0) uniform sampler2D  u_sceneColor;   HDR colour so far (linear; a copy)
+    //   layout(binding = 1) uniform sampler2D  u_sceneDepth;   resolved window depth (1 = background)
+    //   layout(binding = 2) uniform usampler2D u_sceneIds;     Entity::Id() + 1 (0 = background)
+    //   layout(binding = 3..6) uniform sampler2D u_data0..3;   data textures named in `textures`
+    //   FrameData (common.glsl): this view's matrices, camera position, time (u_cameraPosition.w)
+    //   uniform vec4 u_viewRect;  uniform vec2 u_targetSize;  uniform vec4 u_params[16];
+    //   in vec2 v_uv (0..1 over the target; the view is gl_FragCoord.xy - u_viewRect.xy over .zw)
+    // ReloadShadersNow() rebuilds the file; with shader hot reload on it is also rebuilt when it
+    // changes on disk (or when an engine file it includes changes). A failed build keeps the
+    // previous program (a pass that never built is skipped).
+    struct PostPass {
+        std::string name;
+        std::string shader;                // asset path, e.g. "shaders/black_hole.frag.glsl"
+        int order = 0;
+        bool enabled = true;
+        glm::vec4 params[16]{};
+        std::string textures[4];           // SetDataTexture names (empty / unknown = black)
+    };
+    void SetPostPass(const PostPass& pass);   // adds or updates by name (rebuilds if `shader` changed)
+    void RemovePostPass(const std::string& name);
+    void ClearPostPasses();
+    struct PostPassStatus {
+        bool exists = false, ready = false;
+        uint32_t builds = 0, failures = 0;
+        uint64_t runs = 0;                 // view passes executed
+        std::string error;
+    };
+    PostPassStatus GetPostPassStatus(const std::string& name);
+    // Float texture (1..4 channels: R32F / RG32F / RGBA32F, rows bottom-first) for post passes;
+    // calling it again with the same size updates the texels. `linear` filtering, `repeat` wrapping.
+    bool SetDataTexture(const std::string& name, int width, int height, int channels, const float* data, bool linear = true, bool repeat = false);
+    void RemoveDataTexture(const std::string& name);          // GL_DEBUG_TYPE_ERROR messages since the renderer started
 }

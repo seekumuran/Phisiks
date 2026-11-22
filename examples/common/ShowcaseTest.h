@@ -7,6 +7,7 @@
 #include "Phisiks/Runtime/Application.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -15,6 +16,13 @@
 
 namespace Showcase {
     class ShowcaseScene;
+
+    // printf-style detail text for checks (numbers only).
+    inline std::string F(const char* format, double a = 0, double b = 0, double c = 0, double d = 0, double e = 0) {
+        char text[512];
+        std::snprintf(text, sizeof(text), format, a, b, c, d, e);
+        return text;
+    }
 
     class ShowcaseTest : public Phisiks::ITestHarness {
     public:
