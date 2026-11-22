@@ -1,119 +1,81 @@
+Here's a looser, funnier take. I kept every fact that matters (build steps, controls, the showcases, docs) and cut the padding.
+
 # Phisiks
 
-A general-purpose 3D simulation, visualisation and game engine in C++20 for Windows, Linux and macOS (OpenGL 4.6, with an OpenGL 4.1 tier for macOS and older GPUs). **Core engine feature freeze: P10 (`p10-showcase`).**
+Phisiks is a 3D simulation, visualisation and game engine in C++20. It runs on Windows, Linux and macOS.
 
-- **Scenes:** EnTT entity-component scenes with transform hierarchies.
-- **Physics:** rigid bodies, colliders (incl. height fields), joints (hinge, ball-and-socket, prismatic, spring-damper; limits and motors), queries and a character controller behind a small `Phisiks::Physics` API, with two backends: NVIDIA PhysX 5 (Windows default) and the built-in native solver (macOS, Linux).
-- **Renderer:** forward PBR with GPU-driven indirect drawing (compute frustum + Hi-Z occlusion culling), directional/spot/point shadows and analytic fog, plus a persistent shader binary cache, wireframe mode and non-blocking GPU timers per pass.
-- **Compute:** `Phisiks::Compute::IComputeBackend` with an OpenGL 4.6 compute backend and a multi-threaded CPU backend (OpenCL/SYCL hooks); GPU spatial hash and particles, with the same systems on the CPU worker pool on the 4.1 tier and headless.
-- **Upscaling and post FX:** FSR 1.0-style EASU + RCAS spatial upscaling (clean-room), HDR bloom (mip chain), SSAO, projected decals, a 4-pass screen-space fluid renderer, ribbon trails / beams / orbit paths, live GLSL hot reload, and Low / Medium / High quality presets for integrated GPUs.
-- **Animation:** glTF 2.0 / GLB import (meshes, skins, clips, PBR base colour textures), dual-quaternion skinning, Catmull-Rom / Bezier camera paths.
-- **World:** fBm or image heightmap terrain with 4-layer splatmaps and height-field collision, GPU-instanced foliage scatter.
-- **AI:** navigation grid built from static physics geometry, A* with string pulling, crowd steering (separation + time-to-collision avoidance).
-- **Scripting:** embedded, sandboxed Lua 5.4 (`Script` component: entities, physics, joints, input, scene events, file hot reload).
-- **Advanced physics:** XPBD rope, cloth and soft bodies colliding with the scene; particle emitters and box / disk (orbital) / fill spawns; two-way coupling (particles and soft bodies push rigid bodies); force fields (planetary gravity, vortex, N-body); relativistic Doppler particle shading.
-- **Visualisers:** raymarched SDF / smooth-CSG shapes and vector-field arrows.
-- **Cameras:** multiple viewports and orthographic cameras, offscreen targets (optionally as live entity-id segmentation masks), a CAD-style orbit camera.
-- **Simulation:** deterministic stepped simulation (headless or offscreen) with PNG frame and CSV state export, synthetic-vision export (aligned RGB, linear depth, world normals, entity-id masks, camera CSV), a replay ring buffer with timeline scrubbing, and JSON scene files.
-- **PhisiksLab studio:** Dear ImGui in an original dark retro hardware-console skin (obsidian / gunmetal panels with chiselled dark-steel bevels, File | View | Simulation | CAD | Help menu bar, etched control groups, black phosphor-green / amber LCD readouts, LED meters, gradient sliders, transport bar): lesson and showcase playlists, hierarchy, inspector with viewport gizmos, live tuning, CPU/GPU/RAM telemetry and the replay timeline.
-- **Audio:** software mixer with WASAPI (Windows) or miniaudio (macOS, Linux) output; 3D voices with equal-power panning, inverse-square attenuation and Doppler shift.
-- **Assets:** loaded on demand; the sample assets are procedurally generated and CC0.
+The engine is feature-frozen at **P10** (`p10-showcase`). No more new features, which means the bugs you find from here on are officially "character-building."
+
+## What's in the box
+
+- **Scenes:** EnTT entity-component stuff with transform hierarchies, so your objects can be parented to other objects and still somehow know where they are.
+- **Physics:** rigid bodies, colliders (heightfields included), hinges, ball-and-sockets, sliders, spring-dampers, and a character controller. Two backends: PhysX 5 on Windows, and a native solver on macOS and Linux. Both do physics. Neither will explain themselves.
+- **Renderer:** forward PBR with GPU culling, shadows, fog, a shader cache so you stop waiting for it to compile every launch, and GPU timers so you can see exactly which pass is ruining your day.
+- **Compute:** OpenGL 4.6 compute or a multi-threaded CPU backend, with the same systems on the 4.1 tier. If your GPU is old, the CPU has your back.
+- **Post FX:** upscaling, bloom, SSAO, decals, a fluid renderer, trails, and live GLSL hot reload, so you can break your shaders without restarting the app.
+- **Animation:** glTF 2.0 / GLB import, skinning, and camera paths.
+- **World:** terrain, splatmaps, and foliage that scatters itself so you don't have to.
+- **AI:** navmesh, A* pathfinding, and crowd steering. Your NPCs can now walk into each other with purpose.
+- **Scripting:** sandboxed Lua 5.4, with hot reload.
+- **Advanced physics:** rope, cloth, soft bodies, particles that push things, and force fields including N-body gravity. Yes, the black hole is physically accurate. Yes, we're proud of that.
+- **Cameras, simulation, export:** multiple viewports, deterministic stepping, PNG and CSV export, a replay ring buffer, and JSON scenes.
+- **PhisiksLab:** the editor, in a retro hardware-console skin with a menu bar, LCD readouts and a transport bar. It looks like a piece of 90s studio gear, and that's the point.
+- **Audio:** a software mixer with 3D positional sound and Doppler. Doppler shows up everywhere in this project, honestly.
 
 ## Build
 
+**Windows** (PhysX + WASAPI, see `docs/BUILD.md` for the `vendor/` setup):
+
 ```powershell
-# Windows (PhysX + WASAPI; vendor/ as described in docs/BUILD.md)
 cmake --preset vs2026-x64
-cmake --build --preset release          # PhisiksCore, PhisiksLab, the four showcases, tests, tools
-ctest --preset release                  # unit tests, layering, replay, the four showcase autotests
+cmake --build --preset release
+ctest --preset release
 .\Build\bin\Release\PhisiksLab.exe
-.\Build\bin\Release\Showcase01_RoboticArm.exe
 ```
+
+**Linux / macOS:**
+
 ```sh
-# Linux / macOS (native physics + miniaudio)
 python3 tools/fetch_deps.py
-cmake --preset linux-release        # or macos-release
+cmake --preset linux-release
 cmake --build --preset linux-release
 ctest --preset linux-release
 ./Build/bin-linux-release/Release/Showcase03_BlackHole
 ```
-The executables find `assets/` next to themselves first, then in the working directory, so a development build runs from the repository root. Details: `docs/BUILD.md`.
 
-## Download and run (no build tools)
+Executables look for `assets/` next to themselves, then in the working directory, so run dev builds from the repo root.
 
-Each version tag (`v1.0.0`, ...) publishes portable archives on the GitHub Release page (`.github/workflows/release.yml`): `Phisiks-<version>-win64.zip`, `Phisiks-<version>-linux-x86_64.tar.gz`, `Phisiks-<version>-macos.zip`. Extract one anywhere and start `PhisiksLab` or one of the four `Showcase0N_*` programs from any folder; `QUICKSTART.txt` inside lists the controls and options. To make the archive yourself: `cpack --config Build/vs2026/CPackConfig.cmake -C Release` -> `dist/Phisiks-1.0.0-win64.zip` (see `docs/BUILD.md`, "Release package").
+## No build tools? No problem
 
-## Showcases (`examples/`)
+Grab the portable archive for your OS from the GitHub Releases page: `Phisiks-<version>-win64.zip`, `-linux-x86_64.tar.gz`, or `-macos.zip`. Unzip anywhere and run `PhisiksLab`. `QUICKSTART.txt` has the controls, for when you inevitably forget them.
 
-Four "hero centerpiece" executables on one shared framework (`examples/common`) and one dark 1990s engineering-console UI: menu bar (File | View | Simulation | CAD | Help), a telemetry panel (LCD FPS / frame time, CPU / GPU / RAM / culling LED meters, GPU and CPU particle counts, RAM against the 2.5 GB budget), the demo's control groups, a corner X / Y / Z orientation triad, five cinematic spline camera shots and a visualisation-mode switcher. The three engineering demos stand on a light-grey CAD studio cyclorama, the black hole on a deep-space backdrop. Hero meshes are generated by `tools/assetgen` (`assets/meshes/hero/*.obj`); the custom shaders are post passes in `assets/shaders/`. Every demo also appears in PhisiksLab's **SHOWCASE** playlist. They start at 1920x1080 on the Medium quality preset.
+## The showcases
+
+Four demos, one shared framework, one very 1990s engineering-console UI. Each one exists to make you go "wait, that's running in real time?"
 
 | # | Executable | Industry | What it shows |
 |---|---|---|---|
-| 01 | `Showcase01_RoboticArm` | Robotics | Beveled 6-DOF industrial arm (bolted base, cast orange housings, black servo drums, 3-axis wrist, parallel gripper); RGB coordinate frames at the base, J1-J6 and the tool with labels; dual-quaternion FK + damped-least-squares IK; a PTP / LIN pick-and-place program moving a physics part between two stands; glowing TCP trail; **Joint Jog** (J1-J6), **Cartesian Jog** (X / Y / Z, Euler Z-Y-X + quaternion readouts) and a joint-space **Timeline** (|<  <  >  ||  LIVE + scrubber) |
-| 02 | `Showcase02_PoolFluid` | Real-time VFX | Open-top cyan-tiled pool with a buoyant white ball: 128 x 128 heightfield waves coupled two ways to the ball (displacement + buoyancy of the submerged cap), Snell refraction traced against the pool and the ball, Fresnel sky / ball reflections, Beer-Lambert tint, CPU-projected floor caustics with the ball's caustic shadow; click the water for ripples, DROP BALL, **Shader Passes** breakdown slider (Wireframe -> Depth -> Normals -> Caustics & Refraction, fractions wipe) |
-| 03 | `Showcase03_BlackHole` | Science | Schwarzschild black hole ray-traced per pixel (photon orbits from the Binet equation, RK4): black shadow, Einstein photon ring, lensed starfield, the far side of the disk bent over and under the shadow; 16,000 disk particles in the Paczynski-Wiita potential on Euler / velocity Verlet / RK4 (or all three in sectors: split-test), Doppler shift + beaming + gravitational redshift (`doppler.glsl`, hot-reloadable); **Black Hole Parameters** (mass, inclination, Doppler, beaming, glow, time scale) |
-| 04 | `Showcase04_TurbineCad` | CAD / engineering | Axial-centrifugal turbine assembly (20 parts: bolted flanges with hex bolts, intake bell-mouth, three axial rotor stages, magenta stator rings, gold centrifugal impeller with splitters, volute scroll, bearing housing, nozzle ring, turbine wheel, exhaust cone); **CAD Assembly** exploded-view slider along the shaft, ghosted see-through casing with a wireframe overlay, CAD ink edges, rotor speed, bill of materials, F3 4-way orthographic blueprints |
+| 01 | `Showcase01_RoboticArm` | Robotics | A 6-DOF industrial arm doing pick-and-place with IK, joint jogging, and a timeline you can scrub. It's the arm you'd want at your next dinner party. |
+| 02 | `Showcase02_PoolFluid` | Real-time VFX | A pool with a ball that floats, makes waves, and casts caustics. Click the water. Drop the ball. Watch the shader breakdown and feel smart. |
+| 03 | `Showcase03_BlackHole` | Science | A Schwarzschild black hole ray-traced per pixel, with a photon ring, a lensed starfield, and 16,000 disk particles. Yes, it's accurate. No, we will not be taking questions. |
+| 04 | `Showcase04_TurbineCad` | CAD | A 20-part turbine assembly with an exploded-view slider, a bill of materials, and orthographic blueprints. Your engineering manager will want screenshots. |
 
-## Controls cheat sheet
+## Controls (the short version)
 
-The same sheet ships as `QUICKSTART.txt` in the release archive. Keyboard and mouse go to the 3D view only while the pointer is not over a console panel (and no text field is active). Showcases start in the orbit camera, PhisiksLab in first person; the camera does not move while paused.
+- **Camera:** RMB orbit, MMB pan, wheel zoom. `F4` toggles orbit and first person. `V` cycles camera modes. `WASD` to move, because we are not animals.
+- **Shots and views:** `1`-`5` for cinematic camera shots, `0` to go back to free camera, `M` to cycle view modes, `F3` for the CAD four-way view.
+- **Panels and general:** `Tab` hides the panels, `F1`/`F2` toggle debug draws, `Esc` pauses, and `Q` quits while paused. Yes, you have to pause first. We're sorry.
 
-**Camera (all programs)**
-
-| Input | Action |
-|---|---|
-| RMB drag / MMB drag / wheel | orbit / pan / zoom (orbit camera) |
-| `F4` | toggle orbit camera <-> first person (the orbit centres 8 m in front of the view) |
-| `V` | cycle camera: first person -> third person -> free fly |
-| Mouse | look (first / third person, free fly; cursor captured) |
-| `WASD` / arrows, `Shift`, `Space` | move, sprint, jump (free fly: `Space` up, `Ctrl` down) |
-
-**Camera presets and view modes (showcases, also inside PhisiksLab's SHOWCASE scenes)**
-
-| Key | Action |
-|---|---|
-| `1` .. `5` | cinematic camera shots along spline paths (panel group *Camera Shots*; hover a button for the shot name) |
-| `0` | stop the shot, back to the free camera (*FREE* button) |
-| `M` | cycle the view mode: FINAL RENDER -> WIREFRAME -> SDF + FIELDS -> RAW PARTICLES -> CAD 4-WAY (*View Mode* buttons) |
-| `F3` | CAD 4-way view on / off: perspective + orthographic top / front / side, blueprint grid, CAD ink (in PhisiksLab scenes: the quad view) |
-
-**Panels and general**
-
-| Key | Action |
-|---|---|
-| `Tab` | hide / show the console panels |
-| `F1` / `F2` | overlay / physics debug draw |
-| `Esc` | pause / resume; `Q` while paused quits |
-| PhisiksLab only | `R` reload scene, `N` next scene, `E` interact, LMB push / damage |
-
-**Replay timeline transport buttons**
-
-| Where | Buttons (left to right) |
-|---|---|
-| PhisiksLab *Replay timeline* panel (30 s ring at 60 Hz) | step back; play (continues from the scrubbed step); pause; stop (rewind to the first recorded step); step forward; record on / off; eject (clear the timeline); scrub slider (pauses at that step) |
-| RoboticArm *Timeline Replay* group (60 s joint-space recording) | `\|<` first recorded step; eject glyph = step back 0.25 s; play the recording; pause; *LIVE* (back to the live arm); scrub slider |
-
-**Per-demo controls (right-hand console panel)**
-
-| Demo | Controls |
-|---|---|
-| 01 RoboticArm | *Program*: RUN PROGRAM (PTP / LIN pick-and-place cycle), HOME, OPEN / CLOSE gripper. *Joint Jog*: J1 .. J6 sliders in degrees (switches to manual). *Cartesian Jog*: X / Y / Z tool-point sliders in mm (IK), readouts XYZ, Euler Z-Y-X, quaternion, IK residual. *Timeline Replay*: above. *Display*: FRAMES, TRAIL, CAD INK |
-| 02 PoolFluid | Left-click the water: ripple. *Shader Passes*: BREAKDOWN slider 0..3 + WIRE / DEPTH / NORMALS / FINAL buttons. *Optics*: CAUSTICS, REFRACTION. *Interaction*: DROP BALL, RAIN on / off, CALM (flatten the water) |
-| 03 BlackHole | *Black Hole Parameters*: MASS, INCLINATION, DOPPLER, BEAMING, DISK GLOW, TIME SCALE. *Integrator Split-Test*: EULER / VERLET / RK4, SPLIT (each third of the disk on its own integrator), RESET DISK, energy-drift readouts. *Lens*: STARS, PHOTON RING |
-| 04 TurbineCad | *CAD Assembly*: EXPLODE slider (along the shaft), AUTO (animate), ASSEMBLE, EXPLODE ALL, CASING OPACITY, CASING WIRE, CAD INK + INK. *Rotor*: ROTOR RPM. *Bill of Materials*: the 20 parts with their exploded offsets. `F3`: 4-way orthographic blueprints |
-
-**Showcase options:** `--autotest [--quick]` (runtime verification, report in `Build/runs/<scene>/showcase_report.txt`), `--quality low|medium|high`, `--gl41`, `--width W --height H`, `--fullscreen`, `--hidden`, `--hot-reload [dir]` (also rebuilds the post-pass shaders in `assets/shaders/` when they change), `--export-dir <dir> --export-frames|--export-data [--export-every N]`, `--headless`.
+Full controls for each demo live in `QUICKSTART.txt`.
 
 ## Docs
 
-| Doc | What |
-|---|---|
-| `docs/BUILD.md` | requirements, `vendor/` layout, outputs, controls, simulation/export flags |
-| `docs/ROADMAP.md` | completed phases, the feature freeze, open follow-ups |
-| `docs/ARCHITECTURE_DECISIONS.md` | key design decisions |
-| `docs/PHASE_LOG.md` | phase-by-phase history with measurements |
-| `docs/KNOWN_ISSUES.md` | known limitations |
-| `docs/CLEAN_ROOM.md` | provenance: all code original |
-| `THIRD_PARTY_NOTICES.md` | third-party libraries and their licences |
+- `docs/BUILD.md`: requirements, `vendor/` layout, and export flags
+- `docs/ROADMAP.md`: what got done, and what's still on the list
+- `docs/ARCHITECTURE_DECISIONS.md`: why things are the way they are
+- `docs/PHASE_LOG.md`: the full history, with measurements
+- `docs/KNOWN_ISSUES.md`: the stuff we already know is broken
+- `docs/CLEAN_ROOM.md`: all code is original, and here's the paperwork
+- `THIRD_PARTY_NOTICES.md`: the libraries we borrowed, and their licences
 
-MIT licensed, see `LICENSE`.
+MIT licensed. See `LICENSE`.
