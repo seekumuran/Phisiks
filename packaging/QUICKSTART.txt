@@ -23,25 +23,75 @@ REQUIREMENTS
         xattr -dr com.apple.quarantine <this folder>
     macOS always uses the OpenGL 4.1 tier.
 
-SHOWCASE CONTROLS (all four demos)
-  1 .. 5             cinematic camera shots; 0 = back to the free camera
-  M                  cycle view: Final -> Wireframe -> SDF & Vector Fields -> Raw Particles -> CAD 4-way
-  F3                 CAD 4-way view (perspective + orthographic top / front / side)
-  Tab                hide / show the console panels
-  RMB / MMB / wheel  orbit / pan / zoom
-  Esc                pause (then Q quits)
-  PoolFluid          left-click the water to make ripples
-  The panels on screen (menu bar, telemetry, control groups) drive each demo: jog joints,
-  scrub the replay timeline, drop the ball, change black-hole mass / inclination / integrator,
-  explode the turbine, change casing opacity, and so on.
+CONTROLS CHEAT SHEET
+====================
+Keyboard and mouse go to the 3D view only while the pointer is not over a console panel (and no
+text field is active). Showcases start in the orbit camera, PhisiksLab in first person. The camera
+does not move while the simulation is paused (Esc).
 
-PHISIKSLAB CONTROLS
-  WASD / arrows  move          Shift  sprint          Space  jump        Mouse  look
-  E              interact      LMB    push / damage   V      cycle camera (first / third person, free fly)
-  F4             orbit camera  F3     quad view       F1     overlay     F2     physics debug draw
-  R              reload scene  N      next scene      Tab    hide / show the studio panels
-  Esc            pause (Q quits while paused)
-  The SHOWCASE playlist in the studio launches the four demos inside PhisiksLab.
+CAMERA (all programs)
+  RMB drag            orbit around the target          (orbit camera)
+  MMB drag            pan the target                   (orbit camera)
+  Mouse wheel         zoom in / out                    (orbit camera)
+  F4                  toggle orbit camera <-> first person (orbit centres 8 m in front of the view)
+  V                   cycle camera: first person -> third person -> free fly
+  Mouse               look (first / third person, free fly; the cursor is captured)
+  WASD / arrows       move;  Shift sprint;  Space jump (free fly: Space up, Ctrl down)
+
+CAMERA PRESETS AND VIEWS (showcases; also inside PhisiksLab's SHOWCASE scenes)
+  1 2 3 4 5           cinematic camera shots along spline paths (panel: Camera Shots, hover = name)
+  0                   stop the shot, back to the free camera (panel: FREE)
+  M                   cycle view mode: FINAL RENDER -> WIREFRAME -> SDF + FIELDS -> RAW PARTICLES
+                      -> CAD 4-WAY (panel: View Mode buttons)
+  F3                  CAD 4-way view on / off (perspective + orthographic top / front / side,
+                      blueprint grid, CAD ink). In PhisiksLab scenes F3 toggles the quad view.
+
+PANELS AND GENERAL
+  Tab                 hide / show the console panels (UI toggle)
+  F1                  overlay on / off           F2   physics debug draw on / off
+  Esc                 pause / resume;  Q while paused = quit (closing the window also quits)
+  PhisiksLab only:    R reload scene, N next scene, E interact, LMB push / damage
+
+REPLAY TIMELINE TRANSPORT
+  PhisiksLab "Replay timeline" panel (30 s ring at 60 Hz):
+    |<  step back      >  play (continues from the scrubbed step)      ||  pause
+    []  stop (rewind to the first recorded step)    >|  step forward
+    (o) record on / off                               ^  eject (clear the timeline)
+    scrub slider: drag to any recorded step (pauses the simulation)
+  RoboticArm "Timeline Replay" group (60 s joint-space recording):
+    buttons left to right: |< first recorded step;  ^ (eject glyph) step back 0.25 s;
+    > play the recording;  || pause
+    LIVE  leave the replay, back to the live arm      scrub slider: jump to any step
+
+PER-DEMO CONTROLS (right-hand console panel)
+  01 RoboticArm
+    Program:        RUN PROGRAM (pick-and-place PTP / LIN cycle), HOME, OPEN / CLOSE gripper
+    Joint Jog:      J1 .. J6 sliders in degrees (switches to manual mode)
+    Cartesian Jog:  X / Y / Z sliders for the tool point in mm (IK); readouts XYZ, Euler Z-Y-X,
+                    quaternion W X Y Z, IK residual
+    Timeline Replay: see above
+    Display:        FRAMES (J1-J6 / tool axes), TRAIL (tool-point trail), CAD INK
+  02 PoolFluid
+    Left-click the water surface: ripple at that point
+    Shader Passes:  BREAKDOWN slider 0..3 plus WIRE / DEPTH / NORMALS / FINAL buttons
+    Optics:         CAUSTICS and REFRACTION strength sliders
+    Interaction:    DROP BALL (drops the ball back in), RAIN on / off, CALM (flatten the water)
+  03 BlackHole
+    Black Hole Parameters: MASS, INCLINATION, DOPPLER, BEAMING, DISK GLOW, TIME SCALE sliders
+    Integrator Split-Test: EULER / VERLET / RK4 buttons, SPLIT (each third of the disk gets its own
+                    integrator), RESET DISK; energy-drift readouts per integrator
+    Lens:           STARS and PHOTON RING brightness sliders
+  04 TurbineCad
+    CAD Assembly:   EXPLODE slider (parts separate along the shaft), AUTO (animate in / out),
+                    ASSEMBLE, EXPLODE ALL, CASING OPACITY slider, CASING WIRE, CAD INK + INK slider
+    Rotor:          ROTOR RPM slider
+    Bill of Materials: the 20 parts with their current exploded offset
+    F3 gives the 4-way orthographic blueprint view of the assembly
+
+PHISIKSLAB STUDIO
+  Menu bar File | View | Simulation | CAD | Help; lesson and SHOWCASE playlists (click a row);
+  click an object in the viewport to select it, then use the inspector gizmo; << BACK TO LAB
+  returns from a showcase scene.
 
 USEFUL OPTIONS (all programs)
   --quality low|medium|high   scalability preset (low = 720p internal + FSR 1 upscale, for laptops)
