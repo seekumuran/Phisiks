@@ -53,3 +53,22 @@ jobs:
         run: cmake --build Build/ci --config Release --parallel
       - name: Tests (unit, layering, deterministic replay)
         run: ctest --test-dir Build/ci -C Release --output-on-failure
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          brew install ninja || true
+          clang++ --version
+          cmake --version
+          sw_vers
+      - name: Third-party sources
+        run: python3 tools/fetch_deps.py
+      - name: Configure
+        run: cmake --preset macos-release -DPHISIKS_BUNDLED_GLFW=ON -DPHISIKS_TEST_SKIP_RENDER=ON
+      - name: Build
+        run: cmake --build --preset macos-release --parallel
+      - name: Tests (unit, layering, deterministic replay)
+        run: ctest --preset macos-release
