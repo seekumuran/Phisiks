@@ -81,6 +81,8 @@ namespace Editor {
     void MarkEdited();                                 // an edit the editor cannot see (workspace tools)
     // The render / physics settings controls (the default left panel), for apps with their own panel.
     void DrawSettingsPanel(Phisiks::GameContext& ctx);
+    // Width for `perRow` buttons sharing the remaining width of the current panel row.
+    float RowButtonWidth(int perRow);
     // Bottom dock tab shown (the dock also has buttons for it).
     enum class OutputTab { Console = 0, Telemetry = 1, Timeline = 2 };
     void ShowOutputTab(OutputTab tab);

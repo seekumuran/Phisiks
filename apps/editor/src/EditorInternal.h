@@ -14,7 +14,8 @@ namespace Editor::Internal {
     struct Layout {
         float scale = 1.0f;
         float menuBar = 0.0f, toolBar = 0.0f;
-        float left = 300.0f, right = 340.0f, bottom = 220.0f;   // column widths / dock height (scaled pixels)
+        float left = 330.0f, right = 340.0f, bottom = 220.0f;   // column widths / dock height (pixels; scaled on first use)
+        bool scaled = false;
         float leftSplit = 0.46f;                                 // hierarchy share of the left column
         ImVec2 display{ 0.0f, 0.0f };
         glm::vec4 viewport{ 0.0f };                             // x, y (top-left), w, h

@@ -195,7 +195,7 @@ namespace Projects::ProjectKit {
         if (Entity sel = selected ? scene.FromId(selected - 1) : Entity()) {
             ImGui::TextWrapped("Selected: %s", sel.GetName().c_str());
             if (Entity parent = sel.GetParent(); parent && parent.GetName() != rootName) {
-                if (Retro::Button("Select parent assembly", 200.0f)) Editor::Select(parent.Id() + 1);
+                if (Retro::Button("Select parent assembly", Editor::RowButtonWidth(1))) Editor::Select(parent.Id() + 1);
             }
         }
     }
@@ -208,20 +208,21 @@ namespace Projects::ProjectKit {
         const std::string path = ws && ws->DefaultScenePath() ? Editor::ResolveScenePath(ws->DefaultScenePath()) : Editor::ScenePath();
         ImGui::TextDisabled("%s", std::filesystem::path(path).filename().string().c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
-        if (Retro::Button("Save", 98.0f) && !path.empty()) Editor::SaveScene(ctx, path, &status);
+        const float bw = Editor::RowButtonWidth(3);
+        if (Retro::Button("Save", bw) && !path.empty()) Editor::SaveScene(ctx, path, &status);
         ImGui::SameLine();
-        if (Retro::Button("Reopen", 98.0f) && !path.empty()) {
+        if (Retro::Button("Reopen", bw) && !path.empty()) {
             if (Editor::HasUnsavedChanges(ctx)) Editor::RequestReload(ctx);   // asks first; reload rebuilds, then Reopen loads the file
             else Editor::LoadScene(ctx, path, &status);
         }
         ImGui::SameLine();
-        if (Retro::Button("Rebuild", 98.0f)) Editor::RequestReload(ctx);
+        if (Retro::Button("Rebuild", bw)) Editor::RequestReload(ctx);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rebuild the scene from code (the saved file is not read)");
         if (!status.empty()) ImGui::TextDisabled("%s", status.c_str());
     }
 
     void ScreenshotButton(const std::string& prefix, std::string& status) {
-        if (!Retro::Button("Screenshot (PNG)", 200.0f)) return;
+        if (!Retro::Button("Screenshot (PNG)", Editor::RowButtonWidth(1))) return;
         const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         char stamp[32];
         std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", std::localtime(&now));

@@ -777,11 +777,11 @@ namespace Projects {
     // ==================================================================== workspace panel
     void OldMcDonaldScene::DrawWorkspacePanel(GameContext& ctx) {
         const ImVec4 heading(Retro::HEADING[0], Retro::HEADING[1], Retro::HEADING[2], 1.0f);
-        const float bw = 98.0f * UI::Scale();
+        const float bw = Editor::RowButtonWidth(2);
 
         ImGui::TextColored(heading, "CAMERA");
         for (int i = 0; i < PresetCount; ++i) {
-            if (i % 3) ImGui::SameLine();
+            if (i % 2) ImGui::SameLine();
             if (Retro::Button(PRESET_NAMES[i], bw, m_camera == i ? 1 : 0)) ApplyCamera(ctx, i);
         }
 
@@ -796,11 +796,17 @@ namespace Projects {
         Retro::LedToggle("Follow", &follow);
         Retro::EqSlider("speed", &missionSpeed, 0.5f, 6.0f, "%.1fx");
         const int stage = Stage();
-        for (int i = 0; i < 9; ++i) {
-            const bool active = stage == i + 1, done = stage > i + 1;
-            ImGui::TextColored(active ? heading : done ? ImVec4(0.3f, 0.85f, 0.4f, 1.0f) : ImVec4(0.55f, 0.58f, 0.62f, 1.0f), "%s %d %s", active ? ">" : done ? "+" : " ", i + 1, STAGES[i]);
-            ImGui::SameLine();
-            ImGui::TextDisabled("[%s]", STAGE_SOURCE[i]);
+        if (ImGui::BeginTable("##stages", 3, ImGuiTableFlags_SizingFixedFit)) {
+            for (int i = 0; i < 9; ++i) {
+                const bool active = stage == i + 1, done = stage > i + 1;
+                const ImVec4 colour = active ? heading : done ? ImVec4(0.3f, 0.85f, 0.4f, 1.0f) : ImVec4(0.55f, 0.58f, 0.62f, 1.0f);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0); ImGui::TextColored(colour, "%s%d", active ? ">" : done ? "+" : " ", i + 1);
+                ImGui::TableSetColumnIndex(1); ImGui::TextDisabled("%s", STAGE_SOURCE[i]);
+                ImGui::TableSetColumnIndex(2); ImGui::TextColored(colour, "%s", STAGES[i]);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s (%s)", STAGES[i], STAGE_SOURCE[i]);
+            }
+            ImGui::EndTable();
         }
         ImGui::TextColored(ImVec4(Retro::READOUT[0], Retro::READOUT[1], Retro::READOUT[2], 1.0f), "crops %d/%zu   samples %d/%d   path failures %d", m_cropsMapped, m_crops.size(),
                            m_samplesTaken, S::GRID_ROWS * S::GRID_COLS, m_pathFailures);
@@ -810,9 +816,10 @@ namespace Projects {
         if (Retro::LedToggle("CAD edges", &cadEdges)) Showcase::SetCadInk(cadEdges, 0.45f, 1.0f);
         ImGui::SameLine();
         Retro::LedToggle("Spin", &spin);
+        ImGui::TextColored(heading, "EXPLODE");
         float ed = m_explodeTarget[DroneAssembly], er = m_explodeTarget[RoverAssembly];
-        if (Retro::EqSlider("explode drone", &ed, 0.0f, 1.0f)) m_explodeTarget[DroneAssembly] = ed;
-        if (Retro::EqSlider("explode rover", &er, 0.0f, 1.0f)) m_explodeTarget[RoverAssembly] = er;
+        if (Retro::EqSlider("DRONE", &ed, 0.0f, 1.0f)) m_explodeTarget[DroneAssembly] = ed;
+        if (Retro::EqSlider("ROVER", &er, 0.0f, 1.0f)) m_explodeTarget[RoverAssembly] = er;
 
         ImGui::Spacing();
         ImGui::TextColored(heading, "SUBSYSTEMS");

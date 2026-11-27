@@ -40,16 +40,16 @@ namespace Projects {
     void RoverCadScene::DrawAssemblyPanel(GameContext&) {
         const ImVec4 heading(Retro::HEADING[0], Retro::HEADING[1], Retro::HEADING[2], 1.0f);
         ImGui::Spacing();
-        ImGui::TextColored(heading, "ARM JOINTS (IK chain J1-J4)");
+        ImGui::TextColored(heading, "ARM JOINTS (deg)");
         RA::ArmPose pose = RA::GetArm(*this);
         bool changed = false;
-        const char* labels[4] = { "J1 yaw", "J2 shoulder", "J3 elbow", "J4 wrist" };
+        const char* labels[4] = { "J1 YAW", "J2 SHOULDER", "J3 ELBOW", "J4 WRIST" };
         for (int i = 0; i < 4; ++i) {
             float deg = pose.q[i] * 180.0f / ProjectKit::PI;
-            if (Retro::EqSlider(labels[i], &deg, -180.0f, 180.0f, "%.0f deg")) { pose.q[i] = deg * ProjectKit::PI / 180.0f; changed = true; }
+            if (Retro::EqSlider(labels[i], &deg, -180.0f, 180.0f, "%.0f")) { pose.q[i] = deg * ProjectKit::PI / 180.0f; changed = true; }
         }
         if (changed) { RA::SetArm(*this, pose); Editor::MarkEdited(); }
-        if (Retro::Button("Stow arm", 98.0f)) { RA::SetArm(*this, RA::StowPose()); Editor::MarkEdited(); }
+        if (Retro::Button("Stow arm", Editor::RowButtonWidth(1))) { RA::SetArm(*this, RA::StowPose()); Editor::MarkEdited(); }
     }
 
     void RegisterRoverCadScene(SceneManager& scenes) {

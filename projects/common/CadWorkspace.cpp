@@ -185,19 +185,20 @@ namespace Projects {
     void CadWorkspace::DrawWorkspacePanel(GameContext& ctx) {
         const Description& w = Workspace();
         const ImVec4 heading(Retro::HEADING[0], Retro::HEADING[1], Retro::HEADING[2], 1.0f);
-        const float bw = 98.0f * UI::Scale();
+        const float bw = Editor::RowButtonWidth(3), bw2 = Editor::RowButtonWidth(2);
 
         ImGui::TextColored(heading, "VIEW");
-        for (int i = 0; i < ViewCount; ++i) {
-            if (i % 3) ImGui::SameLine();
+        if (Retro::Button(VIEW_NAMES[Perspective], Editor::RowButtonWidth(1), m_view == Perspective ? 1 : 0)) ApplyView(ctx, Perspective);
+        for (int i = Front; i < ViewCount; ++i) {   // the six orthographic views, three per row
+            if ((i - Front) % 3) ImGui::SameLine();
             if (Retro::Button(VIEW_NAMES[i], bw, m_view == i ? 1 : 0)) ApplyView(ctx, i);
         }
 
         ImGui::Spacing();
         ImGui::TextColored(heading, "EXPLODE");
-        if (Retro::Button("Assembled", bw, m_explodeTarget < 0.5f ? 1 : 0)) { m_explodeTarget = 0.0f; ApplyView(ctx, m_view); }
+        if (Retro::Button("Assembled", bw2, m_explodeTarget < 0.5f ? 1 : 0)) { m_explodeTarget = 0.0f; ApplyView(ctx, m_view); }
         ImGui::SameLine();
-        if (Retro::Button("Exploded", bw, m_explodeTarget >= 0.5f ? 1 : 0)) { m_explodeTarget = 1.0f; ApplyView(ctx, m_view); }
+        if (Retro::Button("Exploded", bw2, m_explodeTarget >= 0.5f ? 1 : 0)) { m_explodeTarget = 1.0f; ApplyView(ctx, m_view); }
         float e = m_explodeTarget;
         if (Retro::EqSlider("explode", &e, 0.0f, 1.0f)) m_explodeTarget = e;
 
@@ -214,9 +215,9 @@ namespace Projects {
         Kit::SubsystemList(*this, "##cad_subsystems", w.subsystems, 9.5f);
         const uint32_t selected = Editor::SelectedEntity();
         Entity sel = selected ? FromId(selected - 1) : Entity();
-        if (Retro::Button("Hide selected", bw) && sel) { Kit::SetVisible(sel, false); Editor::MarkEdited(); }
+        if (Retro::Button("Hide selected", bw2) && sel) { Kit::SetVisible(sel, false); Editor::MarkEdited(); }
         ImGui::SameLine();
-        if (Retro::Button("Show all", bw)) if (Entity root = FindByName(w.rootName)) {
+        if (Retro::Button("Show all", bw2)) if (Entity root = FindByName(w.rootName)) {
             Kit::SetVisible(root, true);
             ApplyExplode(m_explode, m_explode);   // wiring stays hidden while exploded
             Editor::MarkEdited();
@@ -244,7 +245,7 @@ namespace Projects {
                 ImGui::EndTable();
             }
             if (Entity parent = sel.GetParent(); parent && !(parent == root) && inAssembly)
-                if (Retro::Button("Select parent assembly", 2.0f * bw)) Editor::Select(parent.Id() + 1);
+                if (Retro::Button("Select parent assembly", Editor::RowButtonWidth(1))) Editor::Select(parent.Id() + 1);
         }
 
         ImGui::Spacing();

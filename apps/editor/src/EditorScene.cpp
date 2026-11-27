@@ -31,7 +31,7 @@ namespace Editor {
                 Entity ground = CreateEntity("Ground");
                 ground.Get<Transform>().scale = glm::vec3(40.0f, 1.0f, 40.0f);
                 MeshRenderer plane{ "Plane", "Editor/Grid" };
-                plane.uvScale = glm::vec2(20.0f);   // 2 m grid cells
+                plane.uvScale = glm::vec2(0.5f);    // pattern cells per metre: 2 m grid cells
                 plane.castShadows = false;
                 ground.Add<MeshRenderer>(plane);
                 Entity slab = CreateEntity("Ground collider");   // 1 m slab whose top face is the plane

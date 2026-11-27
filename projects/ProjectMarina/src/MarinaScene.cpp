@@ -467,10 +467,10 @@ namespace Projects {
 
     void MarinaScene::DrawWorkspacePanel(GameContext& ctx) {
         const ImVec4 heading(Retro::HEADING[0], Retro::HEADING[1], Retro::HEADING[2], 1.0f);
-        const float bw = 98.0f * UI::Scale();
+        const float bw = Editor::RowButtonWidth(2);
         ImGui::TextColored(heading, "CAMERA");
         for (int i = 0; i < int(std::size(PRESETS)); ++i) {
-            if (i % 3) ImGui::SameLine();
+            if (i % 2) ImGui::SameLine();
             if (Retro::Button(PRESETS[i].name, bw, m_camera == i ? 1 : 0)) ApplyCamera(ctx, i);
         }
 

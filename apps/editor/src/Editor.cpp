@@ -383,7 +383,7 @@ namespace Editor {
             ImGui::InvisibleButton("##handle", ImVec2(w, h));
             const bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
             if (active || hovered) ImGui::SetMouseCursor(vertical ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
-            if (active) value = std::clamp(value + sign * (vertical ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y), lo, hi);
+            if (active) value = std::clamp(value + sign * (vertical ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y), lo, std::max(lo, hi));
             if (active || hovered) ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), IM_COL32(0xFF, 0xBE, 0x0B, 0x90));
             ImGui::End();
             ImGui::PopStyleVar(2);
@@ -423,6 +423,10 @@ namespace Editor {
     std::string& ScenePath() { return g_path; }
     void MarkEdited() { g_edited = true; }
     void DrawSettingsPanel(GameContext& ctx) { Internal::SettingsPanelContents(ctx, ctx.CurrentScene()); }
+    float RowButtonWidth(int perRow) {
+        const int n = std::max(perRow, 1);
+        return std::floor((ImGui::GetContentRegionAvail().x - float(n - 1) * ImGui::GetStyle().ItemSpacing.x) / float(n));
+    }
     void ShowOutputTab(OutputTab tab) { Internal::SetOutputTab(int(tab)); }
     bool HasUnsavedChanges(GameContext& ctx) { return g_edited && ctx.CurrentScene() != nullptr; }
     glm::vec4 ViewportRect() { return g_layout.viewport; }
@@ -521,6 +525,7 @@ namespace Editor {
         if (g_stepPending && ctx.state == GameState::Running) { ctx.state = GameState::Paused; g_stepPending = false; }
         Internal::Layout& L = g_layout;
         L.scale = UI::Scale();
+        if (ImGui::GetIO().DisplaySize.x < 64.0f || ImGui::GetIO().DisplaySize.y < 64.0f) return;   // minimised: keep the layout
         L.display = ImGui::GetIO().DisplaySize;
         if (!ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) UI::SetPanelsVisible(!UI::PanelsVisible());
 
@@ -537,6 +542,12 @@ namespace Editor {
         L.toolBar = std::round(ImGui::GetFrameHeight() + 10.0f * L.scale);
         ToolBar(ctx, scene);
 
+        if (!L.scaled) {   // first layout: DPI-scaled defaults, but the viewport keeps at least half of the window
+            L.left = std::min(L.left * L.scale, std::floor(L.display.x * 0.25f));
+            L.right = std::min(L.right * L.scale, std::floor(L.display.x * 0.25f));
+            L.bottom = std::min(L.bottom * L.scale, std::floor(L.display.y * 0.28f));
+            L.scaled = true;
+        }
         // Column sizes stay usable when the window shrinks.
         const float top = L.menuBar + L.toolBar;
         const float minView = 240.0f * L.scale;

@@ -62,7 +62,7 @@ jobs:
       - name: System packages (Mesa llvmpipe, Xvfb)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libglfw3 libgl1 libgl1-mesa-dri libasound2t64 xvfb mesa-utils
+          sudo apt-get install -y libglfw3 libgl1 libgl1-mesa-dri libasound2t64 xvfb mesa-utils gdb
       - uses: actions/download-artifact@v4
         with:
           name: linux-bin
@@ -72,7 +72,7 @@ jobs:
       - name: Runtime tests, OpenGL 4.1 tier on llvmpipe
         run: |
           chmod +x Build/bin-linux-release/Release/*
-          bash tools/ci_report.sh Build/runs/ci-linux xvfb-run -a -s "-screen 0 1280x800x24" ./Build/bin-linux-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-linux
+          CI_XVFB=1 CI_GDB=1 bash tools/ci_report.sh Build/runs/ci-linux ./Build/bin-linux-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-linux
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -120,7 +120,7 @@ jobs:
         run: |
           chmod +x Build/bin-macos-release/Release/*
           system_profiler SPDisplaysDataType | grep -E "Chipset|Metal|Vendor" | sed 's/^ */::notice title=Display::/' || true
-          bash tools/ci_report.sh Build/runs/ci-macos ./Build/bin-macos-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-macos
+          CI_NO_GL_OK=1 bash tools/ci_report.sh Build/runs/ci-macos ./Build/bin-macos-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-macos
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -127,12 +127,16 @@ namespace Editor::Internal {
             }
             DragDropTarget(e);
             EntityContextMenu(ctx, scene, e);
-            if (!children.empty()) {
+            if (!children.empty()) {   // right-aligned descendant count, when it does not cover the name
                 char count[16];
                 std::snprintf(count, sizeof(count), "%d", CountDescendants(e));
                 const float w = ImGui::CalcTextSize(count).x;
-                ImGui::SameLine(std::max(ImGui::GetWindowContentRegionMax().x - w - 4.0f, 0.0f));
-                ImGui::TextColored(Muted(), "%s", count);
+                const float nameEnd = ImGui::GetItemRectMin().x + ImGui::GetTreeNodeToLabelSpacing() + ImGui::CalcTextSize(e.GetName().c_str()).x;
+                const float countX = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x - w - 4.0f;
+                if (countX > nameEnd + 8.0f) {
+                    ImGui::SameLine(std::max(ImGui::GetWindowContentRegionMax().x - w - 4.0f, 0.0f));
+                    ImGui::TextColored(Muted(), "%s", count);
+                }
             }
             if (open) {
                 for (Entity c : children) TreeNode(ctx, scene, c);
@@ -560,8 +564,15 @@ namespace Editor::Internal {
 
         ImGui::SeparatorText("RENDER");
         Render::RenderSettings& r = Render::Settings();
-        if (ImGui::Combo("quality", &g_quality, "Low (integrated GPU)\0Medium\0High\0")) Render::ApplyQualityPreset(Render::QualityPreset(g_quality));
+        // The preset shown is derived from the live settings (they can also change one by one below).
+        auto near = [](float a, float b) { return std::abs(a - b) < 0.005f; };
+        g_quality = near(r.renderScale, 0.667f) && r.msaaSamples == 1 ? 0 : near(r.renderScale, 0.77f) && r.msaaSamples == 2 ? 1
+                  : near(r.renderScale, 1.0f) && r.msaaSamples == 4 ? 2 : 3;
+        const float labelW = ImGui::CalcTextSize("upscaler ").x;
+        ImGui::SetNextItemWidth(std::max(ImGui::GetContentRegionAvail().x - labelW, 60.0f));
+        if (ImGui::Combo("quality", &g_quality, "Low (integrated GPU)\0Medium\0High\0Custom\0") && g_quality < 3) Render::ApplyQualityPreset(Render::QualityPreset(g_quality));
         int upscaler = int(r.upscaler);
+        ImGui::SetNextItemWidth(std::max(ImGui::GetContentRegionAvail().x - labelW, 60.0f));
         if (ImGui::Combo("upscaler", &upscaler, "Bilinear\0FSR 1 (EASU + RCAS)\0")) r.upscaler = Render::Upscaler(upscaler);
         Retro::EqSlider("RENDER SCALE", &r.renderScale, 0.5f, 1.0f, "%.2f");
         Retro::EqSlider("EXPOSURE", &r.exposure, 0.1f, 4.0f, "%.2f");
@@ -572,8 +583,9 @@ namespace Editor::Internal {
             Retro::LedToggle(label, v);
             if (!last) ImGui::SameLine();
         };
-        led("CULL", &r.gpuCulling, false); led("HI-Z", &r.occlusionCulling, false); led("SHADOW", &r.shadowsEnabled, false); led("FOG", &r.fog.enabled, true);
-        led("BLOOM", &r.bloom.enabled, false); led("SSAO", &r.ssao.enabled, false); led("DECAL", &r.decals, true);
+        led("CULL", &r.gpuCulling, false); led("HI-Z", &r.occlusionCulling, false); led("SHADOW", &r.shadowsEnabled, true);
+        led("FOG", &r.fog.enabled, false); led("BLOOM", &r.bloom.enabled, false); led("SSAO", &r.ssao.enabled, true);
+        led("DECAL", &r.decals, true);
         const Render::ShaderReloadStatus reload = Render::GetShaderReloadStatus();
         if (Retro::Button(reload.enabled ? "RELOAD SHADERS" : "WATCH SHADERS", 0.0f, reload.enabled ? (reload.failures ? 2 : 1) : 0)) {
             if (!reload.enabled) Render::EnableShaderHotReload("engine/shaders");
@@ -685,9 +697,10 @@ namespace Editor::Internal {
         g_cursor = (g_cursor + 1) % g_frameNorm.size();
         if (!Retro::BeginDockedPanel("OUTPUT##dock", x, y, w, h, ImGuiWindowFlags_NoScrollbar)) { Retro::EndPanel(); return; }
         const char* tabs[] = { "CONSOLE", "TELEMETRY", "TIMELINE" };
+        const float tabW = std::min(110.0f * GetLayout().scale, RowButtonWidth(3));
         for (int i = 0; i < 3; ++i) {
             if (i) ImGui::SameLine();
-            if (Retro::Button(tabs[i], 100.0f * GetLayout().scale, g_dockTab == i ? 1 : 0)) g_dockTab = i;
+            if (Retro::Button(tabs[i], tabW, g_dockTab == i ? 1 : 0)) g_dockTab = i;
         }
         ImGui::Separator();
         if (g_dockTab == 0) Console();
