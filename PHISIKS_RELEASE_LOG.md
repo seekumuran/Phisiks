@@ -151,6 +151,8 @@ All engine systems are unchanged apart from the fixes listed below. Every sample
 | macOS CI (macOS 15, Apple Clang) | build + headless ctest pass; release packaging incl. `otool` check: pass |
 | macOS rendering | **not verified**: the runner cannot create an OpenGL context; no physical Mac |
 | Windows CI (VS 2022, portable) | build + headless ctest pass; packaging pass |
+| Finalisation commit `c7222bb`, CI run 46043550189 (2026-11-27) | Windows, Linux, macOS build + headless ctest (unit incl. version and save-warning tests, layering, replay): pass. Linux llvmpipe runtime tests (GL 4.1 tier): **234/234** including the save-warning checks. macOS runtime: UNVERIFIED (no OpenGL context on the runner) |
+| Finalisation commit `c7222bb`, release run 46043550241 | Windows, Linux and macOS archives built and checked. The check fails unless `BUILD_INFO.txt` is present, names a released toolchain, this run and this commit, and the name has no `preview-toolchain`; it passed on all three. Publish job skipped (branch push, not a tag) |
 
 ### Outstanding limitations
 
