@@ -9,7 +9,10 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <mutex>
+#include <random>
 
 namespace Phisiks {
     using namespace SceneInternal;
@@ -103,6 +106,11 @@ namespace Phisiks {
     const std::string& Entity::GetName() const {
         static const std::string empty;
         return Valid() ? Get<Phisiks::Name>().value : empty;
+    }
+
+    uint64_t Entity::GetGuid() const {
+        const EntityGuid* g = Valid() ? m_scene->m_registry.try_get<EntityGuid>(m_handle) : nullptr;
+        return g ? g->value : 0;
     }
     void Entity::SetName(const std::string& name) { if (Valid()) Get<Phisiks::Name>().value = name; }
 
@@ -224,7 +232,38 @@ namespace Phisiks {
         m_registry.emplace<Phisiks::Name>(handle, Phisiks::Name{ name });
         m_registry.emplace<Transform>(handle);
         m_registry.emplace<Hierarchy>(handle);
+        m_registry.emplace<EntityGuid>(handle, EntityGuid{ NewGuid() });
         return Entity(this, handle);
+    }
+
+    uint64_t Scene::NewGuid() const {
+        static std::mt19937_64 rng([] {
+            std::random_device device;
+            return (uint64_t(device()) << 32) ^ uint64_t(device()) ^ uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());
+        }());
+        static std::mutex mutex;
+        for (;;) {
+            uint64_t guid;
+            { std::lock_guard<std::mutex> lock(mutex); guid = rng(); }
+            if (guid != 0 && !FindByGuid(guid)) return guid;
+        }
+    }
+
+    Entity Scene::FindByGuid(uint64_t guid) const {
+        if (guid == 0) return {};
+        for (auto [entity, g] : m_registry.view<const EntityGuid>().each()) {
+            if (g.value != guid) continue;
+            const Entity candidate(const_cast<Scene*>(this), entity);
+            if (!IsPendingDestroy(candidate)) return candidate;
+        }
+        return {};
+    }
+
+    bool Scene::SetGuid(Entity entity, uint64_t guid) {
+        if (!entity || guid == 0) return false;
+        if (Entity other = FindByGuid(guid); other && other != entity) return false;
+        m_registry.emplace_or_replace<EntityGuid>(entity.Handle(), EntityGuid{ guid });
+        return true;
     }
 
     void Scene::Unlink(entt::entity entity) {

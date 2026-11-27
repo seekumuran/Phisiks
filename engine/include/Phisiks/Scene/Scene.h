@@ -47,6 +47,7 @@ namespace Phisiks {
 
         const std::string& GetName() const;
         void SetName(const std::string& name);
+        uint64_t GetGuid() const;                   // stable identity (EntityGuid), 0 if invalid
 
         template<class T, class... Args> T& Add(Args&&... args);
         template<class T> T& Get();
@@ -100,6 +101,9 @@ namespace Phisiks {
         virtual void Update(GameContext& /*ctx*/, float /*deltaTime*/) {}
         virtual void FixedUpdate(GameContext& /*ctx*/, float /*fixedDeltaTime*/) {}
         virtual void DrawUI(GameContext& /*ctx*/) {}
+        // true: Update also runs while the simulation is paused (editor workspaces whose tools and
+        // view animations work in edit mode). FixedUpdate, scripts and physics still run only when playing.
+        virtual bool RunsWhilePaused() const { return false; }
 
         const std::string& Name() const { return m_name; }
         uint64_t Serial() const { return m_serial; }      // unique per Scene instance (never reused)
@@ -111,6 +115,11 @@ namespace Phisiks {
         void FlushDestroyed();                         // destroys queued entities
         void Clear();                                  // destroy everything now
         Entity FindByName(const std::string& name) const;
+        Entity FindByGuid(uint64_t guid) const;        // invalid if no live entity has it
+        // A new random, non-zero guid not used by any entity of this scene.
+        uint64_t NewGuid() const;
+        // Gives `entity` this guid (scene loading, undo, snapshots). False if another live entity has it.
+        bool SetGuid(Entity entity, uint64_t guid);
         Entity FromId(uint32_t id) const;              // e.g. physics user data; invalid if stale
         Entity FromBody(Physics::BodyId body) const;   // entity owning a physics body (from hits/events)
         size_t EntityCount() const;

@@ -18,6 +18,13 @@ namespace Phisiks {
         std::string value;
     };
 
+    // Stable identity of an entity (never 0): assigned by Scene::CreateEntity and kept by scene
+    // files (version 2), the editor's undo history, play-mode snapshots and the agent interface.
+    // Entity::Id() is the in-memory handle and changes when an entity is re-created; the guid does not.
+    struct EntityGuid {
+        uint64_t value = 0;
+    };
+
     // Local transform (relative to the parent entity, or the world for root entities).
     struct Transform {
         glm::vec3 position{ 0.0f };

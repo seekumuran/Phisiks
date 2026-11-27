@@ -2159,11 +2159,11 @@ namespace Phisiks {
                     Expect("navigation grid built from the scene colliders; rover route planned by A*", grid && grid->Valid() && omd->RouteBuilt(),
                            grid ? F("%.0f walkable cells", double(grid->WalkableCells())) : std::string("no grid"));
                     {
-                        // NavigationSurface + NavAgent are not in scene files, but the workspace re-attaches them after loading.
-                        const size_t stored = SceneSerializer::UnsavedComponents(*ctx.CurrentScene()).size();
+                        // Scene format 2 stores NavigationSurface + NavAgent: nothing in the project is lost on save.
+                        const size_t unstored = SceneSerializer::UnsavedComponents(*ctx.CurrentScene()).size();
                         const size_t lost = Editor::ComponentsLostOnSave(ctx).size();
-                        Expect("save warning: navigation components the workspace restores are not reported as lost", stored == 2 && lost == 0,
-                               F("%.0f unstored types, ", double(stored)) + F("%.0f reported", double(lost)));
+                        Expect("scene format 2: the project's navigation components are stored (no save warning)", unstored == 0 && lost == 0,
+                               F("%.0f unstored types, ", double(unstored)) + F("%.0f reported", double(lost)));
                     }
                     // the project as built (assembled, idle): kept as the run's reference scene file
                     Expect("project scene file written", SceneSerializer::Save(*ctx.CurrentScene(), m_runDirectory + "/old_mcdonald.scene.json"), m_runDirectory + "/old_mcdonald.scene.json");
@@ -2643,30 +2643,40 @@ namespace Phisiks {
             return true;
         } });
 
-        // Saving a scene with components that scene files do not store (release finalisation): the
-        // editor lists them, refuses an unconfirmed save, and File > Save asks; cancel leaves the file
-        // untouched, confirm writes it without them. Runs on the Joints sample (joints, scripts).
-        m_steps.push_back({ "Editor: save warning for components scene files do not store", [this](GameContext& ctx) {
+        // Scene format 2 on the Joints sample: joints and Lua scripts now survive save + reopen. What a
+        // save still cannot keep (C++ callbacks) is listed first: the editor refuses an unconfirmed
+        // save and File > Save asks; cancel leaves the file untouched, confirm writes it without them.
+        m_steps.push_back({ "Editor: scene format 2 and the save warning for C++ callbacks", [this](GameContext& ctx) {
             const std::string file = m_runDirectory + "/editor_lossy.scene.json";
             const std::string sentinel = "sentinel: a refused or cancelled save must not touch this file\n";
             auto fileText = [&] { std::ifstream in(file, std::ios::binary); std::stringstream ss; ss << in.rdbuf(); return ss.str(); };
             auto joints = [](Scene& s) { size_t n = 0; for (auto e : s.Registry().view<Joint>()) { (void)e; ++n; } return n; };
+            auto scripts = [](Scene& s) { size_t n = 0; for (auto e : s.Registry().view<Script>()) { (void)e; ++n; } return n; };
             switch (m_phase) {
                 case 0: ctx.scenes->Request("Joints"); m_phase = 1; return false;
                 case 1: {
                     if (!ctx.CurrentScene() || ctx.CurrentScene()->Name() != "Joints") return false;
+                    Scene& scene = *ctx.CurrentScene();
+                    const std::string stored = m_runDirectory + "/joints_v2.scene.json";
+                    std::string status, error;
+                    const bool savedV2 = Editor::SaveScene(ctx, stored, &status);
+                    Scene reopenedV2("Joints (format 2)");
+                    const bool loadedV2 = SceneSerializer::Load(reopenedV2, stored, &error);
+                    Expect("scene format 2: joints and scripts survive save + reopen with no warning",
+                           savedV2 && loadedV2 && joints(scene) > 0 && joints(reopenedV2) == joints(scene) && scripts(reopenedV2) == scripts(scene) && Editor::ComponentsLostOnSave(ctx).empty(),
+                           F("%.0f joints, ", double(joints(reopenedV2))) + F("%.0f scripts reopened; ", double(scripts(reopenedV2))) + status + error);
+                    scene.CreateEntity("Callback target").Add<Health>().onDeath = [](GameContext&, Entity, Entity) {};
                     { std::ofstream out(file, std::ios::binary | std::ios::trunc); out << sentinel; }
-                    m_scratch[0] = float(joints(*ctx.CurrentScene()));
+                    m_scratch[0] = float(joints(scene));
                     size_t listed = 0;
                     std::string types;
                     for (const SceneSerializer::UnsavedComponent& c : Editor::ComponentsLostOnSave(ctx)) {
                         types += c.type + " x" + std::to_string(c.count) + " ";
-                        if (c.type == "Joint") listed = c.count;
+                        if (c.type.rfind("Health.onDeath", 0) == 0) listed = c.count;
                     }
-                    Expect("the editor lists the component types a save would drop, with counts", m_scratch[0] > 0 && listed == size_t(m_scratch[0]), types);
-                    std::string status;
+                    Expect("the editor lists what a save would drop (a C++ callback), with counts", listed == 1, types);
                     const bool saved = Editor::SaveScene(ctx, file, &status);
-                    Expect("an unconfirmed save is refused and the file is untouched", !saved && fileText() == sentinel && status.find("Joint") != std::string::npos, status);
+                    Expect("an unconfirmed save is refused and the file is untouched", !saved && fileText() == sentinel && status.find("Health.onDeath") != std::string::npos, status);
                     const Editor::SaveRequest request = Editor::RequestSave(ctx, file, &status);
                     Expect("File > Save asks first and writes nothing yet", request == Editor::SaveRequest::AwaitingConfirmation && Editor::SaveConfirmationPending() && fileText() == sentinel, status);
                     m_scratch[1] = float(m_stepFrames);
@@ -2685,8 +2695,10 @@ namespace Phisiks {
                     std::string error;
                     Scene reopened("Joints (reopened)");
                     const bool loaded = SceneSerializer::Load(reopened, file, &error);
-                    Expect("confirm: the file is written without them; the open scene still has them",
-                           !Editor::SaveConfirmationPending() && loaded && joints(reopened) == 0 && reopened.EntityCount() == ctx.CurrentScene()->EntityCount() && joints(*ctx.CurrentScene()) == size_t(m_scratch[0]),
+                    Entity target = reopened.FindByName("Callback target");
+                    Expect("confirm: the file is written without the callback; the open scene still has it",
+                           !Editor::SaveConfirmationPending() && loaded && target && target.Has<Health>() && !target.Get<Health>().onDeath && joints(reopened) == size_t(m_scratch[0])
+                           && reopened.EntityCount() == ctx.CurrentScene()->EntityCount() && bool(ctx.CurrentScene()->FindByName("Callback target").Get<Health>().onDeath),
                            F("%.0f entities reopened", double(reopened.EntityCount())) + F(" of %.0f; ", double(ctx.CurrentScene()->EntityCount())) + error);
                     return true;
                 }
