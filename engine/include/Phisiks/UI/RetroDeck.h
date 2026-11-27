@@ -1,6 +1,6 @@
 #pragma once
 // "Retro deck" studio skin, P11 look: a dark 1990s retro hardware / engineering console for the
-// Dear ImGui studio and the showcase demos (original artwork: everything is drawn procedurally,
+// Dear ImGui editor and the showcase demos (original artwork: everything is drawn procedurally,
 // no third-party skin assets).
 //
 //   matte obsidian-black panels (#1B1D26 / #12131A) and dark gunmetal faces (#252834) with

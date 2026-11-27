@@ -613,7 +613,7 @@ namespace Showcase {
             if (!Retro::BeginMenuBar("PHISIKS SHOWCASE")) return;
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("Restart demo", "R") && ctx.scenes) ctx.scenes->RequestReload();
-                if (backToLab && ImGui::MenuItem("Back to PhisiksLab") && ctx.scenes) ctx.scenes->Request(backToLab);
+                if (backToLab && ImGui::MenuItem("Back to the samples") && ctx.scenes) ctx.scenes->Request(backToLab);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View")) {

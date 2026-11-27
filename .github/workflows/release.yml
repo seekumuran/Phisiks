@@ -96,7 +96,10 @@ jobs:
           for exe in Phisiks PhisiksSamples ProjectMarina OldMcDonald Showcase01_RoboticArm Showcase02_PoolFluid Showcase03_BlackHole Showcase04_TurbineCad glprobe; do
             if [ ! -f "$root/$exe$ext" ]; then echo "missing $exe$ext"; missing=1; fi
           done
-          for f in QUICKSTART.txt LICENSE THIRD_PARTY_NOTICES.md README.md assets/shaders/black_hole.frag.glsl assets/meshes/hero assets/scripts                    shaders/tonemap.frag.glsl projects/assets/meshes/marina projects/assets/meshes/oldmcdonald                    projects/OldMcDonald/scenes/old_mcdonald.scene.json projects/ProjectMarina/README.md; do
+          for f in QUICKSTART.txt LICENSE THIRD_PARTY_NOTICES.md README.md assets/shaders/black_hole.frag.glsl assets/meshes/hero assets/scripts \
+                   shaders/tonemap.frag.glsl projects/assets/meshes/marina projects/assets/meshes/oldmcdonald \
+                   projects/OldMcDonald/scenes/old_mcdonald.scene.json projects/ProjectMarina/README.md \
+                   THIRD_PARTY_LICENSES/dear-imgui.txt THIRD_PARTY_LICENSES/glfw.txt THIRD_PARTY_LICENSES/lua.txt; do
             if [ ! -e "$root/$f" ]; then echo "missing $f"; missing=1; fi
           done
           if [ "${{ matrix.name }}" = "linux" ]; then
@@ -106,7 +109,7 @@ jobs:
           fi
           if [ "${{ matrix.name }}" = "macos" ]; then
             otool -L "$root/Phisiks" | tee otool.txt
-            if grep -vE "^\s*/(System|usr/lib)/|:$" otool.txt | grep -q .; then echo "non-system dynamic libraries"; missing=1; fi
+            if grep -vE "^[[:space:]]*/(System|usr/lib)/|:$" otool.txt | grep -q .; then echo "non-system dynamic libraries"; missing=1; fi
             rm -f otool.txt
           fi
           rm -rf check

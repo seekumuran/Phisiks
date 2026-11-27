@@ -122,7 +122,63 @@ def main():
         shutil.rmtree(out, ignore_errors=True)
         subprocess.check_call([python, "-m", "glad", "--api", "gl:core=4.6", "--extensions", GLAD_EXTENSIONS,
                                "--out-path", out, "c", "--loader", "--debug"])
+    licenses()
     print("vendor/ ready")
+
+
+GLFW = "3.4"            # FetchContent / bundled builds (CMakeLists.txt); the vendored Windows binaries are GLFW 3.3.0 (same zlib licence)
+PHYSX = "105.1-physx-5.3.1"   # NVIDIA-Omniverse/PhysX tag of the vendored PhysX 5.3.1 binaries (Windows)
+
+
+def licenses():
+    """vendor/licenses/<library>.txt: the licence text of every third-party library at its pinned
+    version. CMake installs the folder as THIRD_PARTY_LICENSES/ in release packages (MIT, BSD-3 and
+    zlib require the notice to accompany binary copies)."""
+    def lic(name, data):
+        rel = "licenses/" + name + ".txt"
+        if need(rel):
+            write(rel, data)
+
+    def from_file(name, rel):
+        path = os.path.join(VENDOR, rel)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                lic(name, f.read())
+
+    if need("licenses/glm.txt"):
+        print("licences")
+    lic_sources = [
+        ("glm", lambda: raw("g-truc/glm", GLM, "copying.txt")),
+        ("entt", lambda: raw("skypjack/entt", ENTT, "LICENSE")),
+        ("stb", lambda: raw("nothings/stb", STB, "LICENSE")),
+        ("glfw", lambda: raw("glfw/glfw", GLFW, "LICENSE.md")),
+        ("physx", lambda: raw("NVIDIA-Omniverse/PhysX", PHYSX, "LICENSE.md")),
+        ("nlohmann-json", lambda: raw("nlohmann/json", JSON, "LICENSE.MIT")),
+    ]
+    for name, get in lic_sources:
+        if need("licenses/%s.txt" % name):
+            try:
+                lic(name, get())
+            except Exception as e:   # keep going: the build does not depend on licence files
+                print("  warning: %s licence not fetched (%s)" % (name, e))
+    from_file("dear-imgui", "imgui/LICENSE.txt")
+    from_file("imguizmo", "imguizmo/LICENSE")
+    from_file("miniaudio", "miniaudio/LICENSE")
+    from_file("nlohmann-json", "nlohmann/LICENSE.MIT")
+    # Lua: the notice at the end of lua.h. glad: the SPDX header of the generated loader.
+    lua_h = os.path.join(VENDOR, "lua", "src", "lua.h")
+    if os.path.exists(lua_h) and need("licenses/lua.txt"):
+        with open(lua_h, encoding="latin-1") as f:
+            text = f.read()
+        start = text.rfind("* Copyright (C)")
+        start = text.rfind("/*", 0, start) if start >= 0 else -1
+        lic("lua", (text[start:] if start >= 0 else text[-1200:]).encode("utf-8"))
+    gl_h = os.path.join(VENDOR, "glad", "include", "glad", "gl.h")
+    if os.path.exists(gl_h) and need("licenses/glad.txt"):
+        with open(gl_h, encoding="utf-8", errors="replace") as f:
+            header = f.read().split("*/", 1)[0] + "*/\n"
+        lic("glad", (header + "\nThe generated loader is (WTFPL OR CC0-1.0) AND Apache-2.0 (Khronos API registry).\n"
+                     "Apache-2.0: https://www.apache.org/licenses/LICENSE-2.0\n").encode("utf-8"))
 
 
 def glad_python():

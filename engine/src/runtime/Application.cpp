@@ -75,7 +75,7 @@ namespace Phisiks {
                 return false;
             }
             m_rendererReady = true;
-            if (options.enableUI && !UI::Init()) Log::Warning() << "UI unavailable; continuing without the studio panels";
+            if (options.enableUI && !UI::Init()) Log::Warning() << "UI unavailable; continuing without the editor panels";
             if (!options.shaderHotReloadDirectory.empty()) Render::EnableShaderHotReload(options.shaderHotReloadDirectory);
         }
         if (!Physics::Init()) {
@@ -237,7 +237,7 @@ namespace Phisiks {
             PHISIKS_PROFILE_SCOPE("Update");
             // 1. Input (tests inject synthetic input before it is sampled)
             if (m_harness) m_harness->BeforeInput(m_ctx);
-            // The studio UI owns the mouse / keyboard while it is hovered or typed into.
+            // The editor UI owns the mouse / keyboard while it is hovered or typed into.
             if (!m_harness && UI::IsActive()) m_ctx.input.SetHardwareEnabled(!UI::WantsMouse() && !UI::WantsKeyboard());
             m_ctx.input.Update(Platform::HasWindow() && Platform::HasFocus());
             HandleGlobalActions();
@@ -325,7 +325,7 @@ namespace Phisiks {
                 GpuTimer::Get().End("Frame");
             }
             if (m_recorder) m_recorder->Capture(scene, m_ctx.stats.frameIndex, m_ctx.stats.totalFixedSteps, m_ctx.stats.simulationTime, m_rendererReady);
-            if (UI::IsActive()) {   // studio panels on top of the presented frame (not part of captures)
+            if (UI::IsActive()) {   // editor panels on top of the presented frame (not part of captures)
                 UI::BeginFrame();
                 m_game->OnGui(m_ctx);
                 if (m_rendererReady) GpuTimer::Get().Begin("UI");

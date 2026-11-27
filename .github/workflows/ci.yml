@@ -68,11 +68,11 @@ jobs:
           name: linux-bin
           path: Build/bin-linux-release
       - name: OpenGL on the runner
-        run: xvfb-run -a -s "-screen 0 1280x800x24" glxinfo -B | grep -E "OpenGL (renderer|core profile version)" || true
+        run: xvfb-run -a -s "-screen 0 1280x800x24" glxinfo -B | grep -E "OpenGL (renderer|core profile version)" | sed 's/^ */::notice title=glxinfo::/' || true
       - name: Runtime tests, OpenGL 4.1 tier on llvmpipe
         run: |
           chmod +x Build/bin-linux-release/Release/*
-          xvfb-run -a -s "-screen 0 1280x800x24" ./Build/bin-linux-release/Release/PhisiksRuntimeTests --autotest --gl41 --run-dir Build/runs/ci-linux
+          bash tools/ci_report.sh Build/runs/ci-linux xvfb-run -a -s "-screen 0 1280x800x24" ./Build/bin-linux-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-linux
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -119,7 +119,8 @@ jobs:
       - name: Runtime tests, OpenGL 4.1 (the macOS tier)
         run: |
           chmod +x Build/bin-macos-release/Release/*
-          ./Build/bin-macos-release/Release/PhisiksRuntimeTests --autotest --gl41 --run-dir Build/runs/ci-macos
+          system_profiler SPDisplaysDataType | grep -E "Chipset|Metal|Vendor" | sed 's/^ */::notice title=Display::/' || true
+          bash tools/ci_report.sh Build/runs/ci-macos ./Build/bin-macos-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-macos
       - uses: actions/upload-artifact@v4
         if: always()
         with:

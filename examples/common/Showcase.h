@@ -11,7 +11,7 @@
 //                     corner X / Y / Z orientation triad.
 //   Run()             the executable entry point every demo's main() calls (argument parsing, the
 //                     Medium quality preset at 1920x1080 by default, --autotest harness).
-//   RegisterAll()     registers the four showcase scenes (PhisiksLab's SHOWCASE playlist).
+//   RegisterAll()     registers the four showcase scenes (hosted by the runtime tests as well).
 //
 // Demos only implement Build() and optional hooks; the framework owns modes, cameras and the HUD.
 #include "Phisiks/Framework/GameContext.h"
@@ -50,7 +50,7 @@ namespace Showcase {
     CameraShot DollyShot(const std::string& name, const glm::vec3& a, const glm::vec3& b, const glm::vec3& target, float duration);
 
     struct DemoInfo {
-        const char* scene;          // scene name (also the Lab playlist entry)
+        const char* scene;          // scene name
         const char* title;
         const char* industry;
         const char* blurb;
@@ -139,7 +139,7 @@ namespace Showcase {
 
     ShowcaseScene* Current(Phisiks::GameContext& ctx);       // nullptr unless the current scene is a showcase
 
-    // Per-frame framework input (keys 1-5 / 0 / M / F3); the showcase app and PhisiksLab call it in OnUpdate.
+    // Per-frame framework input (keys 1-5 / 0 / M / F3); the showcase app and the runtime tests call it in OnUpdate.
     void HandleInput(Phisiks::GameContext& ctx);
     // RetroDeck HUD + demo panel (inside IGame::OnGui). `backToLab` adds a button that requests that scene.
     void DrawGui(Phisiks::GameContext& ctx, const char* backToLab = nullptr);

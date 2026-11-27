@@ -12,7 +12,7 @@ namespace Phisiks::UI {
     bool WantsMouse();         // the cursor is over / dragging a UI element (games should ignore the mouse)
     bool WantsKeyboard();
     int LastDrawVertexCount(); // vertices of the last rendered UI frame (tests)
-    // Studio panels shown (the game decides what it draws; the engine HUD hides its telemetry text
+    // Editor panels shown (the game decides what it draws; the engine HUD hides its telemetry text
     // while they are, so nothing overlaps behind the panels).
     void SetPanelsVisible(bool visible);
     bool PanelsVisible();      // IsActive() and not hidden

@@ -1,4 +1,4 @@
--- Spinner (hot-reloaded: edit and save while PhisiksLab runs; state in `self` survives the reload).
+-- Spinner (hot-reloaded: edit and save while the PHISIKS samples run; state in `self` survives the reload).
 speed = 90          -- degrees per second about +Y
 
 function on_start(self)

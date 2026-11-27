@@ -414,8 +414,8 @@ endforeach()
 # The runtime verification harness on both feature tiers (editor, samples, showcases, example
 # projects; exit code = failed checks). It needs a window with an OpenGL context.
 if(PHISIKS_BUILD_PROJECTS)
-    add_test(NAME RuntimeTests COMMAND PhisiksRuntimeTests --autotest --run-dir ${CMAKE_BINARY_DIR}/runtime_tests/gl46 WORKING_DIRECTORY ${PHISIKS_ROOT})
-    add_test(NAME RuntimeTestsGL41 COMMAND PhisiksRuntimeTests --autotest --gl41 --run-dir ${CMAKE_BINARY_DIR}/runtime_tests/gl41 WORKING_DIRECTORY ${PHISIKS_ROOT})
+    add_test(NAME RuntimeTests COMMAND PhisiksRuntimeTests --autotest --hidden --run-dir ${CMAKE_BINARY_DIR}/runtime_tests/gl46 WORKING_DIRECTORY ${PHISIKS_ROOT})
+    add_test(NAME RuntimeTestsGL41 COMMAND PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir ${CMAKE_BINARY_DIR}/runtime_tests/gl41 WORKING_DIRECTORY ${PHISIKS_ROOT})
     set_tests_properties(RuntimeTests RuntimeTestsGL41 PROPERTIES TIMEOUT 1200 RUN_SERIAL TRUE)
 endif()
 endif()
@@ -465,6 +465,12 @@ if(PHISIKS_BUILD_PROJECTS)   # example projects: scene files, meshes and READMEs
             PATTERN "src" EXCLUDE PATTERN "tools" EXCLUDE PATTERN "common" EXCLUDE PATTERN "CMakeLists.txt" EXCLUDE)
 endif()
 install(DIRECTORY ${PHISIKS_ROOT}/engine/shaders/ DESTINATION shaders FILES_MATCHING PATTERN "*.glsl")
+# Licence texts of the third-party code compiled into the programs (tools/fetch_deps.py collects them).
+if(EXISTS ${PHISIKS_VENDOR}/licenses)
+    install(DIRECTORY ${PHISIKS_VENDOR}/licenses/ DESTINATION THIRD_PARTY_LICENSES)
+else()
+    message(WARNING "vendor/licenses is missing: run 'python tools/fetch_deps.py' so release packages include the third-party licence texts")
+endif()
 install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md
               ${PHISIKS_ROOT}/packaging/QUICKSTART.txt DESTINATION .)
 

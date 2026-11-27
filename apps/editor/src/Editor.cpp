@@ -526,6 +526,7 @@ namespace Editor {
 
         Scene* scene = ctx.CurrentScene();
         WorkspaceExtension* ws = Internal::Workspace(ctx);
+        ctx.crosshairVisible = ctx.camera.GetMode() != CameraMode::Orbit;   // the aim cross is for first person / fly cameras
         if (ws) ws->DrawViewportOverlay(ctx);
         const bool panels = UI::PanelsVisible();
         if (scene) Internal::ApplyViewportLayout(ctx, *scene, panels);

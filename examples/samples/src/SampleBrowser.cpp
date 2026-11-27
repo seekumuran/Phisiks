@@ -48,8 +48,8 @@ namespace Samples {
             int n = 1;
             for (const Sample& s : SAMPLES) {
                 const bool current = scene && scene->Name() == s.scene;
-                if (Retro::PlaylistRow(n++, s.title, s.tag, current)) { ClearCaption(); Editor::RequestScene(ctx, s.scene); }
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", s.about);
+                if (Retro::PlaylistRow(n++, s.title, nullptr, current)) { ClearCaption(); Editor::RequestScene(ctx, s.scene); }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("[%s] %s", s.tag, s.about);
             }
         }
         Retro::EndPlaylist();

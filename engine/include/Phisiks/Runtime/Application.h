@@ -44,7 +44,7 @@ namespace Phisiks {
         bool exportVision = false;     // synthetic vision: aligned RGB + linear depth + normals + entity-id mask + camera CSV
         int exportEvery = 1;
 
-        // Studio / platform
+        // Editor UI / platform
         bool enableUI = false;         // Dear ImGui (IGame::OnGui)
         int maxGLVersion = 46;         // 41 = force the OpenGL 4.1 feature tier (macOS path) on any GPU
         bool recordReplay = false;     // GameContext::replay records every fixed step

@@ -1,4 +1,4 @@
-// Retro deck studio skin, dark retro hardware-console look (see Phisiks/UI/RetroDeck.h). Every
+// Retro deck editor skin, dark retro hardware-console look (see Phisiks/UI/RetroDeck.h). Every
 // element is drawn with ImGui draw lists: bevels are two-tone 1 px lines (dark-steel #3E4356
 // top/left, pure black #07080B bottom/right for raised parts, the reverse for recessed ones),
 // etched group frames are a black groove with a dark-steel ridge, gradients are multi-colour

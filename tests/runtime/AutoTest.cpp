@@ -224,7 +224,7 @@ namespace Phisiks {
         int passed = 0, failed = 0;
         for (const Check& c : m_checks) (c.passed ? passed : failed)++;
         std::ofstream out(m_runDirectory + "/autotest_report.txt");
-        out << "Phisiks PhisiksLab - automated runtime verification report\n";
+        out << "PHISIKS runtime tests - automated runtime verification report\n";
         out << "Checks: " << passed << " passed, " << failed << " failed" << (m_finished ? "" : "  (SEQUENCE DID NOT FINISH)") << "\n\n";
         std::string lastStep;
         for (const Check& c : m_checks) {
@@ -1961,7 +1961,7 @@ namespace Phisiks {
             }
         }, 20.0 });
 
-        m_steps.push_back({ "P10: showcase playlist (the four demos inside PhisiksLab)", [this](GameContext& ctx) {
+        m_steps.push_back({ "P10: the four showcase scenes hosted in the editor application", [this](GameContext& ctx) {
             const auto& demos = Showcase::Demos();
             const size_t i = size_t(m_phase / 2);
             if (i >= demos.size()) {

@@ -350,7 +350,9 @@ namespace Editor::Internal {
         Entity e = Selected(scene);
         if (!e) {
             ImGui::TextDisabled("Nothing selected.");
-            ImGui::TextDisabled("Click an object in the viewport or the scene list.");
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::TextWrapped("Click an object in the viewport or the scene list. Create adds new objects.");
+            ImGui::PopStyleColor();
             Retro::EndPanel();
             return;
         }
@@ -540,10 +542,10 @@ namespace Editor::Internal {
         ImGui::SeparatorText("PHYSICS");
         const Physics::Settings& ps = Physics::GetSettings();
         float gravity = ps.gravity.y;
-        if (Retro::EqSlider("GRAVITY", &gravity, -30.0f, 5.0f, "%.2f m/s2")) Physics::SetGravity(glm::vec3(ps.gravity.x, gravity, ps.gravity.z));
+        if (Retro::EqSlider("GRAVITY", &gravity, -30.0f, 5.0f, "%.2f")) Physics::SetGravity(glm::vec3(ps.gravity.x, gravity, ps.gravity.z));
         int substeps = int(ps.substeps);
         if (Retro::EqSliderInt("SUBSTEPS", &substeps, 1, 16)) Physics::SetSubsteps(uint32_t(substeps));
-        if (Retro::EqSlider("FRICTION", &g_friction, 0.0f, 1.5f, "%.2f (all colliders)") && scene) {
+        if (Retro::EqSlider("FRICTION", &g_friction, 0.0f, 1.5f, "%.2f") && scene) {
             scene->Each<Collider>([&](Entity e, Collider& c) {
                 c.shape.material.staticFriction = g_friction;
                 c.shape.material.dynamicFriction = g_friction * 0.83f;
@@ -551,6 +553,7 @@ namespace Editor::Internal {
             });
             NoteEdit();
         }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Sets the friction of every collider in the scene");
         Retro::LedToggle("DEBUG DRAW", &ctx.physicsDebugDraw);
         ImGui::SameLine();
         ImGui::TextColored(Muted(), "%s", Physics::BackendName());

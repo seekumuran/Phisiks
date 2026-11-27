@@ -1,5 +1,5 @@
 #pragma once
-// Classroom scenes for the PhisiksLab studio (each one teaches one engine topic).
+// Lesson scenes of the PHISIKS samples (each one shows one engine topic).
 //   Rotors     the same rotation as Euler angles, a quaternion and a geometric-algebra rotor
 //   Orbits     explicit Euler vs RK4 on a Kepler orbit (energy drift, trails)
 //   PBR        roughness x metallic sphere grid under key / rim / point lights

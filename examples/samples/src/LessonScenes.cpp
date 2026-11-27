@@ -147,7 +147,7 @@ namespace Samples {
 
     void PbrScene::DrawUI(GameContext&) {
         Caption("PBR: roughness increases left -> right, metallic bottom -> top",
-                "Cook-Torrance GGX + hemisphere ambient + rim; try exposure / quality presets in the studio");
+                "Cook-Torrance GGX + hemisphere ambient + rim; try exposure / quality presets in the settings panel");
     }
 
     // ==================================================================== Fountain
