@@ -1,7 +1,7 @@
-# ctest DeterministicReplay: runs PhisiksLab headless in deterministic mode twice and requires the
+# ctest DeterministicReplay: runs PhisiksSamples headless in deterministic mode twice and requires the
 # exported simulation data to be byte-identical; then records a short hidden-window run and
 # requires the PNG frames to exist.
-#   cmake -DLAB=<PhisiksLab.exe> -DWORK=<dir> -P test_deterministic_replay.cmake   (cwd = repo root)
+#   cmake -DLAB=<PhisiksSamples.exe> -DWORK=<dir> -P test_deterministic_replay.cmake   (cwd = repo root)
 
 file(REMOVE_RECURSE "${WORK}")
 foreach(run a b)

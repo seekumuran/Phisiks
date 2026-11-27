@@ -1,11 +1,13 @@
 #include "Phisiks/Core/Log.h"
 
 #include <chrono>
+#include <deque>
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 #include <mutex>
 
 namespace Phisiks::Log {
@@ -14,6 +16,9 @@ namespace Phisiks::Log {
         std::string g_path;
         std::mutex g_mutex;
         std::chrono::steady_clock::time_point g_start = std::chrono::steady_clock::now();
+        std::deque<Record> g_recent;
+        uint64_t g_lines = 0;
+        constexpr size_t RECENT = 2000;
 
         const char* LevelTag(Level level) {
             switch (level) {
@@ -57,6 +62,19 @@ namespace Phisiks::Log {
             g_file << prefix << message << "\n";
             g_file.flush();
         }
+        g_recent.push_back(Record{ level, seconds, message, ++g_lines });
+        if (g_recent.size() > RECENT) g_recent.pop_front();
+    }
+
+    void CopyRecent(std::vector<Record>& out, size_t maxLines) {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        const size_t n = std::min(maxLines, g_recent.size());
+        out.assign(g_recent.end() - std::ptrdiff_t(n), g_recent.end());
+    }
+
+    uint64_t LineCount() {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return g_lines;
     }
 
     const std::string& GetLogFilePath() {

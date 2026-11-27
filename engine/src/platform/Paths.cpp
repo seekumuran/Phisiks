@@ -56,4 +56,20 @@ namespace Phisiks::Platform::Paths {
 #endif
         return {};
     }
+
+    fs::path UserDataDirectory() {
+        auto env = [](const char* name) -> std::string {
+            const char* v = std::getenv(name);
+            return v ? std::string(v) : std::string();
+        };
+#if defined(_WIN32)
+        if (const std::string local = env("LOCALAPPDATA"); !local.empty()) return fs::path(local) / "Phisiks";
+#elif defined(__APPLE__)
+        if (const std::string home = env("HOME"); !home.empty()) return fs::path(home) / "Library" / "Application Support" / "Phisiks";
+#else
+        if (const std::string xdg = env("XDG_DATA_HOME"); !xdg.empty()) return fs::path(xdg) / "phisiks";
+        if (const std::string home = env("HOME"); !home.empty()) return fs::path(home) / ".local" / "share" / "phisiks";
+#endif
+        return {};
+    }
 }

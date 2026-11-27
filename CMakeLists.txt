@@ -4,9 +4,15 @@
 #   PhisiksCore        static library: the engine (engine/include public API, engine/src private)
 #   PhisiksImGui       static library: Dear ImGui + GLFW/OpenGL3 backends + ImGuizmo (vendor/)
 #   PhisiksLua         static library: Lua 5.4 (vendor/lua, C)
-#   PhisiksLab         interactive studio app (apps/lab) + runtime verification harness (tests/runtime)
+#   PhisiksEditor      static library: the editor (apps/editor/src), reused by every app below
+#   Phisiks            the PHISIKS editor (apps/editor)
+#   PhisiksSamples     the engine sample scenes in the editor (examples/samples)
+#   Showcase01..04     four standalone demo programs (examples/0N_*)
+#   ProjectMarina, OldMcDonald   separate example projects built on the engine (projects/)
+#   PhisiksRuntimeTests  runtime verification harness (tests/runtime) hosting all of the above
 #   PhisiksUnitTests   headless unit tests (tests/unit)
-#   assetgen           regenerates the CC0 sample assets in assets/
+#   assetgen           regenerates the CC0 engine / example assets in assets/
+#   projectassetgen    regenerates the example projects' meshes in projects/assets
 #   glprobe, stacksample (Windows), check_layering   tools
 #
 # Backends (cache options)
@@ -21,7 +27,7 @@
 # Dependencies: vendor/ (python tools/fetch_deps.py downloads the portable ones; see docs/BUILD.md).
 
 cmake_minimum_required(VERSION 3.25)
-project(Phisiks VERSION 1.0.0 LANGUAGES C CXX)
+project(Phisiks VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -239,8 +245,8 @@ endfunction()
 
 # ---------------------------------------------------------------------------------------------
 # Showcases (examples/): PhisiksShowcase = the shared framework (examples/common) + the four hero demo
-# scenes; one executable per demo (examples/NN_name/main.cpp). PhisiksLab links the library too
-# (its SHOWCASE playlist launches the same scenes).
+# scenes; one executable per demo (examples/NN_name/main.cpp). The runtime tests and the CAD
+# workspaces of the example projects (CAD ink post pass) link the library too.
 # ---------------------------------------------------------------------------------------------
 file(GLOB PHISIKS_SHOWCASE_SOURCES CONFIGURE_DEPENDS
     ${PHISIKS_ROOT}/examples/common/*.cpp ${PHISIKS_ROOT}/examples/common/*.h
@@ -266,20 +272,83 @@ foreach(entry ${PHISIKS_SHOWCASES})
 endforeach()
 
 # ---------------------------------------------------------------------------------------------
-# PhisiksLab
+# Editor: PhisiksEditor (library) + Phisiks (the editor executable)
 # ---------------------------------------------------------------------------------------------
-file(GLOB_RECURSE PHISIKS_LAB_SOURCES CONFIGURE_DEPENDS
-    ${PHISIKS_ROOT}/apps/lab/src/*.cpp ${PHISIKS_ROOT}/apps/lab/src/*.h
-    ${PHISIKS_ROOT}/tests/runtime/*.cpp ${PHISIKS_ROOT}/tests/runtime/*.h)
-add_executable(PhisiksLab ${PHISIKS_LAB_SOURCES})
-target_include_directories(PhisiksLab PRIVATE ${PHISIKS_ROOT}/apps/lab/src ${PHISIKS_ROOT}/tests/runtime)
-source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_LAB_SOURCES})
-phisiks_executable(PhisiksLab)
-target_link_libraries(PhisiksLab PRIVATE PhisiksShowcase)
+file(GLOB PHISIKS_EDITOR_SOURCES CONFIGURE_DEPENDS ${PHISIKS_ROOT}/apps/editor/src/*.cpp ${PHISIKS_ROOT}/apps/editor/src/*.h)
+list(FILTER PHISIKS_EDITOR_SOURCES EXCLUDE REGEX "/Main\\.cpp$")
+add_library(PhisiksEditor STATIC ${PHISIKS_EDITOR_SOURCES})
+target_include_directories(PhisiksEditor PUBLIC ${PHISIKS_ROOT}/apps/editor/src)
+target_link_libraries(PhisiksEditor PUBLIC PhisiksCore)
+target_compile_definitions(PhisiksEditor PRIVATE PHISIKS_VERSION_STRING="${PROJECT_VERSION}")
+source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_EDITOR_SOURCES})
+
+add_executable(Phisiks ${PHISIKS_ROOT}/apps/editor/src/Main.cpp)
+target_link_libraries(Phisiks PRIVATE PhisiksEditor)
+phisiks_executable(Phisiks)
 
 # ---------------------------------------------------------------------------------------------
-# Layering + brand check (strict, runs before the engine builds): apps/ and tests/runtime use only
-# the public engine API, and no project file references names of the code base Phisiks replaced.
+# Samples (examples/samples): the engine sample scenes (library PhisiksSampleScenes) and the
+# PhisiksSamples executable (the scenes inside the editor with a sample browser).
+# ---------------------------------------------------------------------------------------------
+file(GLOB PHISIKS_SAMPLE_SOURCES CONFIGURE_DEPENDS ${PHISIKS_ROOT}/examples/samples/src/*.cpp ${PHISIKS_ROOT}/examples/samples/src/*.h)
+list(FILTER PHISIKS_SAMPLE_SOURCES EXCLUDE REGEX "/main\\.cpp$")
+add_library(PhisiksSampleScenes STATIC ${PHISIKS_SAMPLE_SOURCES})
+target_include_directories(PhisiksSampleScenes PUBLIC ${PHISIKS_ROOT}/examples/samples/src)
+target_link_libraries(PhisiksSampleScenes PUBLIC PhisiksEditor)
+source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_SAMPLE_SOURCES})
+add_executable(PhisiksSamples ${PHISIKS_ROOT}/examples/samples/src/main.cpp)
+target_link_libraries(PhisiksSamples PRIVATE PhisiksSampleScenes)
+phisiks_executable(PhisiksSamples)
+set_target_properties(PhisiksSamples PROPERTIES FOLDER Examples)
+
+# ---------------------------------------------------------------------------------------------
+# Example projects (projects/): separate applications built on the engine and the editor.
+#   PhisiksProjectKit    shared building blocks + the CAD workspace framework (projects/common)
+#   ProjectMarina        Project Marina engineering scene (projects/ProjectMarina)
+#   OldMcDonald          Old-McDonald greenhouse mission + rover / drone CAD (projects/OldMcDonald)
+# ---------------------------------------------------------------------------------------------
+option(PHISIKS_BUILD_PROJECTS "Build the example projects in projects/ (and the runtime tests, which host them)" ON)
+if(PHISIKS_BUILD_PROJECTS)
+    file(GLOB PHISIKS_PROJECTKIT_SOURCES CONFIGURE_DEPENDS ${PHISIKS_ROOT}/projects/common/*.cpp ${PHISIKS_ROOT}/projects/common/*.h)
+    add_library(PhisiksProjectKit STATIC ${PHISIKS_PROJECTKIT_SOURCES})
+    target_include_directories(PhisiksProjectKit PUBLIC ${PHISIKS_ROOT}/projects/common)
+    target_link_libraries(PhisiksProjectKit PUBLIC PhisiksEditor PhisiksShowcase)
+    set_target_properties(PhisiksProjectKit PROPERTIES FOLDER Projects)
+    foreach(project ProjectMarina OldMcDonald)
+        file(GLOB sources CONFIGURE_DEPENDS ${PHISIKS_ROOT}/projects/${project}/src/*.cpp ${PHISIKS_ROOT}/projects/${project}/src/*.h)
+        list(FILTER sources EXCLUDE REGEX "/Main\\.cpp$")
+        add_library(${project}Scenes STATIC ${sources})
+        target_include_directories(${project}Scenes PUBLIC ${PHISIKS_ROOT}/projects/${project}/src)
+        target_link_libraries(${project}Scenes PUBLIC PhisiksProjectKit)
+        source_group(TREE ${PHISIKS_ROOT} FILES ${sources})
+        add_executable(${project} ${PHISIKS_ROOT}/projects/${project}/src/Main.cpp)
+        target_link_libraries(${project} PRIVATE ${project}Scenes)
+        phisiks_executable(${project})
+        set_target_properties(${project} ${project}Scenes PROPERTIES FOLDER Projects)
+    endforeach()
+
+    # projectassetgen: regenerates projects/assets (deterministic; outputs are committed). The mesh
+    # dimensions come from the projects' spec headers.
+    add_executable(projectassetgen ${PHISIKS_ROOT}/projects/tools/projectassetgen.cpp
+        ${PHISIKS_ROOT}/projects/tools/MarinaMeshes.cpp ${PHISIKS_ROOT}/projects/tools/OldMcDonaldMeshes.cpp)
+    target_include_directories(projectassetgen PRIVATE ${PHISIKS_VENDOR}/glm ${PHISIKS_ROOT}/tools/assetgen
+        ${PHISIKS_ROOT}/projects/ProjectMarina/src ${PHISIKS_ROOT}/projects/OldMcDonald/src)
+    phisiks_output(projectassetgen)
+    set_target_properties(projectassetgen PROPERTIES FOLDER Projects)
+
+    # Runtime verification harness (tests/runtime): every scene above in the real application loop.
+    file(GLOB PHISIKS_RUNTIME_TEST_SOURCES CONFIGURE_DEPENDS ${PHISIKS_ROOT}/tests/runtime/*.cpp ${PHISIKS_ROOT}/tests/runtime/*.h)
+    add_executable(PhisiksRuntimeTests ${PHISIKS_RUNTIME_TEST_SOURCES})
+    target_include_directories(PhisiksRuntimeTests PRIVATE ${PHISIKS_ROOT}/tests/runtime)
+    target_link_libraries(PhisiksRuntimeTests PRIVATE PhisiksSampleScenes ProjectMarinaScenes OldMcDonaldScenes PhisiksShowcase)
+    phisiks_executable(PhisiksRuntimeTests)
+    source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_RUNTIME_TEST_SOURCES})
+endif()
+
+# ---------------------------------------------------------------------------------------------
+# Layering + brand check (strict, runs before the engine builds): apps/, examples/, projects/ and
+# tests/runtime use only the public engine API, and no project file references names of the code
+# base Phisiks replaced.
 # ---------------------------------------------------------------------------------------------
 add_custom_target(check_layering ALL
     COMMAND ${CMAKE_COMMAND} -DPHISIKS_ROOT=${PHISIKS_ROOT} -P ${PHISIKS_ROOT}/tools/check_layering.cmake
@@ -292,10 +361,8 @@ add_dependencies(PhisiksCore check_layering)
 # ---------------------------------------------------------------------------------------------
 # assetgen: regenerates the CC0 sample assets in assets/ (deterministic; outputs are committed).
 add_executable(assetgen ${PHISIKS_ROOT}/tools/assetgen/assetgen.cpp ${PHISIKS_ROOT}/tools/assetgen/HeroMeshes.cpp
-    ${PHISIKS_ROOT}/tools/assetgen/MarinaMeshes.cpp ${PHISIKS_ROOT}/tools/assetgen/OldMcDonaldMeshes.cpp
     ${PHISIKS_ROOT}/tools/assetgen/MeshKit.h)
-# apps/lab/src for MarinaSpec.h / OldMcDonaldSpec.h (project dimensions, shared with the PhisiksLab scenes)
-target_include_directories(assetgen PRIVATE ${PHISIKS_VENDOR}/stb_image ${PHISIKS_VENDOR}/glm ${PHISIKS_ROOT}/apps/lab/src)
+target_include_directories(assetgen PRIVATE ${PHISIKS_VENDOR}/stb_image ${PHISIKS_VENDOR}/glm)
 phisiks_output(assetgen)
 
 # glprobe: checks whether the current GPU/driver meets the renderer's requirements.
@@ -329,7 +396,7 @@ add_test(NAME Layering COMMAND ${CMAKE_COMMAND} -DPHISIKS_ROOT=${PHISIKS_ROOT} -
 # run must export PNG frames (skipped with -DSKIP_RENDER=ON where no display is available).
 option(PHISIKS_TEST_SKIP_RENDER "Skip the rendered part of the DeterministicReplay test (no display)" OFF)
 add_test(NAME DeterministicReplay
-    COMMAND ${CMAKE_COMMAND} -DLAB=$<TARGET_FILE:PhisiksLab> -DWORK=${CMAKE_BINARY_DIR}/replay_test
+    COMMAND ${CMAKE_COMMAND} -DLAB=$<TARGET_FILE:PhisiksSamples> -DWORK=${CMAKE_BINARY_DIR}/replay_test
             -DSKIP_RENDER=${PHISIKS_TEST_SKIP_RENDER}
             -P ${PHISIKS_ROOT}/tools/test_deterministic_replay.cmake
     WORKING_DIRECTORY ${PHISIKS_ROOT})
@@ -344,20 +411,31 @@ foreach(entry ${PHISIKS_SHOWCASES})
     add_test(NAME ${target} COMMAND ${target} --autotest --quick --hidden --run-dir ${CMAKE_BINARY_DIR}/showcase_runs/${target}
              WORKING_DIRECTORY ${PHISIKS_ROOT})
 endforeach()
+# The runtime verification harness on both feature tiers (editor, samples, showcases, example
+# projects; exit code = failed checks). It needs a window with an OpenGL context.
+if(PHISIKS_BUILD_PROJECTS)
+    add_test(NAME RuntimeTests COMMAND PhisiksRuntimeTests --autotest --run-dir ${CMAKE_BINARY_DIR}/runtime_tests/gl46 WORKING_DIRECTORY ${PHISIKS_ROOT})
+    add_test(NAME RuntimeTestsGL41 COMMAND PhisiksRuntimeTests --autotest --gl41 --run-dir ${CMAKE_BINARY_DIR}/runtime_tests/gl41 WORKING_DIRECTORY ${PHISIKS_ROOT})
+    set_tests_properties(RuntimeTests RuntimeTestsGL41 PROPERTIES TIMEOUT 1200 RUN_SERIAL TRUE)
+endif()
 endif()
 
 # ---------------------------------------------------------------------------------------------
 # Install + package: a self-contained, portable release folder (no build tools needed to run).
 #   cmake --install Build/vs2026 --config Release --prefix <dir>
-#   cpack --config Build/vs2026/CPackConfig.cmake -C Release      -> dist/Phisiks-1.0.0-win64.zip
+#   cpack --config Build/vs2026/CPackConfig.cmake -C Release      -> dist/Phisiks-<version>-win64[-physx].zip
 # Layout (everything flat next to the executables; assets resolve relative to the executable):
-#   PhisiksLab, Showcase01_RoboticArm .. Showcase04_TurbineCad, glprobe
+#   Phisiks (editor), PhisiksSamples, Showcase01_RoboticArm .. Showcase04_TurbineCad,
+#   ProjectMarina, OldMcDonald (projects/: their scene files, meshes and READMEs), glprobe
 #   *.dll / runtime libraries (PhysX on Windows when that backend is built, the MSVC runtime)
 #   assets/   meshes, textures, models, audio, post-pass shaders (assets/shaders), Lua (assets/scripts)
 #   shaders/  the engine GLSL sources (embedded in the executables; used by --hot-reload)
 #   LICENSE, THIRD_PARTY_NOTICES.md, README.md, QUICKSTART.txt
 # ---------------------------------------------------------------------------------------------
-set(PHISIKS_PACKAGE_TARGETS PhisiksLab glprobe)
+set(PHISIKS_PACKAGE_TARGETS Phisiks PhisiksSamples glprobe)
+if(PHISIKS_BUILD_PROJECTS)
+    list(APPEND PHISIKS_PACKAGE_TARGETS ProjectMarina OldMcDonald)
+endif()
 foreach(entry ${PHISIKS_SHOWCASES})
     string(REPLACE ":" ";" parts ${entry})
     list(GET parts 0 target)
@@ -369,7 +447,7 @@ if(PHISIKS_RUNTIME_DLLS)
 endif()
 if(WIN32)
     # Imported shared libraries (e.g. a vcpkg PhysX), if any.
-    install(FILES $<TARGET_RUNTIME_DLLS:PhisiksLab> DESTINATION . OPTIONAL)
+    install(FILES $<TARGET_RUNTIME_DLLS:Phisiks> DESTINATION . OPTIONAL)
     # The MSVC C/C++ runtime, app-local (no Visual C++ Redistributable install needed).
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
     set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)                                      # UCRT ships with Windows 10+
@@ -382,16 +460,22 @@ elseif(UNIX)
     set_target_properties(${PHISIKS_PACKAGE_TARGETS} PROPERTIES INSTALL_RPATH "$ORIGIN")
 endif()
 install(DIRECTORY ${PHISIKS_ROOT}/assets/ DESTINATION assets)
-install(DIRECTORY ${PHISIKS_ROOT}/projects/ DESTINATION projects)   # engineering project files (Old-McDonald scene, docs)
+if(PHISIKS_BUILD_PROJECTS)   # example projects: scene files, meshes and READMEs (no sources)
+    install(DIRECTORY ${PHISIKS_ROOT}/projects/ DESTINATION projects
+            PATTERN "src" EXCLUDE PATTERN "tools" EXCLUDE PATTERN "common" EXCLUDE PATTERN "CMakeLists.txt" EXCLUDE)
+endif()
 install(DIRECTORY ${PHISIKS_ROOT}/engine/shaders/ DESTINATION shaders FILES_MATCHING PATTERN "*.glsl")
 install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md
               ${PHISIKS_ROOT}/packaging/QUICKSTART.txt DESTINATION .)
 
-if(WIN32)
+if(WIN32 AND PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
+    set(PHISIKS_PACKAGE_SYSTEM win64-physx)   # distinct name: the CI / portable archive is native physics
+    set(PHISIKS_PACKAGE_GENERATOR ZIP)
+elseif(WIN32)
     set(PHISIKS_PACKAGE_SYSTEM win64)
     set(PHISIKS_PACKAGE_GENERATOR ZIP)
 elseif(APPLE)
-    set(PHISIKS_PACKAGE_SYSTEM macos)
+    set(PHISIKS_PACKAGE_SYSTEM macos-${CMAKE_SYSTEM_PROCESSOR})
     set(PHISIKS_PACKAGE_GENERATOR ZIP)
 else()
     set(PHISIKS_PACKAGE_SYSTEM linux-${CMAKE_SYSTEM_PROCESSOR})
@@ -399,7 +483,7 @@ else()
 endif()
 set(CPACK_PACKAGE_NAME Phisiks)
 set(CPACK_PACKAGE_VENDOR "The Phisiks authors")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Phisiks: real-time physics + rendering engine, PhisiksLab studio and four showcases")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "PHISIKS: a general-purpose 3D engine and editor (C++20, OpenGL)")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_RESOURCE_FILE_LICENSE ${PHISIKS_ROOT}/LICENSE)
 set(CPACK_GENERATOR ${PHISIKS_PACKAGE_GENERATOR})

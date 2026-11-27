@@ -50,7 +50,7 @@ function(phisiks_check_includes dirs allow_local out_count)
 endfunction()
 
 phisiks_check_includes("engine/include" FALSE public_violations)
-phisiks_check_includes("apps;examples;tests/runtime" TRUE app_violations)
+phisiks_check_includes("apps;examples;projects/common;projects/ProjectMarina/src;projects/OldMcDonald/src;tests/runtime" TRUE app_violations)
 
 set(unit_violations 0)
 file(GLOB unit_files "${PHISIKS_ROOT}/tests/unit/*.cpp" "${PHISIKS_ROOT}/tests/unit/*.h")
@@ -67,7 +67,7 @@ endforeach()
 set(BRAND_REGEX "[Hh][Ee][Ll][Ll]2025|[Uu][Nn][Ll][Oo][Vv][Ee][Dd]|[Ll][Ee][Gg][Aa][Cc][Yy]|[Vv][Ee][Tt][Tt][Aa][Ii]|[Mm][Aa][Nn][Nn][Aa][Nn]|H[e]ll::|H[e]ll/")
 set(brand_violations 0)
 set(brand_files)
-foreach(dir engine apps tests tools assets docs examples)
+foreach(dir engine apps tests tools assets docs examples projects)
     file(GLOB_RECURSE found
         "${PHISIKS_ROOT}/${dir}/*.h" "${PHISIKS_ROOT}/${dir}/*.hpp" "${PHISIKS_ROOT}/${dir}/*.cpp" "${PHISIKS_ROOT}/${dir}/*.c"
         "${PHISIKS_ROOT}/${dir}/*.glsl" "${PHISIKS_ROOT}/${dir}/*.cmake" "${PHISIKS_ROOT}/${dir}/*.txt"

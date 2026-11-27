@@ -7,4 +7,6 @@ namespace Phisiks::Platform::Paths {
     // Per-user cache root: %LOCALAPPDATA%\Phisiks (Windows), ~/Library/Caches/Phisiks (macOS),
     // $XDG_CACHE_HOME/phisiks or ~/.cache/phisiks (Linux). Empty if none can be determined.
     std::filesystem::path UserCacheDirectory();
+    // Per-user data root (see Phisiks/Platform/System.h UserDataDirectory).
+    std::filesystem::path UserDataDirectory();
 }

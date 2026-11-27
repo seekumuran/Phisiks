@@ -36,6 +36,7 @@ namespace Phisiks::Platform {
     bool ShouldClose();              // user closed the window or RequestClose() was called
     void RequestClose();
     bool CloseWasRequestedByApp();
+    void CancelClose();              // the user's close request is ignored (the window stays open)
     bool HasFocus();
     bool IsMinimized();
 

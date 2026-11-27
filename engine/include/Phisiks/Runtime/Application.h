@@ -30,6 +30,7 @@ namespace Phisiks {
         bool fullscreen = false;
         int windowWidth = 0, windowHeight = 0;             // client size (0 = 75 % of the primary monitor)
         bool vsync = false;
+        bool captureCursor = true;        // first-person start (cursor captured); editors start with a free cursor
         uint64_t maxFrames = 0;                            // 0 = unlimited (safety cap for automated runs)
 
         // Simulation / recording
@@ -75,6 +76,7 @@ namespace Phisiks {
         bool m_initialized = false;
         bool m_shutDown = false;
         bool m_rendererReady = false;
+        bool m_userQuit = false;          // Q while paused: asks IGame::OnQuitRequested first
         std::unique_ptr<class Recorder> m_recorder;
     };
 }

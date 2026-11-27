@@ -13,10 +13,6 @@
 //     audio/siren.wav           2 s seamless two-tone siren loop (guard bots), 44.1 kHz mono 16-bit
 //     meshes/hero/*.obj         P11 hero showcase meshes (robot arm, turbine assembly, pool basin,
 //                               studio cyclorama, frame arrow): see HeroMeshes.cpp
-//     meshes/marina/*.obj       Project Marina engineering assembly parts and the tubing / wiring
-//                               kit (PhisiksLab "ProjectMarina" scene): see MarinaMeshes.cpp
-//     meshes/oldmcdonald/*.obj  Old-McDonald greenhouse, mapping drone and soil rover parts
-//                               (PhisiksLab "OldMcDonald" scene): see OldMcDonaldMeshes.cpp
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -33,8 +29,6 @@
 namespace fs = std::filesystem;
 
 bool HeroMeshes(const fs::path& out);     // HeroMeshes.cpp
-bool MarinaMeshes(const fs::path& out);   // MarinaMeshes.cpp
-bool OldMcDonaldMeshes(const fs::path& out);   // OldMcDonaldMeshes.cpp
 
 namespace {
     constexpr double PI = 3.14159265358979323846;
@@ -420,8 +414,6 @@ int main(int argc, char** argv) {
     ok &= SaveWav(EngineLoop(44100), 44100, out / "audio/engine_loop.wav");
     ok &= SaveWav(Siren(44100), 44100, out / "audio/siren.wav");
     ok &= HeroMeshes(out);
-    ok &= MarinaMeshes(out);
-    ok &= OldMcDonaldMeshes(out);
     std::printf("assetgen: %s -> %s\n", ok ? "ok" : "FAILED", out.string().c_str());
     return ok ? 0 : 1;
 }

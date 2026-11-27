@@ -196,10 +196,25 @@ namespace Phisiks::UI::Retro {
     }
 
     // ---------------------------------------------------------------------------------- panel
+    namespace {
+        bool PanelFrame(const char* title, bool visible);
+    }
+
     bool BeginPanel(const char* title, float x, float y, float width, float height, bool* open) {
         ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_FirstUseEver);
-        const bool visible = ImGui::Begin(title, open);
+        return PanelFrame(title, ImGui::Begin(title, open));
+    }
+
+    bool BeginDockedPanel(const char* title, float x, float y, float width, float height, int flags) {
+        ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
+        return PanelFrame(title, ImGui::Begin(title, nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                                                              ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | flags));
+    }
+
+    namespace {
+    bool PanelFrame(const char* title, bool visible) {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 p = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
         const ImVec2 q(p.x + size.x, p.y + size.y);
@@ -236,6 +251,7 @@ namespace Phisiks::UI::Retro {
         }
         ++g_current.panels;
         return visible;
+    }
     }
 
     void EndPanel() { ImGui::End(); }

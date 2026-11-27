@@ -21,6 +21,9 @@ namespace Phisiks::UI::Retro {
 
     // Panel with the bevelled frame and the amber double-striped title "=== TITLE ===".
     bool BeginPanel(const char* title, float x, float y, float width, float height = 0.0f, bool* open = nullptr);
+    // Same frame, pinned to (x, y, width, height) every frame (editor layouts: not movable or resizable
+    // by dragging; the caller lays the panels out). `flags` are extra ImGuiWindowFlags.
+    bool BeginDockedPanel(const char* title, float x, float y, float width, float height, int flags = 0);
     void EndPanel();
 
     // Top menu bar of the console (an ImGui main menu bar with a raised bevel and a title plate).

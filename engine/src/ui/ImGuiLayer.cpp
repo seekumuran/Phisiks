@@ -4,6 +4,11 @@
 #include "Phisiks/UI/RetroDeck.h"
 
 #include <glad/gl.h>
+#include <GLFW/glfw3.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include <imgui_impl_glfw.h>
@@ -16,7 +21,28 @@ namespace Phisiks::UI {
         int g_vertices = 0;
 
         bool g_panelsVisible = true;
+        float g_scale = 1.0f;
+
+        // UI scale: the monitor's content scale (Windows / Linux report window sizes in pixels; macOS
+        // in points, where the backend already renders at the framebuffer scale), overridable with
+        // PHISIKS_UI_SCALE (e.g. 1.25).
+        float ContentScale(GLFWwindow* window) {
+            if (const char* env = std::getenv("PHISIKS_UI_SCALE")) {
+                const float s = float(std::atof(env));
+                if (s >= 0.5f && s <= 4.0f) return s;
+            }
+#if defined(__APPLE__)
+            (void)window;
+            return 1.0f;
+#else
+            float x = 1.0f, y = 1.0f;
+            glfwGetWindowContentScale(window, &x, &y);
+            return std::clamp(std::max(x, y), 1.0f, 4.0f);
+#endif
+        }
     }
+
+    float Scale() { return g_scale; }
 
     bool Init() {
         if (g_active) return true;
@@ -26,13 +52,21 @@ namespace Phisiks::UI {
         ImGuiIO& io = ImGui::GetIO();
         io.IniFilename = nullptr;   // layout is code-defined (no imgui.ini in the working directory)
         Retro::ApplyTheme();
-        if (!ImGui_ImplGlfw_InitForOpenGL(static_cast<GLFWwindow*>(Platform::GetNativeHandle()), true) || !ImGui_ImplOpenGL3_Init("#version 410")) {
+        GLFWwindow* window = static_cast<GLFWwindow*>(Platform::GetNativeHandle());
+        g_scale = ContentScale(window);
+        if (g_scale > 1.01f) {   // crisp text at high DPI: the built-in font rasterised at the scaled size
+            ImFontConfig font;
+            font.SizePixels = std::round(13.0f * g_scale);
+            io.Fonts->AddFontDefault(&font);
+            ImGui::GetStyle().ScaleAllSizes(g_scale);
+        }
+        if (!ImGui_ImplGlfw_InitForOpenGL(window, true) || !ImGui_ImplOpenGL3_Init("#version 410")) {
             Log::Error() << "UI: Dear ImGui backend initialisation failed";
             ImGui::DestroyContext();
             return false;
         }
         g_active = true;
-        Log::Info() << "UI: Dear ImGui " << IMGUI_VERSION << " ready";
+        Log::Info() << "UI: Dear ImGui " << IMGUI_VERSION << " ready (scale " << g_scale << ")";
         return true;
     }
 

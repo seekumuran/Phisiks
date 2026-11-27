@@ -117,12 +117,29 @@ def main():
                     write("lua/" + parts[1], f.read())
     if need("glad/src/gl.c"):
         print("glad " + GLAD + " (pip install glad2==%s)" % GLAD)
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "glad2==" + GLAD])
+        python = glad_python()
         out = os.path.join(VENDOR, "glad")
         shutil.rmtree(out, ignore_errors=True)
-        subprocess.check_call([sys.executable, "-m", "glad", "--api", "gl:core=4.6", "--extensions", GLAD_EXTENSIONS,
+        subprocess.check_call([python, "-m", "glad", "--api", "gl:core=4.6", "--extensions", GLAD_EXTENSIONS,
                                "--out-path", out, "c", "--loader", "--debug"])
     print("vendor/ ready")
+
+
+def glad_python():
+    """A Python interpreter with glad2 installed. The current interpreter is used when pip may install
+    into it; an "externally managed" interpreter (PEP 668: Homebrew Python on macOS, Debian / Ubuntu
+    system Python) gets a private virtual environment in vendor/.glad-venv instead."""
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "glad2==" + GLAD])
+        return sys.executable
+    except subprocess.CalledProcessError:
+        print("  pip refused the current interpreter; using a virtual environment (vendor/.glad-venv)")
+    venv = os.path.join(VENDOR, ".glad-venv")
+    if not os.path.isdir(venv):
+        subprocess.check_call([sys.executable, "-m", "venv", venv])
+    python = os.path.join(venv, "Scripts", "python.exe") if os.name == "nt" else os.path.join(venv, "bin", "python")
+    subprocess.check_call([python, "-m", "pip", "install", "--quiet", "glad2==" + GLAD])
+    return python
 
 
 def patch_imguizmo():

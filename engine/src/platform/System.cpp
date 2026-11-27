@@ -1,5 +1,8 @@
 #include "Phisiks/Platform/System.h"
+#include "platform/Paths.h"
 
+#include <filesystem>
+#include <fstream>
 #include <thread>
 
 #if defined(_WIN32)
@@ -63,5 +66,20 @@ namespace Phisiks::Platform {
 #else
         return "Linux";
 #endif
+    }
+
+    std::string ExecutableDirectory() { return Paths::ExecutableDirectory().string(); }
+    std::string UserDataDirectory() { return Paths::UserDataDirectory().string(); }
+
+    bool IsWritableDirectory(const std::string& directory) {
+        namespace fs = std::filesystem;
+        if (directory.empty()) return false;
+        std::error_code ec;
+        fs::create_directories(directory, ec);
+        if (!fs::is_directory(directory, ec)) return false;
+        const fs::path probe = fs::path(directory) / ".phisiks_write_probe";
+        { std::ofstream f(probe, std::ios::binary | std::ios::trunc); if (!f || !(f << 'x')) return false; }
+        fs::remove(probe, ec);
+        return true;
     }
 }

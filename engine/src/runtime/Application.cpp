@@ -5,6 +5,7 @@
 #include "Phisiks/Core/Time.h"
 #include "Phisiks/Framework/DebugOverlay.h"
 #include "Phisiks/Platform/Window.h"
+#include "Phisiks/Platform/System.h"
 #include "Phisiks/Core/InputState.h"
 #include "Phisiks/Physics/Physics.h"
 #include "core/CrashHandler.h"
@@ -38,8 +39,20 @@ namespace Phisiks {
         m_options = options;
         m_game = &game;
         m_harness = std::move(harness);
-        Log::Init(options.runDirectory + "/engine.log");
-        CrashHandler::Install(options.runDirectory);
+        // Logs and crash dumps go to the run directory (relative to the working directory). A read-only
+        // install folder falls back to the per-user data folder, so they are never lost silently.
+        std::string fallbackNote;
+        if (!Platform::IsWritableDirectory(m_options.runDirectory)) {
+            const std::string user = Platform::UserDataDirectory();
+            const std::string fallback = user.empty() ? std::string() : user + "/runs/latest";
+            if (!fallback.empty() && Platform::IsWritableDirectory(fallback)) {
+                fallbackNote = m_options.runDirectory;
+                m_options.runDirectory = fallback;
+            }
+        }
+        Log::Init(m_options.runDirectory + "/engine.log");
+        CrashHandler::Install(m_options.runDirectory);
+        if (!fallbackNote.empty()) Log::Warning() << "Run directory '" << fallbackNote << "' is not writable; logs and crash dumps go to " << m_options.runDirectory;
         Log::Info() << "Application::Init (scene '" << options.initialScene << "'" << (m_harness ? ", test harness" : "") << ")";
 
         SetState(GameState::Booting);
@@ -113,7 +126,16 @@ namespace Phisiks {
     int Application::Run() {
         if (!m_initialized) return 2;
 
-        while (!m_ctx.quitRequested && !(Platform::HasWindow() && Platform::ShouldClose())) {
+        while (true) {
+            if (m_ctx.quitRequested) break;
+            // A user quit (window close button, Q while paused) asks the game first.
+            const bool windowClose = Platform::HasWindow() && Platform::ShouldClose();
+            if (windowClose && Platform::CloseWasRequestedByApp()) break;
+            if (windowClose || m_userQuit) {
+                if (m_harness || m_game->OnQuitRequested(m_ctx)) break;
+                if (windowClose) Platform::CancelClose();
+                m_userQuit = false;
+            }
             Profiler::Get().BeginFrame();
             if (m_rendererReady) GpuTimer::Get().BeginFrame();   // collects GPU results that are ready; never waits
             {
@@ -131,7 +153,7 @@ namespace Phisiks {
                     while (Time::ConsumeFixedStep()) {}   // startup time is not simulated: game frame N = fixed step N
                     m_game->OnStart(m_ctx);
                     m_scenes.Request(m_options.initialScene);
-                    SetCursor(Platform::CursorMode::Captured);
+                    SetCursor(m_options.captureCursor ? Platform::CursorMode::Captured : Platform::CursorMode::Normal);
                     if (m_rendererReady) Render::Internal::RenderFrame();
                 }
                 else {
@@ -177,7 +199,7 @@ namespace Phisiks {
         }
         if (m_ctx.state == GameState::Paused && input.Pressed(Action::Quit)) {
             Log::Info() << "Quit requested from pause";
-            m_ctx.quitRequested = true;
+            m_userQuit = true;
         }
         if (input.Pressed(Action::ToggleOverlay)) m_ctx.overlayVisible = !m_ctx.overlayVisible;
         if (input.Pressed(Action::TogglePhysicsDebug)) m_ctx.physicsDebugDraw = !m_ctx.physicsDebugDraw;

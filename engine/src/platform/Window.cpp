@@ -156,6 +156,7 @@ namespace Phisiks::Platform {
     bool ShouldClose()            { return !g.window || g.appRequestedClose || glfwWindowShouldClose(g.window); }
     void RequestClose()           { g.appRequestedClose = true; }
     bool CloseWasRequestedByApp() { return g.appRequestedClose; }
+    void CancelClose()            { if (g.window) glfwSetWindowShouldClose(g.window, GLFW_FALSE); }
     bool HasFocus()               { return g.focused; }
 
     bool IsMinimized() {

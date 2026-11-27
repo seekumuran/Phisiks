@@ -1,11 +1,13 @@
-# Build check: Linux (GCC) and Windows (MSVC). macOS is not checked here (GitHub rejected the
-# macos-14 runner configuration); build it locally with the macos-release preset. Both build the portable configuration: native physics + miniaudio + GLFW from the system or
-# CMake FetchContent, with the portable third-party sources fetched by tools/fetch_deps.py (the
-# Windows PhysX build needs the vendored SDK binaries and is checked locally, see docs/BUILD.md).
-# Runners have no GPU: the headless unit tests and the headless deterministic-replay test run
-# everywhere; Linux additionally tries the runtime autotest on Mesa llvmpipe (software OpenGL,
-# 4.1 tier) under Xvfb, reported but not blocking. PHISIKS_TEST_SKIP_RENDER=ON also skips the four
-# showcase autotests (they need an OpenGL context).
+# Build check on Windows (MSVC), Linux (GCC) and macOS (Apple Clang). All three build the portable
+# configuration: native physics + miniaudio + GLFW (system / bundled), with the portable third-party
+# sources fetched by tools/fetch_deps.py. The Windows PhysX build needs the vendored SDK binaries
+# and is checked locally (BUILD_WINDOWS.md).
+#
+# Runners have no GPU. The build jobs run the headless ctest (unit tests, layering, deterministic
+# replay; PHISIKS_TEST_SKIP_RENDER=ON skips the tests that need an OpenGL window). The rendered
+# runtime tests run in their own jobs on software OpenGL (Linux: Mesa llvmpipe under Xvfb; macOS:
+# the runner's OpenGL 4.1): those jobs are not required for the build to pass, but their failures
+# are shown as failed jobs, not hidden.
 name: ci
 
 on:
@@ -14,33 +16,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  linux:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: System packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build libglfw3-dev libgl1-mesa-dev libasound2-dev xvfb mesa-utils
-      - name: Third-party sources
-        run: python3 tools/fetch_deps.py
-      - name: Configure
-        run: cmake --preset linux-release -DPHISIKS_TEST_SKIP_RENDER=ON
-      - name: Build
-        run: cmake --build --preset linux-release --parallel
-      - name: Tests (unit, layering, deterministic replay)
-        run: ctest --preset linux-release
-      - name: Runtime autotest on llvmpipe (OpenGL 4.1 tier, informational)
-        continue-on-error: true
-        timeout-minutes: 30
-        run: xvfb-run -a -s "-screen 0 1280x800x24" ./Build/bin-linux-release/Release/PhisiksLab --autotest --gl41 --run-dir Build/runs/ci
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: linux-runs
-          path: Build/runs
-          if-no-files-found: ignore
-
   windows:
     runs-on: windows-2022
     steps:
@@ -53,6 +28,59 @@ jobs:
         run: cmake --build Build/ci --config Release --parallel
       - name: Tests (unit, layering, deterministic replay)
         run: ctest --test-dir Build/ci -C Release --output-on-failure
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libglfw3-dev libgl1-mesa-dev libasound2-dev
+          gcc --version
+          cmake --version
+      - name: Third-party sources
+        run: python3 tools/fetch_deps.py
+      - name: Configure
+        run: cmake --preset linux-release -DPHISIKS_TEST_SKIP_RENDER=ON
+      - name: Build
+        run: cmake --build --preset linux-release --parallel
+      - name: Tests (unit, layering, deterministic replay)
+        run: ctest --preset linux-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-bin
+          path: Build/bin-linux-release
+          retention-days: 3
+
+  linux-runtime:
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages (Mesa llvmpipe, Xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglfw3 libgl1 libgl1-mesa-dri libasound2t64 xvfb mesa-utils
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-bin
+          path: Build/bin-linux-release
+      - name: OpenGL on the runner
+        run: xvfb-run -a -s "-screen 0 1280x800x24" glxinfo -B | grep -E "OpenGL (renderer|core profile version)" || true
+      - name: Runtime tests, OpenGL 4.1 tier on llvmpipe
+        run: |
+          chmod +x Build/bin-linux-release/Release/*
+          xvfb-run -a -s "-screen 0 1280x800x24" ./Build/bin-linux-release/Release/PhisiksRuntimeTests --autotest --gl41 --run-dir Build/runs/ci-linux
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-runtime-report
+          path: |
+            Build/runs/ci-linux/autotest_report.txt
+            Build/runs/ci-linux/engine.log
+          if-no-files-found: ignore
 
   macos:
     runs-on: macos-15
@@ -72,3 +100,31 @@ jobs:
         run: cmake --build --preset macos-release --parallel
       - name: Tests (unit, layering, deterministic replay)
         run: ctest --preset macos-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bin
+          path: Build/bin-macos-release
+          retention-days: 3
+
+  macos-runtime:
+    needs: macos
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-bin
+          path: Build/bin-macos-release
+      - name: Runtime tests, OpenGL 4.1 (the macOS tier)
+        run: |
+          chmod +x Build/bin-macos-release/Release/*
+          ./Build/bin-macos-release/Release/PhisiksRuntimeTests --autotest --gl41 --run-dir Build/runs/ci-macos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-runtime-report
+          path: |
+            Build/runs/ci-macos/autotest_report.txt
+            Build/runs/ci-macos/engine.log
+          if-no-files-found: ignore

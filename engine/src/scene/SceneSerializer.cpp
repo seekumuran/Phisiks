@@ -17,12 +17,15 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
+#include <stdexcept>
 #include <set>
 #include <sstream>
 
 namespace Phisiks::SceneSerializer {
     namespace {
         using json = nlohmann::json;
+        constexpr int FORMAT_VERSION = 1;   // ToJson writes this; FromJson reads 1..FORMAT_VERSION
         using namespace Physics;
         using namespace Physics::Advanced;
 
@@ -78,7 +81,7 @@ namespace Phisiks::SceneSerializer {
     std::string ToJson(Scene& scene, bool pretty) {
         json root;
         root["format"] = "phisiks-scene";
-        root["version"] = 1;
+        root["version"] = FORMAT_VERSION;
         root["name"] = scene.Name();
         // stable order: by entity id
         std::vector<Entity> entities;
@@ -156,6 +159,9 @@ namespace Phisiks::SceneSerializer {
         return pretty ? root.dump(2) : root.dump();
     }
 
+    // Loading is two-phase: the whole file is parsed and validated into plain component values first,
+    // and the scene is cleared and rebuilt only when that succeeded, so a damaged or incompatible file
+    // never destroys the scene that is open.
     bool FromJson(Scene& scene, const std::string& text, std::string* error) {
         json root;
         try { root = json::parse(text); }
@@ -164,39 +170,63 @@ namespace Phisiks::SceneSerializer {
             if (error) *error = "not a phisiks-scene file";
             return false;
         }
+        const int version = !root.contains("version") ? 1 : root["version"].is_number_integer() ? root["version"].get<int>() : -1;   // no key: version 1
+        if (version < 1 || version > FORMAT_VERSION) {
+            if (error) *error = "unsupported phisiks-scene version " + std::to_string(version) + " (this build reads 1.." + std::to_string(FORMAT_VERSION) + ")";
+            return false;
+        }
+
+        struct Pending {
+            std::string name;
+            int parent = -1;
+            Transform transform;
+            std::optional<MeshRenderer> meshRenderer;
+            std::optional<Light> light;
+            std::optional<Camera> camera;
+            std::optional<Collider> collider;
+            std::optional<Rigidbody> rigidbody;
+            std::optional<AudioSource> audioSource;
+            std::optional<ForceField> forceField;
+            std::optional<ParticleSystem> particleSystem;
+            std::optional<SoftBody> softBody;
+        };
+        std::vector<Pending> pending;
+        std::vector<std::pair<std::string, Render::MaterialDesc>> materials;
         try {
             if (root.contains("materials")) {
-                for (auto it = root["materials"].begin(); it != root["materials"].end(); ++it) Render::RegisterMaterial(it.key(), MaterialFrom(it.value()));
+                for (auto it = root["materials"].begin(); it != root["materials"].end(); ++it) materials.emplace_back(it.key(), MaterialFrom(it.value()));
             }
-            scene.Clear();
             const json& list = root["entities"];
-            std::vector<Entity> created;
+            pending.reserve(list.size());
             for (const json& j : list) {
-                Entity e = scene.CreateEntity(j.value("name", std::string("Entity")));
-                created.push_back(e);
+                Pending e;
+                e.name = j.value("name", std::string("Entity"));
+                e.parent = j.value("parent", -1);
                 if (j.contains("transform")) {
-                    Transform& t = e.Get<Transform>();
-                    Get(j["transform"], "position", t.position); GetQ(j["transform"], "rotation", t.rotation); Get(j["transform"], "scale", t.scale);
+                    Get(j["transform"], "position", e.transform.position); GetQ(j["transform"], "rotation", e.transform.rotation); Get(j["transform"], "scale", e.transform.scale);
                 }
                 if (j.contains("meshRenderer")) {
                     const json& m = j["meshRenderer"];
-                    MeshRenderer& r = e.Add<MeshRenderer>();
+                    MeshRenderer r;
                     Get(m, "mesh", r.mesh); Get(m, "material", r.material); Get(m, "uvScale", r.uvScale); Get(m, "visible", r.visible); Get(m, "castShadows", r.castShadows);
+                    e.meshRenderer = r;
                 }
                 if (j.contains("light")) {
                     const json& l = j["light"];
-                    Light& light = e.Add<Light>();
+                    Light light;
                     light.type = LightOf(NameOr(l, "type", "Point"));
                     Get(l, "color", light.color); Get(l, "intensity", light.intensity); Get(l, "range", light.range);
                     Get(l, "innerConeAngle", light.innerConeAngle); Get(l, "outerConeAngle", light.outerConeAngle); Get(l, "castShadows", light.castShadows);
+                    e.light = light;
                 }
                 if (j.contains("camera")) {
                     const json& c = j["camera"];
-                    Camera& cam = e.Add<Camera>();
+                    Camera cam;
                     if (c.value("orthographic", false)) cam.projection = Projection::Orthographic;
                     Get(c, "verticalFov", cam.verticalFov); Get(c, "orthoHeight", cam.orthoHeight); Get(c, "nearPlane", cam.nearPlane); Get(c, "farPlane", cam.farPlane);
                     Get(c, "viewport", cam.viewport); Get(c, "order", cam.order); Get(c, "target", cam.target); Get(c, "targetSize", cam.targetSize);
                     Get(c, "enabled", cam.enabled); Get(c, "primary", cam.primary);
+                    e.camera = cam;
                 }
                 if (j.contains("collider")) {
                     const json& c = j["collider"];
@@ -209,7 +239,7 @@ namespace Phisiks::SceneSerializer {
                     if (c.contains("layer")) col.layer = Layer(c["layer"].get<int>());
                     if (c.contains("vertices")) for (const json& v : c["vertices"]) col.shape.vertices.push_back({ v.at(0).get<float>(), v.at(1).get<float>(), v.at(2).get<float>() });
                     if (c.contains("indices")) col.shape.indices = c["indices"].get<std::vector<uint32_t>>();
-                    e.Add<Collider>(col);
+                    e.collider = col;
                 }
                 if (j.contains("rigidbody")) {
                     const json& r = j["rigidbody"];
@@ -217,12 +247,13 @@ namespace Phisiks::SceneSerializer {
                     rb.type = BodyOf(NameOr(r, "type", "Dynamic"));
                     Get(r, "mass", rb.mass); Get(r, "linearDamping", rb.linearDamping); Get(r, "angularDamping", rb.angularDamping);
                     Get(r, "continuousCollision", rb.continuousCollision); Get(r, "useGravity", rb.useGravity);
-                    e.Add<Rigidbody>(rb);
+                    e.rigidbody = rb;
                 }
                 if (j.contains("audioSource")) {
                     const json& a = j["audioSource"];
-                    AudioSource& s = e.Add<AudioSource>();
+                    AudioSource s;
                     Get(a, "clip", s.clip); Get(a, "volume", s.volume); Get(a, "loop", s.loop); Get(a, "playOnStart", s.playOnStart);
+                    e.audioSource = s;
                 }
                 if (j.contains("forceField")) {
                     const json& f = j["forceField"];
@@ -231,7 +262,7 @@ namespace Phisiks::SceneSerializer {
                     Get(f, "vector", ff.vector); Get(f, "strength", ff.strength); Get(f, "radius", ff.radius); Get(f, "falloff", ff.falloff); Get(f, "axis", ff.axis);
                     Get(f, "influenceRadius", ff.influenceRadius); Get(f, "softening", ff.softening);
                     Get(f, "affectsRigidBodies", ff.affectsRigidBodies); Get(f, "affectsParticles", ff.affectsParticles); Get(f, "affectsSoftBodies", ff.affectsSoftBodies);
-                    e.Add<ForceField>(ff);
+                    e.forceField = ff;
                 }
                 if (j.contains("particleSystem")) {
                     const json& p = j["particleSystem"];
@@ -241,7 +272,7 @@ namespace Phisiks::SceneSerializer {
                     Get(p, "color", ps.color); Get(p, "fastColor", ps.fastColor); Get(p, "fastSpeed", ps.fastSpeed); Get(p, "seed", ps.seed);
                     Get(p, "emissionRate", ps.emissionRate); Get(p, "lifetime", ps.lifetime); Get(p, "emitDirection", ps.emitDirection);
                     Get(p, "emitSpeed", ps.emitSpeed); Get(p, "emitSpread", ps.emitSpread); Get(p, "pushRigidBodies", ps.pushRigidBodies);
-                    e.Add<ParticleSystem>(ps);
+                    e.particleSystem = ps;
                 }
                 if (j.contains("softBody")) {
                     const json& s = j["softBody"];
@@ -251,30 +282,68 @@ namespace Phisiks::SceneSerializer {
                     Get(s, "bendCompliance", sb.bendCompliance); Get(s, "volumeCompliance", sb.volumeCompliance); Get(s, "pinned", sb.pinned);
                     Get(s, "substeps", sb.substeps); Get(s, "damping", sb.damping); Get(s, "friction", sb.friction); Get(s, "material", sb.material);
                     Get(s, "pushRigidBodies", sb.pushRigidBodies);
-                    e.Add<SoftBody>(sb);
+                    e.softBody = sb;
                 }
+                pending.push_back(std::move(e));
             }
-            for (size_t i = 0; i < list.size() && i < created.size(); ++i) {
-                const int parent = list[i].value("parent", -1);
-                if (parent >= 0 && size_t(parent) < created.size() && size_t(parent) != i) created[i].SetParent(created[size_t(parent)], false);
+            for (size_t i = 0; i < pending.size(); ++i) {   // parent links must point at another entity of the file
+                const int parent = pending[i].parent;
+                if (parent >= 0 && (size_t(parent) >= pending.size() || size_t(parent) == i)) throw std::runtime_error("entity " + std::to_string(i) + " has an invalid parent index");
             }
         }
         catch (const std::exception& e) {
-            if (error) *error = std::string("invalid scene: ") + e.what();
+            if (error) *error = std::string("invalid scene (nothing was changed): ") + e.what();
             return false;
+        }
+
+        // ---- commit (the file is valid)
+        for (const auto& [name, material] : materials) Render::RegisterMaterial(name, material);
+        scene.Clear();
+        std::vector<Entity> created;
+        created.reserve(pending.size());
+        for (const Pending& p : pending) {
+            Entity e = scene.CreateEntity(p.name);
+            created.push_back(e);
+            e.Get<Transform>() = p.transform;
+            if (p.meshRenderer) e.Add<MeshRenderer>(*p.meshRenderer);
+            if (p.light) e.Add<Light>(*p.light);
+            if (p.camera) e.Add<Camera>(*p.camera);
+            if (p.collider) e.Add<Collider>(*p.collider);
+            if (p.rigidbody) e.Add<Rigidbody>(*p.rigidbody);
+            if (p.audioSource) e.Add<AudioSource>(*p.audioSource);
+            if (p.forceField) e.Add<ForceField>(*p.forceField);
+            if (p.particleSystem) e.Add<ParticleSystem>(*p.particleSystem);
+            if (p.softBody) e.Add<SoftBody>(*p.softBody);
+        }
+        for (size_t i = 0; i < pending.size(); ++i) {
+            if (pending[i].parent >= 0) created[i].SetParent(created[size_t(pending[i].parent)], false);
         }
         return true;
     }
 
+    // Atomic save: the scene is written to "<path>.tmp" and renamed over the target only when the
+    // write succeeded, so an interrupted or failed save leaves the previous file intact.
     bool Save(Scene& scene, const std::string& path) {
+        namespace fs = std::filesystem;
         std::error_code ec;
-        const std::filesystem::path parent = std::filesystem::path(path).parent_path();
-        if (!parent.empty()) std::filesystem::create_directories(parent, ec);
-        std::ofstream file(path, std::ios::binary);
-        if (!file) { Log::Error() << "SceneSerializer: cannot write " << path; return false; }
-        file << ToJson(scene);
+        const fs::path target(path);
+        if (target.has_parent_path()) fs::create_directories(target.parent_path(), ec);
+        const fs::path temp = fs::path(path + ".tmp");
+        {
+            std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+            if (!file) { Log::Error() << "SceneSerializer: cannot write " << temp.string(); return false; }
+            file << ToJson(scene);
+            file.flush();
+            if (!file) { file.close(); fs::remove(temp, ec); Log::Error() << "SceneSerializer: write failed for " << temp.string(); return false; }
+        }
+        fs::rename(temp, target, ec);
+        if (ec) {
+            Log::Error() << "SceneSerializer: cannot replace " << path << ": " << ec.message();
+            fs::remove(temp, ec);
+            return false;
+        }
         Log::Info() << "SceneSerializer: saved '" << scene.Name() << "' to " << path;
-        return bool(file);
+        return true;
     }
 
     bool Load(Scene& scene, const std::string& path, std::string* error) {

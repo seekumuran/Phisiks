@@ -23,5 +23,9 @@ namespace Phisiks {
         virtual void OnFixedUpdate(GameContext& /*ctx*/, float /*fixedDeltaTime*/) {}
         virtual void OnShutdown(GameContext& /*ctx*/) {}
         virtual void OnGui(GameContext& /*ctx*/) {}   // Dear ImGui windows (AppOptions::enableUI), after the frame was rendered
+        // The user asked to quit (window close button, or Q while paused). Return false to keep running
+        // (e.g. to ask about unsaved changes first); set GameContext::quitRequested later to quit.
+        // Not called for --max-frames, test harness or RequestClose() quits.
+        virtual bool OnQuitRequested(GameContext& /*ctx*/) { return true; }
     };
 }

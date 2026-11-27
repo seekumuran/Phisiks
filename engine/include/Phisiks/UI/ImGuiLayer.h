@@ -16,4 +16,5 @@ namespace Phisiks::UI {
     // while they are, so nothing overlaps behind the panels).
     void SetPanelsVisible(bool visible);
     bool PanelsVisible();      // IsActive() and not hidden
+    float Scale();             // UI scale factor (monitor DPI or PHISIKS_UI_SCALE; 1 = 96 dpi): multiply layout pixels by it
 }

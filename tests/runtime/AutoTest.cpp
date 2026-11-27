@@ -10,7 +10,7 @@
 #include "RoverCadScene.h"
 #include "DroneCadScene.h"
 #include "CadWorkspace.h"
-#include "Studio.h"
+#include "Editor.h"
 #include "ProjectKit.h"
 #include "SceneBuilder.h"
 #include "P9Scenes.h"
@@ -40,6 +40,9 @@
 #include "Phisiks/Audio/Audio.h"
 
 #include <glm/geometric.hpp>
+#include <imgui.h>
+
+#include <filesystem>
 
 #include <cmath>
 #include <cstdio>
@@ -59,8 +62,8 @@ namespace Phisiks {
         }
         std::string V(const glm::vec3& v) { return F("(%.3f, %.3f, %.3f)", v.x, v.y, v.z); }
 
-        using namespace Lab::Layout;
-        using Lab::PhysicsTowerScene;
+        using namespace Samples::Layout;
+        using Samples::PhysicsTowerScene;
 
         size_t EntityCount(GameContext& ctx) { return ctx.CurrentScene() ? ctx.CurrentScene()->EntityCount() : 0; }
 
@@ -165,7 +168,9 @@ namespace Phisiks {
 
         Step& step = m_steps[m_stepIndex];
         bool done = step.run(ctx);
-        if (!done && (StepSimTime(ctx) > step.timeoutSimSeconds || m_stepFrames > 2000)) {
+        // Frame cap scales with the step's sim-time budget: fast frames (e.g. the OpenGL 4.1 tier at
+        // ~10-20 ms) must not end a long step (the Old-McDonald mission needs ~45 s of simulation).
+        if (!done && (StepSimTime(ctx) > step.timeoutSimSeconds || m_stepFrames > std::max(2000.0, step.timeoutSimSeconds * 100.0))) {
             Expect("completed", false, F("timed out after %.1f s sim / %.0f frames (phase %.0f)", StepSimTime(ctx), double(m_stepFrames), m_phase));
             done = true;
         }
@@ -688,7 +693,7 @@ namespace Phisiks {
         m_steps.push_back({ "Quad view (multi-viewport, orthographic)", [this](GameContext& ctx) {
             Scene& scene = *ctx.CurrentScene();
             switch (m_phase) {
-                case 0: Lab::SetQuadView(scene, true); m_scratch[0] = float(m_stepFrames); m_phase = 1; return false;
+                case 0: Samples::SetQuadView(scene, true); m_scratch[0] = float(m_stepFrames); m_phase = 1; return false;
                 case 1:
                     if (m_stepFrames - m_scratch[0] < 3) return false;
                     Screenshot("07c_quad_view");
@@ -733,12 +738,12 @@ namespace Phisiks {
                     Expect("front view (ortho): wall height matches the projection", std::abs(frontHeight - frontExpected) <= 0.03 * frontExpected + 2.0,
                            F("%.0f px (expected %.1f = 3 m x %.0f px / 12 m)", frontHeight, frontExpected, double(hh)));
                     Screenshot("07c2_switch_frame");   // the frame that switches back to one view
-                    Lab::SetQuadView(scene, false);
+                    Samples::SetQuadView(scene, false);
                     m_scratch[0] = float(m_stepFrames); m_phase = 3; return false;
                 }
                 default:
                     if (m_stepFrames - m_scratch[0] < 2) return false;
-                    Expect("single view restored", GetRenderStats().views == 1 && !Lab::IsQuadView(scene), F("%.0f views", GetRenderStats().views));
+                    Expect("single view restored", GetRenderStats().views == 1 && !Samples::IsQuadView(scene), F("%.0f views", GetRenderStats().views));
                     Screenshot("07d_single_view_restored");
                     return true;
             }
@@ -889,7 +894,7 @@ namespace Phisiks {
                     m_scratch[1] = float(r.occlusionCulled);
                     m_scratch[4] = r.occlusionActive ? 1.0f : 0.0f;
                     // 0.8 m box 3 m behind the wall, entirely below the wall's top edge from this eye point
-                    Lab::SceneBuilder::AddStaticBox(scene, "OcclusionProbe", glm::vec3(0.0f, 0.4f, WALL_CENTER.z - 3.0f), glm::vec3(0.8f), "Sandbox/Ground");
+                    Samples::SceneBuilder::AddStaticBox(scene, "OcclusionProbe", glm::vec3(0.0f, 0.4f, WALL_CENTER.z - 3.0f), glm::vec3(0.8f), "Sandbox/Ground");
                     m_scratch[0] = float(m_stepFrames);
                     m_phase = 3;
                     return false;
@@ -965,7 +970,7 @@ namespace Phisiks {
         {
             auto snapshot = std::make_shared<std::vector<glm::vec4>>();
             m_steps.push_back({ "FieldLab: GPU particles, XPBD and force fields", [this, snapshot](GameContext& ctx) {
-                using namespace Lab::FieldLayout;
+                using namespace Samples::FieldLayout;
                 namespace Adv = Physics::Advanced;
                 switch (m_phase) {
                     case 0: ctx.scenes->Request("FieldLab"); m_phase = 1; return false;
@@ -1206,7 +1211,7 @@ namespace Phisiks {
             }
 
             // force-field sampling (the arrow visualiser's data) vs FieldMath
-            using namespace Lab::FieldLayout;
+            using namespace Samples::FieldLayout;
             std::vector<glm::vec4> samples;
             const bool fieldsOk = Adv::SampleFields(FIELD_BOUNDS_MIN, FIELD_BOUNDS_MAX, FIELD_RESOLUTION, samples) &&
                                   samples.size() == size_t(FIELD_RESOLUTION.x * FIELD_RESOLUTION.y * FIELD_RESOLUTION.z);
@@ -1268,7 +1273,7 @@ namespace Phisiks {
                            moved < 1e-3 && std::abs(measured - expected) <= 0.01 * expected + glm::pi<double>() * r,
                            F("%.0f px measured, %.1f px expected (radius %.2f px), ", measured, expected, r) +
                            F("camera moved %.4f m, capture %.0fx%.0f", moved, m_capture.width, m_capture.height) + F(", fov %.3f", fov));
-                    Lab::FieldLabScene::ApplySdfSculpture(*ctx.CurrentScene());
+                    Samples::FieldLabScene::ApplySdfSculpture(*ctx.CurrentScene());
                     return true;
                 }
             }
@@ -1513,13 +1518,15 @@ namespace Phisiks {
         } });
 
         // ================================================================== P9
-        // P9a. Retro studio skin: panels, LCD, LED meters, EQ sliders, transport bar, playlist; the
-        // bitmap HUD telemetry is suppressed while the panels are open (and returns when hidden).
-        m_steps.push_back({ "P9: retro studio skin, zero HUD overlap", [this](GameContext& ctx) {
+        // P9a. Editor skin (industrial console): docked panels, LCD, LED meters, EQ sliders, tool bar
+        // transport, sample browser playlist; the bitmap HUD telemetry is suppressed while the panels
+        // are open (and returns when hidden).
+        m_steps.push_back({ "Editor: console skin, zero HUD overlap", [this](GameContext& ctx) {
             namespace Retro = UI::Retro;
             switch (m_phase) {
                 case 0:
                     UI::SetPanelsVisible(true);
+                    Editor::ShowOutputTab(Editor::OutputTab::Telemetry);
                     if (m_stepFrames < 3) return false;
                     m_backbufferRequested = true;
                     m_backbufferReady = false;
@@ -1528,10 +1535,10 @@ namespace Phisiks {
                 case 1: {
                     if (!m_backbufferReady) return false;
                     const Retro::FrameStats& s = Retro::LastFrameStats();
-                    Expect("retro panels drawn (bevelled, gold title stripes)", s.panels >= 5, F("%.0f panels", s.panels));
+                    Expect("editor panels drawn (bevelled, amber title stripes): scene, side, inspector, output", s.panels >= 4, F("%.0f panels", s.panels));
                     Expect("LCD readout, LED meters and spectrum analyser", s.lcds >= 1 && s.meters >= 4 && s.litSegments > 0,
                            F("%.0f LCDs, %.0f meters, %.0f lit segments", s.lcds, s.meters, s.litSegments));
-                    Expect("equaliser sliders, transport buttons, lesson playlist", s.eqSliders >= 6 && s.transportButtons >= 7 && s.playlistRows >= 12,
+                    Expect("equaliser sliders, tool bar transport, sample browser", s.eqSliders >= 6 && s.transportButtons >= 4 && s.playlistRows >= 11,
                            F("%.0f EQ sliders, %.0f transport buttons, %.0f playlist rows", s.eqSliders, s.transportButtons, s.playlistRows));
                     // the LCD on the presented back buffer: recessed black with phosphor-green digits
                     const Render::FrameCapture& b = m_backbuffer;
@@ -1569,6 +1576,7 @@ namespace Phisiks {
                     const int lines = DebugOverlay::LastTelemetryLineCount();
                     Expect("HUD telemetry returns when the panels are hidden (Tab)", lines > 10 && ctx.overlayVisible, F("%.0f lines", lines));
                     UI::SetPanelsVisible(true);
+                    Editor::ShowOutputTab(Editor::OutputTab::Console);
                     return true;
                 }
             }
@@ -1874,7 +1882,7 @@ namespace Phisiks {
                     }
                     Expect("height-field collision matches the rendered heights", hits >= 12 && worst < 0.03f, F("%.0f rays, max error %.4f m", double(hits), worst));
                     const AI::Stats nav = AI::GetStats();
-                    const Lab::TerrainScene* scene = dynamic_cast<Lab::TerrainScene*>(ctx.CurrentScene());
+                    const Samples::TerrainScene* scene = dynamic_cast<Samples::TerrainScene*>(ctx.CurrentScene());
                     Expect("navigation grid built from static geometry; crowd crosses and re-targets", nav.walkableCells > 1500 && nav.agents == 8 && scene && scene->crossings >= 8 && nav.pathFailures == 0,
                            F("%.0f walkable cells (%.1f ms), %.0f agents, %.0f arrivals", nav.walkableCells, nav.buildMs, nav.agents, scene ? double(scene->crossings) : 0.0)
                                + F(", %.0f paths, %.0f failures", nav.pathsPlanned, nav.pathFailures));
@@ -1973,7 +1981,7 @@ namespace Phisiks {
         // Project Marina: the engineering scene is made of selectable, editable entities, every tube
         // and wire run is continuous, and the project survives a save to disk + reopen unchanged.
         m_steps.push_back({ "Project Marina: editable engineering scene, save and reopen", [this](GameContext& ctx) {
-            auto* marina = dynamic_cast<Lab::MarinaScene*>(ctx.CurrentScene());
+            auto* marina = dynamic_cast<Projects::MarinaScene*>(ctx.CurrentScene());
             auto writeBackbuffer = [&](const std::string& name) {   // what the window shows, studio UI included
                 const Render::FrameCapture& b = m_backbuffer;
                 Assets::Image shot;
@@ -2067,6 +2075,8 @@ namespace Phisiks {
                 case 7:
                     if (!m_backbufferReady) return false;
                     writeBackbuffer("marina_presentation_mode");
+                    Expect("no text labels, callouts or overlays over the scene (panels hidden)", UI::LastDrawVertexCount() == 0 && GetRenderStats().overlayGlyphs == 0,
+                           F("%.0f UI vertices, ", double(UI::LastDrawVertexCount())) + F("%.0f bitmap glyphs", double(GetRenderStats().overlayGlyphs)));
                     UI::SetPanelsVisible(true);
                     return true;
             }
@@ -2077,8 +2087,8 @@ namespace Phisiks {
         // is a pickable entity, presets frame what they claim, edits survive save + reopen, and the
         // mission sequence runs in order (rover routed by the engine's A*, arm placed by IK).
         m_steps.push_back({ "Old-McDonald: agricultural robotics project, edit, save, mission", [this](GameContext& ctx) {
-            auto* omd = dynamic_cast<Lab::OldMcDonaldScene*>(ctx.CurrentScene());
-            using OMD = Lab::OldMcDonaldScene;
+            auto* omd = dynamic_cast<Projects::OldMcDonaldScene*>(ctx.CurrentScene());
+            using OMD = Projects::OldMcDonaldScene;
             auto writeBackbuffer = [&](const std::string& name) {
                 const Render::FrameCapture& b = m_backbuffer;
                 Assets::Image shot;
@@ -2126,7 +2136,7 @@ namespace Phisiks {
                     for (const char* parent : { "Drone wiring", "Rover wiring", "ESC leads 1", "ESC leads 2", "ESC leads 3", "ESC leads 4" })
                         if (Entity p = Find(ctx, parent)) for (Entity run : p.GetChildren()) {
                             if (run.GetName().rfind("ESC leads", 0) == 0) continue;   // sub-groups of "Drone wiring", listed separately
-                            worst = std::max(worst, Lab::ProjectKit::RunGap(*ctx.CurrentScene(), run.GetName()));
+                            worst = std::max(worst, Projects::ProjectKit::RunGap(*ctx.CurrentScene(), run.GetName()));
                             ++runs;
                         }
                     Expect("wiring runs are continuous (piece to piece)", runs >= 30 && worst < 1e-4f, F("%.0f runs, worst gap %.2e m", runs, worst));
@@ -2188,7 +2198,7 @@ namespace Phisiks {
                 case 7: omd->ApplyCamera(ctx, OMD::Presentation); m_scratch[0] = float(m_stepFrames); m_phase = 8; return false;
                 case 8:
                     if (m_stepFrames - m_scratch[0] < 90) return false;
-                    Lab::ProjectKit::SetVisible(Find(ctx, "3 Mapping Drone"), false);
+                    Projects::ProjectKit::SetVisible(Find(ctx, "3 Mapping Drone"), false);
                     m_scratch[0] = float(m_stepFrames);
                     m_phase = 9;
                     return false;
@@ -2196,14 +2206,14 @@ namespace Phisiks {
                 case 10: {
                     if (!m_captureReady) return false;
                     const int droneParts = partsInView("3 Mapping Drone");
-                    Lab::ProjectKit::SetVisible(Find(ctx, "3 Mapping Drone"), true);
+                    Projects::ProjectKit::SetVisible(Find(ctx, "3 Mapping Drone"), true);
                     int toggled = 0;
                     for (const char* g : { "1 Greenhouse", "2 Growing Beds", "3 Mapping Drone", "4 Soil Rover", "Sensor-positioning arm", "LiDAR", "Soil sensor head", "5 Sampling Grid", "6 Mission Route" }) {
                         Entity e = Find(ctx, g);
-                        Lab::ProjectKit::SetVisible(e, false);
-                        const bool hidden = !Lab::ProjectKit::AnyVisible(e);
-                        Lab::ProjectKit::SetVisible(e, true);
-                        if (hidden && Lab::ProjectKit::AnyVisible(e)) ++toggled;
+                        Projects::ProjectKit::SetVisible(e, false);
+                        const bool hidden = !Projects::ProjectKit::AnyVisible(e);
+                        Projects::ProjectKit::SetVisible(e, true);
+                        if (hidden && Projects::ProjectKit::AnyVisible(e)) ++toggled;
                     }
                     Expect("subsystem visibility: hidden drone leaves the image; 9 subsystems toggle", droneParts == 0 && toggled == 9, F("%.0f drone parts while hidden, ", droneParts) + F("%.0f of 9 toggled", toggled));
                     m_phase = 11;
@@ -2252,8 +2262,8 @@ namespace Phisiks {
         }, 120.0 });
 
         m_steps.push_back({ "Old-McDonald: mission playback (sequential drone then rover, A* route, IK arm)", [this](GameContext& ctx) {
-            auto* omd = dynamic_cast<Lab::OldMcDonaldScene*>(ctx.CurrentScene());
-            using OMD = Lab::OldMcDonaldScene;
+            auto* omd = dynamic_cast<Projects::OldMcDonaldScene*>(ctx.CurrentScene());
+            using OMD = Projects::OldMcDonaldScene;
             if (!omd) { Expect("Old-McDonald scene active", false, "not loaded"); return true; }
             auto writeBackbuffer = [&](const std::string& name) {
                 const Render::FrameCapture& b = m_backbuffer;
@@ -2296,13 +2306,15 @@ namespace Phisiks {
                 case 15:
                     if (!m_backbufferReady) return false;
                     writeBackbuffer("omd_presentation_mode");
+                    Expect("no text labels, callouts or overlays over the scene (panels hidden)", UI::LastDrawVertexCount() == 0 && GetRenderStats().overlayGlyphs == 0,
+                           F("%.0f UI vertices, ", double(UI::LastDrawVertexCount())) + F("%.0f bitmap glyphs", double(GetRenderStats().overlayGlyphs)));
                     UI::SetPanelsVisible(true);
                     return true;
             }
             return false;
         }, 600.0 });
 
-        // Old-McDonald standalone CAD workspaces (rover, drone; Lab::CadWorkspace): the same assembly as the
+        // Old-McDonald standalone CAD workspaces (rover, drone; Projects::CadWorkspace): the same assembly as the
         // mission scene, isolated in a neutral studio; seven views, per-part picking, selection, explode,
         // hide / show, transform + material edit, save + reopen. One parametrised step per workspace.
         struct CadCase {
@@ -2315,8 +2327,8 @@ namespace Phisiks {
         };
         auto cadStep = [this](CadCase c) {
             return [this, c](GameContext& ctx) {
-                auto* cad = dynamic_cast<Lab::CadWorkspace*>(ctx.CurrentScene());
-                using CW = Lab::CadWorkspace;
+                auto* cad = dynamic_cast<Projects::CadWorkspace*>(ctx.CurrentScene());
+                using CW = Projects::CadWorkspace;
                 auto writeBackbuffer = [&](const std::string& name) {
                     const Render::FrameCapture& b = m_backbuffer;
                     Assets::Image shot;
@@ -2372,15 +2384,15 @@ namespace Phisiks {
                         for (const std::string& g : c.wiringGroups)
                             if (Entity w = Find(ctx, g)) for (Entity run : w.GetChildren()) {
                                 if (run.GetName().rfind("ESC leads", 0) == 0) continue;   // sub-group, listed separately
-                                worst = std::max(worst, Lab::ProjectKit::RunGap(scene, run.GetName()));
+                                worst = std::max(worst, Projects::ProjectKit::RunGap(scene, run.GetName()));
                                 ++runs;
                             }
                         Expect(L + " CAD: wiring runs continuous", runs >= c.minRuns && worst < 1e-4f, F("%.0f runs, worst gap %.2e m", runs, worst));
                         // selection (studio picking / inspector target) of a single component
                         Entity part = Find(ctx, c.editPart);
-                        if (part) Lab::Studio::Select(part.Id() + 1);
-                        Expect(L + " CAD: component selectable for the inspector", part && Lab::Studio::SelectedEntity() == part.Id() + 1 && part.Has<MeshRenderer>(), c.editPart);
-                        Lab::Studio::Select(0);
+                        if (part) Editor::Select(part.Id() + 1);
+                        Expect(L + " CAD: component selectable for the inspector", part && Editor::SelectedEntity() == part.Id() + 1 && part.Has<MeshRenderer>(), c.editPart);
+                        Editor::Select(0);
                         const std::string file = m_runDirectory + "/" + c.shotPrefix + ".scene.json";
                         Expect(L + " CAD scene file written", SceneSerializer::Save(scene, file), file);
                         m_scratch[1] = 0.0f;   // view index
@@ -2428,13 +2440,31 @@ namespace Phisiks {
                         std::string detail;
                         const bool ok = c.explodedOk(ctx, detail);
                         Expect(L + " CAD exploded view: " + c.exploded, ok, detail + F(", %.0f parts in view", partsInView(c.root)));
+                        {   // Release audit B4: every save / load path keeps the explode state consistent.
+                            const std::string file = m_runDirectory + "/" + c.shotPrefix + "_saved_exploded.scene.json";
+                            std::string status, d1, d2, d3, d4;
+                            const bool saved = Editor::SaveScene(ctx, file, &status);           // File > Save while exploded
+                            const bool stillExploded = cad->Explode() > 0.999f && c.explodedOk(ctx, d1);
+                            cad->SetExplodeNow(1.0f);
+                            const bool loaded = Editor::LoadScene(ctx, file, &status);          // File > Open while exploded
+                            const bool fileAssembled = loaded && cad->Explode() < 1e-6f && c.collapsedOk(ctx, d2);
+                            cad->SetExplodeNow(1.0f);
+                            const bool reExplodes = c.explodedOk(ctx, d3);
+                            cad->SetExplodeNow(0.0f);
+                            const bool reCollapses = c.collapsedOk(ctx, d4);
+                            Expect(L + " CAD: File save / open while exploded keep the assembly intact (audit B4)", saved && stillExploded && fileAssembled && reExplodes && reCollapses,
+                                   std::string(saved ? "saved assembled" : "save failed") + "; reopened: " + d2 + "; exploded again: " + d3 + "; collapsed: " + d4);
+                            Expect(L + " CAD: replay timeline disabled in the workspace (audit B4)", !ctx.replay.Enabled() && ctx.replay.Size() == 0,
+                                   F("recording %.0f, ", ctx.replay.Enabled() ? 1.0 : 0.0) + F("%.0f steps", double(ctx.replay.Size())));
+                            cad->SetExplodeNow(1.0f);
+                        }
                         cad->SetExplodeNow(0.0f);
                         std::string back;
                         const bool collapsed = c.collapsedOk(ctx, back);
                         Expect(L + " CAD: " + c.collapsed, collapsed, back);
                         // hide a subsystem and one individual component
-                        Lab::ProjectKit::SetVisible(Find(ctx, c.hideGroup), false);
-                        Lab::ProjectKit::SetVisible(Find(ctx, c.hidePart), false);
+                        Projects::ProjectKit::SetVisible(Find(ctx, c.hideGroup), false);
+                        Projects::ProjectKit::SetVisible(Find(ctx, c.hidePart), false);
                         cad->ApplyView(ctx, CW::Perspective);
                         m_scratch[0] = float(m_stepFrames);
                         m_phase = 9;
@@ -2444,10 +2474,10 @@ namespace Phisiks {
                     case 10: {
                         if (!m_captureReady) return false;
                         const int group = partsInView(c.hideGroup), single = partsInView(c.hidePart), rest = partsInView(c.root);
-                        Lab::ProjectKit::SetVisible(Find(ctx, c.hideGroup), true);
-                        Lab::ProjectKit::SetVisible(Find(ctx, c.hidePart), true);
+                        Projects::ProjectKit::SetVisible(Find(ctx, c.hideGroup), true);
+                        Projects::ProjectKit::SetVisible(Find(ctx, c.hidePart), true);
                         Expect(L + " CAD: hidden subsystem and hidden component leave the image, the rest stays", group == 0 && single == 0 && rest >= c.minViewParts &&
-                               Lab::ProjectKit::AnyVisible(Find(ctx, c.hideGroup)) && Lab::ProjectKit::AnyVisible(Find(ctx, c.hidePart)),
+                               Projects::ProjectKit::AnyVisible(Find(ctx, c.hideGroup)) && Projects::ProjectKit::AnyVisible(Find(ctx, c.hidePart)),
                                c.hideGroup + F(" %.0f, ", group) + c.hidePart + F(" %.0f, ", single) + F("other parts %.0f", rest));
                         m_phase = 11;
                         return false;
@@ -2493,7 +2523,7 @@ namespace Phisiks {
         {
             CadCase rover;
             rover.title = "Rover CAD: standalone rover workspace, views, explode, visibility, save";
-            rover.scene = "RoverCAD"; rover.root = Lab::RoverCadScene::ROOT; rover.label = "rover"; rover.shotPrefix = "rcad";
+            rover.scene = "RoverCAD"; rover.root = Projects::RoverCadScene::ROOT; rover.label = "rover"; rover.shotPrefix = "rcad";
             rover.named = { "Rover body", "Chassis", "Bodywork", "Drive system", "Electronics", "LiDAR", "Sensor-positioning arm", "End effector",
                             "Soil sensor head", "Rover wiring", "Raspberry Pi Pico", "J1 Base yaw", "J4 Wrist", "Wheel FL", "Wheel RR", "Fender L", "Fender R" };
             rover.wiringGroups = { "Rover wiring" };
@@ -2503,20 +2533,20 @@ namespace Phisiks {
             rover.explodedOk = [this](GameContext& ctx, std::string& d) {
                 Entity lidar = Find(ctx, "LiDAR"), wheel = Find(ctx, "Wheel FR"), arm = Find(ctx, "Sensor-positioning arm"), wiring = Find(ctx, "Rover wiring");
                 d = F("LiDAR y %.3f, ", lidar.LocalTransform().position.y) + F("wheel FR z %.3f", wheel.LocalTransform().position.z);
-                return lidar.LocalTransform().position.y > 0.4f && wheel.LocalTransform().position.z > 0.4f && arm.LocalTransform().position.y > 0.4f && !Lab::ProjectKit::AnyVisible(wiring);
+                return lidar.LocalTransform().position.y > 0.4f && wheel.LocalTransform().position.z > 0.4f && arm.LocalTransform().position.y > 0.4f && !Projects::ProjectKit::AnyVisible(wiring);
             };
             rover.collapsed = "collapses back to the assembled layout";
             rover.collapsedOk = [this](GameContext& ctx, std::string& d) {
                 Entity lidar = Find(ctx, "LiDAR");
                 d = F("LiDAR y %.4f", lidar.LocalTransform().position.y);
-                return std::abs(lidar.LocalTransform().position.y - 0.168f) < 1e-4f && Lab::ProjectKit::AnyVisible(Find(ctx, "Rover wiring"));
+                return std::abs(lidar.LocalTransform().position.y - 0.168f) < 1e-4f && Projects::ProjectKit::AnyVisible(Find(ctx, "Rover wiring"));
             };
             m_steps.push_back({ rover.title, cadStep(rover), 120.0 });
         }
         {
             CadCase drone;
             drone.title = "Drone CAD: standalone drone workspace, views, explode, visibility, save";
-            drone.scene = "DroneCAD"; drone.root = Lab::DroneCadScene::ROOT; drone.label = "drone"; drone.shotPrefix = "dcad";
+            drone.scene = "DroneCAD"; drone.root = Projects::DroneCadScene::ROOT; drone.label = "drone"; drone.shotPrefix = "dcad";
             drone.named = { "Frame (F450 class)", "Propulsion", "Propellers", "Electronics", "Drone wiring", "Battery - LiPo", "GPS - ReadyToSky", "Landing gear",
                             "Flight controller - Pixhawk 2.4.8", "Pixhawk 2.4.8 case", "GPS puck", "Top plate", "Arm beam 1", "Arm beam 4", "Motor 1", "Motor 4",
                             "Propeller 1", "Propeller 4", "ESC 1", "ESC leads 4", "Motor mount 2", "Cable tie 3", "Prop nut 2" };
@@ -2526,21 +2556,101 @@ namespace Phisiks {
             drone.exploded = "FC up, battery and gear down, arms out, assembly lifted clear of the ground, wiring hidden";
             drone.explodedOk = [this](GameContext& ctx, std::string& d) {
                 Entity fc = Find(ctx, "Flight controller - Pixhawk 2.4.8"), bat = Find(ctx, "Battery - LiPo"), arm = Find(ctx, "Arm beam 1"),
-                       root = Find(ctx, Lab::DroneCadScene::ROOT), gear = Find(ctx, "Landing gear");
+                       root = Find(ctx, Projects::DroneCadScene::ROOT), gear = Find(ctx, "Landing gear");
                 const float lowest = std::min(bat.WorldPosition().y + 0.068f - 0.0175f, gear.WorldPosition().y);   // pack underside, skid underside
                 d = F("FC +%.3f, ", fc.LocalTransform().position.y) + F("battery %.3f, ", bat.LocalTransform().position.y) +
                     F("arm 1 out %.3f, ", glm::length(arm.LocalTransform().position)) + F("lowest part y %.3f", lowest);
                 return fc.LocalTransform().position.y > 0.12f && bat.LocalTransform().position.y < -0.19f && glm::length(arm.LocalTransform().position) > 0.10f &&
-                       root.LocalTransform().position.y > 0.19f && lowest > 0.0f && !Lab::ProjectKit::AnyVisible(Find(ctx, "Drone wiring"));
+                       root.LocalTransform().position.y > 0.19f && lowest > 0.0f && !Projects::ProjectKit::AnyVisible(Find(ctx, "Drone wiring"));
             };
             drone.collapsed = "collapses back to the assembled layout (skids on the ground)";
             drone.collapsedOk = [this](GameContext& ctx, std::string& d) {
-                Entity root = Find(ctx, Lab::DroneCadScene::ROOT), bat = Find(ctx, "Battery - LiPo");
+                Entity root = Find(ctx, Projects::DroneCadScene::ROOT), bat = Find(ctx, "Battery - LiPo");
                 d = F("root y %.4f, ", root.LocalTransform().position.y) + F("battery %.4f", bat.LocalTransform().position.y);
-                return std::abs(root.LocalTransform().position.y) < 1e-4f && std::abs(bat.LocalTransform().position.y) < 1e-4f && Lab::ProjectKit::AnyVisible(Find(ctx, "Drone wiring"));
+                return std::abs(root.LocalTransform().position.y) < 1e-4f && std::abs(bat.LocalTransform().position.y) < 1e-4f && Projects::ProjectKit::AnyVisible(Find(ctx, "Drone wiring"));
             };
             m_steps.push_back({ drone.title, cadStep(drone), 120.0 });
         }
+
+        // Editor document safety (release audit B5, H1, H3): a damaged or newer scene file never
+        // touches the open scene, saves are atomic, workspace scene files resolve without depending on
+        // the working directory, edits are tracked as unsaved changes.
+        m_steps.push_back({ "Editor: scene file safety and unsaved changes", [this](GameContext& ctx) {
+            Scene& scene = *ctx.CurrentScene();
+            const size_t entities = scene.EntityCount();
+            const std::string rootName = scene.Name() == "DroneCAD" ? Projects::DroneCadScene::ROOT : std::string();
+            std::string error1, error2;
+            const std::string damaged = R"({"format":"phisiks-scene","version":1,"name":"x","entities":[
+                {"name":"A","parent":-1,"transform":{"position":[0,0,0]}},
+                {"name":"B","parent":-1,"transform":{"position":[1,2]}}],"materials":{}})";
+            const bool damagedLoaded = SceneSerializer::FromJson(scene, damaged, &error1);
+            const size_t afterDamaged = scene.EntityCount();
+            const std::string newer = R"({"format":"phisiks-scene","version":99,"name":"x","entities":[]})";
+            const bool newerLoaded = SceneSerializer::FromJson(scene, newer, &error2);
+            const size_t afterNewer = scene.EntityCount();
+            Expect("a damaged scene file is rejected and the open scene is untouched (audit B5)",
+                   !damagedLoaded && afterDamaged == entities && (rootName.empty() || Find(ctx, rootName)), F("%.0f -> ", double(entities)) + F("%.0f entities; ", double(afterDamaged)) + error1);
+            Expect("a newer scene format version is rejected (audit B5)", !newerLoaded && afterNewer == entities, error2);
+
+            const std::string file = m_runDirectory + "/editor_atomic.scene.json";
+            std::string status;
+            Editor::MarkEdited();
+            const bool dirty = Editor::HasUnsavedChanges(ctx);
+            const bool saved = Editor::SaveScene(ctx, file, &status);
+            std::error_code ec;
+            const bool noTemp = !std::filesystem::exists(file + ".tmp", ec) && std::filesystem::exists(file, ec);
+            Expect("save is atomic (no temporary file left) and clears the unsaved-changes flag (audit H1)", saved && noTemp && dirty && !Editor::HasUnsavedChanges(ctx), status);
+
+            const std::string resolved = Editor::ResolveScenePath("projects/OldMcDonald/scenes/drone_cad.scene.json");
+            Expect("workspace scene files resolve to an existing absolute path (audit H3)",
+                   std::filesystem::path(resolved).is_absolute() && std::filesystem::exists(resolved, ec), resolved);
+            return true;
+        } });
+
+        // Editor viewport: the main camera is fitted to the centre area between the panels (the
+        // runtime test otherwise renders the full window under the panels) and picking works in it.
+        m_steps.push_back({ "Editor: empty document, inset viewport, picking", [this](GameContext& ctx) {
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("Untitled"); m_phase = 1; return false;
+                case 1: {
+                    if (!ctx.CurrentScene() || ctx.CurrentScene()->Name() != "Untitled") return false;
+                    Editor::AppConfig config = Editor::Config();
+                    config.insetViewport = true;
+                    Editor::Configure(config);
+                    Entity cube = ctx.CurrentScene()->CreateEntity("Pick cube");
+                    cube.Get<Transform>().position = ctx.camera.GetOrbitTarget();
+                    cube.Add<MeshRenderer>(MeshRenderer{ "Cube", "" });
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                }
+                case 2: if (m_stepFrames - m_scratch[0] < 6) return false; RequestCapture(); m_phase = 3; return false;
+                case 3: {
+                    if (!m_captureReady) return false;
+                    Scene& scene = *ctx.CurrentScene();
+                    const glm::vec4 rect = Editor::ViewportRect();
+                    const Entity main = Find(ctx, "MainCamera");
+                    const glm::vec4 vp = main ? main.Get<Camera>().viewport : glm::vec4(0.0f);
+                    const ImVec2 d = ImGui::GetIO().DisplaySize;
+                    const glm::vec4 expected(rect.x / d.x, 1.0f - (rect.y + rect.w) / d.y, rect.z / d.x, rect.w / d.y);
+                    const bool fitted = rect.z > 100.0f && glm::all(glm::lessThan(glm::abs(vp - expected), glm::vec4(0.01f))) && vp.z < 0.99f;
+                    Expect("main camera fitted to the viewport between the panels", fitted,
+                           F("viewport (%.3f, %.3f, ", vp.x, vp.y) + F("%.3f, %.3f), ", vp.z, vp.w) + F("rect %.0f x %.0f px", rect.z, rect.w));
+                    const Render::FrameCapture& c = m_capture;
+                    const int px = int((rect.x + rect.z * 0.5f) / d.x * float(c.width)), py = int((1.0f - (rect.y + rect.w * 0.5f) / d.y) * float(c.height));
+                    const uint32_t id = (px >= 0 && py >= 0 && px < c.width && py < c.height) ? c.entityIds[size_t(py) * c.width + px] : 0;
+                    const Entity cube = Find(ctx, "Pick cube");
+                    Expect("the object at the viewport centre is pickable", cube && id == PixelId(cube), F("id %.0f", double(id)));
+                    Screenshot("editor_inset_viewport");
+                    Editor::AppConfig config = Editor::Config();
+                    config.insetViewport = false;
+                    Editor::Configure(config);
+                    (void)scene;
+                    return true;
+                }
+            }
+            return false;
+        } });
 
         m_steps.push_back({ "Scene transition back to Sandbox", [this](GameContext& ctx) {
             if (m_phase == 0) { ctx.scenes->Request("Sandbox"); m_phase = 1; return false; }

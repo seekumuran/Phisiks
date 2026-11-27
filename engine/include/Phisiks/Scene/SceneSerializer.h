@@ -8,9 +8,13 @@
 //                     "softBody" } ] }
 //
 // Saving writes every entity with its built-in components and the procedural materials they use
-// (when a renderer is running). Loading destroys the scene's entities and rebuilds them (entity ids
-// change); physics bodies, render objects and simulations are created by the scene systems as for
-// any new entity. Unknown keys are ignored; missing keys keep the component defaults.
+// (when a renderer is running); Save writes "<path>.tmp" and renames it over the target, so a failed
+// save keeps the previous file. Load parses and validates the whole file first: a damaged file or an
+// unsupported "version" fails with an error and leaves the scene untouched. Only a valid file
+// destroys the scene's entities and rebuilds them (entity ids change); physics bodies, render
+// objects and simulations are created by the scene systems as for any new entity. Unknown keys are
+// ignored; missing keys keep the component defaults. Not stored: Joint, Script, NavAgent, Terrain,
+// Decal, Trail, SkinnedModel, CameraPath (re-create them in code after loading).
 
 #include <string>
 
