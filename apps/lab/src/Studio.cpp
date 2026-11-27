@@ -535,6 +535,13 @@ namespace Lab::Studio {
                     for (const Showcase::DemoInfo& demo : Showcase::Demos()) if (ImGui::MenuItem(demo.title, demo.industry) && ctx.scenes) ctx.scenes->Request(demo.scene);
                     ImGui::EndMenu();
                 }
+                if (ImGui::BeginMenu("Projects")) {
+                    if (ImGui::MenuItem("Project Marina", "ENGINEERING") && ctx.scenes) ctx.scenes->Request("ProjectMarina");
+                    if (ImGui::MenuItem("Old-McDonald", "AGRI-ROBOTICS") && ctx.scenes) ctx.scenes->Request("OldMcDonald");
+                    if (ImGui::MenuItem("Old-McDonald Rover CAD", "STANDALONE") && ctx.scenes) ctx.scenes->Request("RoverCAD");
+                    if (ImGui::MenuItem("Old-McDonald Drone CAD", "STANDALONE") && ctx.scenes) ctx.scenes->Request("DroneCAD");
+                    ImGui::EndMenu();
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("CAD")) {
@@ -554,6 +561,7 @@ namespace Lab::Studio {
 
     void OnSceneLoaded(GameContext& ctx) {
         g_selected = 0;
+        if (auto* ext = dynamic_cast<StudioExtension*>(ctx.CurrentScene()); ext && ext->DefaultProjectPath()) g_path = ext->DefaultProjectPath();
         ctx.replay.Clear();
         g_caption1.clear();
         g_caption2.clear();
@@ -565,6 +573,8 @@ namespace Lab::Studio {
     void Draw(GameContext& ctx) {
         if (!UI::IsActive()) return;
         if (!ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) UI::SetPanelsVisible(!UI::PanelsVisible());
+        StudioExtension* extension = dynamic_cast<StudioExtension*>(ctx.CurrentScene());
+        if (extension) extension->DrawStudioOverlay(ctx);
         if (!UI::PanelsVisible()) return;
         if (Showcase::Current(ctx)) {   // showcase scenes bring their own RetroDeck HUD
             Showcase::DrawGui(ctx, "Sandbox");
@@ -572,7 +582,8 @@ namespace Lab::Studio {
         }
         Scene* scene = ctx.CurrentScene();
         MenuBar(ctx, scene);
-        Classroom(ctx, scene);
+        if (extension) extension->DrawStudioPanel(ctx);
+        else Classroom(ctx, scene);
         if (scene) {
             HierarchyPanel(*scene);
             Inspector(*scene);

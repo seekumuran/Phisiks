@@ -5,6 +5,13 @@
 #include "Phisiks/Core/Time.h"
 #include "SandboxScenes.h"
 #include "FieldLab.h"
+#include "MarinaScene.h"
+#include "OldMcDonaldScene.h"
+#include "RoverCadScene.h"
+#include "DroneCadScene.h"
+#include "CadWorkspace.h"
+#include "Studio.h"
+#include "ProjectKit.h"
 #include "SceneBuilder.h"
 #include "P9Scenes.h"
 #include "Showcase.h"
@@ -1962,6 +1969,578 @@ namespace Phisiks {
             ++m_phase;
             return false;
         }, 120.0 });
+
+        // Project Marina: the engineering scene is made of selectable, editable entities, every tube
+        // and wire run is continuous, and the project survives a save to disk + reopen unchanged.
+        m_steps.push_back({ "Project Marina: editable engineering scene, save and reopen", [this](GameContext& ctx) {
+            auto* marina = dynamic_cast<Lab::MarinaScene*>(ctx.CurrentScene());
+            auto writeBackbuffer = [&](const std::string& name) {   // what the window shows, studio UI included
+                const Render::FrameCapture& b = m_backbuffer;
+                Assets::Image shot;
+                shot.width = b.width;
+                shot.height = b.height;
+                shot.rgba.resize(b.rgba.size());
+                for (int y = 0; y < b.height; ++y) std::copy_n(&b.rgba[size_t(b.height - 1 - y) * b.width * 4], size_t(b.width) * 4, &shot.rgba[size_t(y) * b.width * 4]);
+                if (Assets::WritePng(m_runDirectory + "/" + name + ".png", shot)) m_writtenScreenshots.push_back(m_runDirectory + "/" + name + ".png");
+            };
+            auto requestBackbuffer = [&] { m_backbufferRequested = true; m_backbufferReady = false; };
+            auto worstGap = [&](size_t& runs) {
+                float worst = 0.0f;
+                runs = 0;
+                for (const auto& route : marina->Routes()) { worst = std::max(worst, marina->RouteGap(route.group)); ++runs; }
+                return worst;
+            };
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("ProjectMarina"); m_phase = 1; return false;
+                case 1:
+                    if (ctx.scenes->CurrentName() != "ProjectMarina" || !marina) return false;
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (m_stepFrames - m_scratch[0] < 30) return false;
+                    const char* subsystems[] = { "Project Marina", "0 Bench", "1 Computing Unit - SBC", "2 Cooling Circuit", "3 Electronics",
+                                                 "4 Pump Assembly - P1", "5 Heat Exchanger - HX1", "6 Membrane Distillation - MD1",
+                                                 "7 Seawater Reservoir - TK1", "8 Condensation System", "9 Sensor Wiring", "Process Tubing" };
+                    int found = 0;
+                    for (const char* name : subsystems) if (Find(ctx, name)) ++found;
+                    Expect("all subsystem groups are in the hierarchy", found == int(std::size(subsystems)), F("%.0f of %.0f", found, double(std::size(subsystems))));
+                    const RenderStats r = GetRenderStats();
+                    Expect("every part mesh loaded into a render object", r.meshObjects == CountRenderedEntities(ctx) && r.meshObjects > 250,
+                           F("%.0f render objects, %.0f MeshRenderer entities", r.meshObjects, double(CountRenderedEntities(ctx))));
+                    size_t runs = 0;
+                    const float gap = worstGap(runs);
+                    Expect("tubing and wiring runs are continuous (piece to piece)", runs >= 20 && gap < 1e-4f, F("%.0f runs, worst gap %.2e m", double(runs), gap));
+                    RequestCapture();
+                    m_phase = 3;
+                    return false;
+                }
+                case 3: {
+                    if (!m_captureReady) return false;
+                    const Entity root = Find(ctx, "Project Marina");
+                    std::vector<uint32_t> ids(m_capture.entityIds);
+                    std::sort(ids.begin(), ids.end());
+                    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+                    int parts = 0;
+                    for (uint32_t id : ids) if (id && ctx.CurrentScene()->FromId(id - 1).IsDescendantOf(root)) ++parts;
+                    Expect("parts are individually pickable (entity id buffer)", parts >= 60, F("%.0f distinct Marina parts in view", parts));
+                    requestBackbuffer();
+                    m_phase = 4;
+                    return false;
+                }
+                case 4: {
+                    if (!m_backbufferReady) return false;
+                    writeBackbuffer("marina_studio");
+                    Scene& scene = *ctx.CurrentScene();
+                    const std::string path = m_runDirectory + "/project_marina.json";
+                    const std::string before = SceneSerializer::ToJson(scene);
+                    const size_t entities = scene.EntityCount();
+                    std::string error;
+                    const bool saved = SceneSerializer::Save(scene, path);
+                    const bool loaded = saved && SceneSerializer::Load(scene, path, &error);
+                    const std::string after = SceneSerializer::ToJson(scene);
+                    Expect("project saves to disk and reopens unchanged", saved && loaded && after == before && scene.EntityCount() == entities,
+                           F("%.0f entities, %.0f bytes", double(entities), double(before.size())) + (error.empty() ? "" : ", " + error));
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 5;
+                    return false;
+                }
+                case 5: {
+                    if (m_stepFrames - m_scratch[0] < 5) return false;
+                    const RenderStats r = GetRenderStats();
+                    size_t runs = 0;
+                    const float gap = worstGap(runs);
+                    Expect("reopened project rebuilt its parts and runs", r.meshObjects == CountRenderedEntities(ctx) && runs >= 20 && gap < 1e-4f,
+                           F("%.0f render objects, worst run gap %.2e m", r.meshObjects, gap));
+                    const Render::MaterialDesc* tube = Render::FindMaterial("Marina/ClearTube");
+                    Expect("see-through materials keep their opacity after reopening", tube && tube->opacity < 0.5f, F("clear tubing opacity %.2f", tube ? tube->opacity : -1.0f));
+                    UI::SetPanelsVisible(false);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 6;
+                    return false;
+                }
+                case 6:
+                    if (m_stepFrames - m_scratch[0] < 3) return false;
+                    requestBackbuffer();
+                    m_phase = 7;
+                    return false;
+                case 7:
+                    if (!m_backbufferReady) return false;
+                    writeBackbuffer("marina_presentation_mode");
+                    UI::SetPanelsVisible(true);
+                    return true;
+            }
+            return false;
+        } });
+
+        // Old-McDonald: a second engineering project on the same scene / studio systems. Every part
+        // is a pickable entity, presets frame what they claim, edits survive save + reopen, and the
+        // mission sequence runs in order (rover routed by the engine's A*, arm placed by IK).
+        m_steps.push_back({ "Old-McDonald: agricultural robotics project, edit, save, mission", [this](GameContext& ctx) {
+            auto* omd = dynamic_cast<Lab::OldMcDonaldScene*>(ctx.CurrentScene());
+            using OMD = Lab::OldMcDonaldScene;
+            auto writeBackbuffer = [&](const std::string& name) {
+                const Render::FrameCapture& b = m_backbuffer;
+                Assets::Image shot;
+                shot.width = b.width;
+                shot.height = b.height;
+                shot.rgba.resize(b.rgba.size());
+                for (int y = 0; y < b.height; ++y) std::copy_n(&b.rgba[size_t(b.height - 1 - y) * b.width * 4], size_t(b.width) * 4, &shot.rgba[size_t(y) * b.width * 4]);
+                if (Assets::WritePng(m_runDirectory + "/" + name + ".png", shot)) m_writtenScreenshots.push_back(m_runDirectory + "/" + name + ".png");
+            };
+            auto requestBoth = [&] { m_backbufferRequested = true; m_backbufferReady = false; RequestCapture(); };
+            auto partsInView = [&](const char* ancestor) {
+                const Entity root = Find(ctx, ancestor);
+                std::vector<uint32_t> ids(m_capture.entityIds);
+                std::sort(ids.begin(), ids.end());
+                ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+                int n = 0;
+                for (uint32_t id : ids) if (id && root && ctx.CurrentScene()->FromId(id - 1).IsDescendantOf(root)) ++n;
+                return n;
+            };
+            const int presets[] = { OMD::DroneClose, OMD::RoverClose, OMD::Overview, OMD::TopPlan, OMD::DroneExploded, OMD::RoverExploded };
+            const char* shots[] = { "omd_drone_close", "omd_rover_close", "omd_overview", "omd_top_plan", "omd_drone_exploded", "omd_rover_exploded" };
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("OldMcDonald"); m_phase = 1; return false;
+                case 1:
+                    if (ctx.scenes->CurrentName() != "OldMcDonald" || !omd) return false;
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                case 2: {
+                    if (m_stepFrames - m_scratch[0] < 40) return false;
+                    const char* groups[] = { "Old-McDonald", "1 Greenhouse", "2 Growing Beds", "3 Mapping Drone", "4 Soil Rover", "5 Sampling Grid", "6 Mission Route",
+                                             "Sensor-positioning arm", "LiDAR", "Soil sensor head", "Flight controller - Pixhawk 2.4.8", "GPS - ReadyToSky", "Raspberry Pi Pico",
+                                             "Soil moisture sensor", "Soil temperature sensor", "Soil pH sensor" };
+                    int found = 0;
+                    for (const char* g : groups) if (Find(ctx, g)) ++found;
+                    Expect("project hierarchy: subsystems and named hardware present", found == int(std::size(groups)), F("%.0f of %.0f", found, double(std::size(groups))));
+                    int samples = 0;
+                    for (char row : { 'A', 'B', 'C', 'D' }) for (int c = 1; c <= 4; ++c) if (Find(ctx, std::string("SP-") + row + std::to_string(c))) ++samples;
+                    Expect("fixed sampling grid: 16 individually named points", samples == 16, F("%.0f sampling points", samples));
+                    const RenderStats r = GetRenderStats();
+                    Expect("every part mesh loaded into a render object", r.meshObjects == CountRenderedEntities(ctx) && r.meshObjects > 300,
+                           F("%.0f render objects, %.0f MeshRenderer entities", r.meshObjects, double(CountRenderedEntities(ctx))));
+                    float worst = 0.0f;
+                    int runs = 0;
+                    for (const char* parent : { "Drone wiring", "Rover wiring", "ESC leads 1", "ESC leads 2", "ESC leads 3", "ESC leads 4" })
+                        if (Entity p = Find(ctx, parent)) for (Entity run : p.GetChildren()) {
+                            if (run.GetName().rfind("ESC leads", 0) == 0) continue;   // sub-groups of "Drone wiring", listed separately
+                            worst = std::max(worst, Lab::ProjectKit::RunGap(*ctx.CurrentScene(), run.GetName()));
+                            ++runs;
+                        }
+                    Expect("wiring runs are continuous (piece to piece)", runs >= 30 && worst < 1e-4f, F("%.0f runs, worst gap %.2e m", runs, worst));
+                    AI::NavGrid* grid = AI::SceneGrid(*ctx.CurrentScene());
+                    Expect("navigation grid built from the scene colliders; rover route planned by A*", grid && grid->Valid() && omd->RouteBuilt(),
+                           grid ? F("%.0f walkable cells", double(grid->WalkableCells())) : std::string("no grid"));
+                    // the project as built (assembled, idle): kept as the run's reference scene file
+                    Expect("project scene file written", SceneSerializer::Save(*ctx.CurrentScene(), m_runDirectory + "/old_mcdonald.scene.json"), m_runDirectory + "/old_mcdonald.scene.json");
+                    requestBoth();
+                    m_phase = 3;
+                    return false;
+                }
+                case 3: {
+                    if (!m_backbufferReady || !m_captureReady) return false;
+                    writeBackbuffer("omd_presentation");
+                    Expect("presentation view: parts individually pickable", partsInView("Old-McDonald") >= 80, F("%.0f distinct project parts in view", partsInView("Old-McDonald")));
+                    m_scratch[1] = 0.0f;   // preset index
+                    m_phase = 4;
+                    return false;
+                }
+                case 4:
+                    omd->ApplyCamera(ctx, presets[int(m_scratch[1])]);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 5;
+                    return false;
+                case 5:
+                    if (m_stepFrames - m_scratch[0] < 90) return false;
+                    requestBoth();
+                    m_phase = 6;
+                    return false;
+                case 6: {
+                    if (!m_backbufferReady || !m_captureReady) return false;
+                    const int i = int(m_scratch[1]);
+                    writeBackbuffer(shots[i]);
+                    const int preset = presets[i];
+                    if (preset == OMD::DroneClose) Expect("drone close-up: drone components individually pickable", partsInView("3 Mapping Drone") >= 15, F("%.0f drone parts", partsInView("3 Mapping Drone")));
+                    if (preset == OMD::RoverClose) Expect("rover close-up: rover components individually pickable", partsInView("4 Soil Rover") >= 20, F("%.0f rover parts", partsInView("4 Soil Rover")));
+                    if (preset == OMD::Overview) Expect("overview: greenhouse, beds, drone and rover in view", partsInView("1 Greenhouse") > 0 && partsInView("2 Growing Beds") > 20 && partsInView("3 Mapping Drone") > 0 && partsInView("4 Soil Rover") > 0,
+                                                       F("%.0f bed parts", partsInView("2 Growing Beds")));
+                    if (preset == OMD::TopPlan) {
+                        const Entity cam = Find(ctx, "MainCamera");
+                        Expect("top plan: orthographic, all 16 sampling points visible", cam && cam.Get<Camera>().projection == Projection::Orthographic && partsInView("5 Sampling Grid") >= 32,
+                               F("%.0f sampling-grid parts in view (disc + stake per point)", partsInView("5 Sampling Grid")));
+                    }
+                    if (preset == OMD::DroneExploded) {
+                        Entity fc = Find(ctx, "Flight controller - Pixhawk 2.4.8"), bat = Find(ctx, "Battery - LiPo");
+                        Expect("exploded drone: flight controller up, battery down", omd->Explode(OMD::DroneAssembly) > 0.99f && fc.LocalTransform().position.y > 0.12f && bat.LocalTransform().position.y < -0.19f,
+                               F("explode %.2f, FC +%.3f m, battery %.3f m", omd->Explode(OMD::DroneAssembly), fc.LocalTransform().position.y, bat.LocalTransform().position.y));
+                    }
+                    if (preset == OMD::RoverExploded) {
+                        Entity lidar = Find(ctx, "LiDAR");
+                        Expect("exploded rover: assembly separated, drone re-assembled", omd->Explode(OMD::RoverAssembly) > 0.99f && omd->Explode(OMD::DroneAssembly) < 0.01f && lidar.LocalTransform().position.y > 0.4f,
+                               F("rover explode %.2f, drone explode %.2f", omd->Explode(OMD::RoverAssembly), omd->Explode(OMD::DroneAssembly)) + F(", LiDAR at %.3f m", lidar.LocalTransform().position.y));
+                    }
+                    m_scratch[1] += 1.0f;
+                    m_phase = int(m_scratch[1]) < int(std::size(presets)) ? 4 : 7;
+                    return false;
+                }
+                case 7: omd->ApplyCamera(ctx, OMD::Presentation); m_scratch[0] = float(m_stepFrames); m_phase = 8; return false;
+                case 8:
+                    if (m_stepFrames - m_scratch[0] < 90) return false;
+                    Lab::ProjectKit::SetVisible(Find(ctx, "3 Mapping Drone"), false);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 9;
+                    return false;
+                case 9: if (m_stepFrames - m_scratch[0] < 3) return false; RequestCapture(); m_phase = 10; return false;
+                case 10: {
+                    if (!m_captureReady) return false;
+                    const int droneParts = partsInView("3 Mapping Drone");
+                    Lab::ProjectKit::SetVisible(Find(ctx, "3 Mapping Drone"), true);
+                    int toggled = 0;
+                    for (const char* g : { "1 Greenhouse", "2 Growing Beds", "3 Mapping Drone", "4 Soil Rover", "Sensor-positioning arm", "LiDAR", "Soil sensor head", "5 Sampling Grid", "6 Mission Route" }) {
+                        Entity e = Find(ctx, g);
+                        Lab::ProjectKit::SetVisible(e, false);
+                        const bool hidden = !Lab::ProjectKit::AnyVisible(e);
+                        Lab::ProjectKit::SetVisible(e, true);
+                        if (hidden && Lab::ProjectKit::AnyVisible(e)) ++toggled;
+                    }
+                    Expect("subsystem visibility: hidden drone leaves the image; 9 subsystems toggle", droneParts == 0 && toggled == 9, F("%.0f drone parts while hidden, ", droneParts) + F("%.0f of 9 toggled", toggled));
+                    m_phase = 11;
+                    return false;
+                }
+                case 11: {   // edit a transform, a scale and a material, save, reopen
+                    Scene& scene = *ctx.CurrentScene();
+                    Find(ctx, "Flight controller - Pixhawk 2.4.8").LocalTransform().position += glm::vec3(0.0f, 0.01f, 0.0f);
+                    Find(ctx, "Dock marker post").LocalTransform().scale = glm::vec3(1.25f);
+                    Render::MaterialDesc red = *Render::FindMaterial("OMD/MotorRed");
+                    red.baseColor = glm::vec3(0.1f, 0.3f, 0.7f);
+                    Render::RegisterMaterial("OMD/MotorRed", red);
+                    const std::string path = m_runDirectory + "/old_mcdonald_edit_test.scene.json";
+                    const std::string before = SceneSerializer::ToJson(scene);
+                    const size_t entities = scene.EntityCount();
+                    std::string error;
+                    const bool saved = SceneSerializer::Save(scene, path);
+                    Render::RegisterMaterial("OMD/MotorRed", Render::MaterialDesc());   // wiped: must come back from the file
+                    const bool loaded = saved && SceneSerializer::Load(scene, path, &error);
+                    const std::string after = SceneSerializer::ToJson(scene);
+                    const Render::MaterialDesc* arm = Render::FindMaterial("OMD/MotorRed");
+                    const Render::MaterialDesc* glass = Render::FindMaterial("OMD/Glass");
+                    Entity fc = Find(ctx, "Flight controller - Pixhawk 2.4.8"), post = Find(ctx, "Dock marker post");
+                    Expect("edits survive save + reopen (transform, scale, material, glazing opacity)",
+                           loaded && after == before && scene.EntityCount() == entities && std::abs(fc.LocalTransform().position.y - 0.01f) < 1e-5f &&
+                               std::abs(post.LocalTransform().scale.x - 1.25f) < 1e-5f && arm && std::abs(arm->baseColor.z - 0.7f) < 1e-5f && glass && glass->opacity < 0.2f,
+                           F("%.0f entities, %.0f bytes", double(entities), double(before.size())) + (error.empty() ? "" : ", " + error));
+                    Find(ctx, "Flight controller - Pixhawk 2.4.8").LocalTransform().position -= glm::vec3(0.0f, 0.01f, 0.0f);
+                    red.baseColor = glm::vec3(0.70f, 0.06f, 0.05f);
+                    Render::RegisterMaterial("OMD/MotorRed", red);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 12;
+                    return false;
+                }
+                case 12: {
+                    if (m_stepFrames - m_scratch[0] < 10) return false;
+                    AI::NavGrid* grid = AI::SceneGrid(*ctx.CurrentScene());
+                    const Entity rover = Find(ctx, "4 Soil Rover");
+                    const RenderStats r = GetRenderStats();
+                    Expect("reopened project: runtime navigation re-attached, parts rebuilt", rover.Has<NavAgent>() && grid && grid->Valid() && r.meshObjects == CountRenderedEntities(ctx),
+                           F("%.0f render objects", r.meshObjects) + (grid && grid->Valid() ? ", grid valid" : ", no grid"));
+                    return true;
+                }
+            }
+            return false;
+        }, 120.0 });
+
+        m_steps.push_back({ "Old-McDonald: mission playback (sequential drone then rover, A* route, IK arm)", [this](GameContext& ctx) {
+            auto* omd = dynamic_cast<Lab::OldMcDonaldScene*>(ctx.CurrentScene());
+            using OMD = Lab::OldMcDonaldScene;
+            if (!omd) { Expect("Old-McDonald scene active", false, "not loaded"); return true; }
+            auto writeBackbuffer = [&](const std::string& name) {
+                const Render::FrameCapture& b = m_backbuffer;
+                Assets::Image shot;
+                shot.width = b.width;
+                shot.height = b.height;
+                shot.rgba.resize(b.rgba.size());
+                for (int y = 0; y < b.height; ++y) std::copy_n(&b.rgba[size_t(b.height - 1 - y) * b.width * 4], size_t(b.width) * 4, &shot.rgba[size_t(y) * b.width * 4]);
+                if (Assets::WritePng(m_runDirectory + "/" + name + ".png", shot)) m_writtenScreenshots.push_back(m_runDirectory + "/" + name + ".png");
+            };
+            switch (m_phase) {
+                case 0:
+                    omd->missionSpeed = 6.0f;
+                    omd->ApplyCamera(ctx, OMD::MissionView);   // the Mission preset starts playback
+                    m_scratch[2] = 0.0f;   // screenshot flags
+                    m_phase = 13;
+                    return false;
+                case 13: {
+                    if (m_backbufferReady) {
+                        writeBackbuffer(int(m_scratch[2]) == 1 ? "omd_mission_survey" : "omd_mission_arm");
+                        m_backbufferReady = false;
+                    }
+                    if (omd->Stage() == 2 && m_scratch[2] < 1.0f && omd->CropsMapped() > 10) { m_scratch[2] = 1.0f; m_backbufferRequested = true; }
+                    if (omd->Stage() == 8 && m_scratch[2] < 2.0f && omd->SamplesTaken() >= 5) { m_scratch[2] = 2.0f; m_backbufferRequested = true; }
+                    if (omd->GetPhase() != OMD::Phase::Docked) return false;
+                    int stages = 0;
+                    for (int s = 1; s <= 10; ++s) if ((omd->StagesSeen() >> s) & 1) ++stages;
+                    const glm::vec3 rover = Find(ctx, "4 Soil Rover").WorldPosition(), drone = Find(ctx, "3 Mapping Drone").WorldPosition();
+                    Expect("mission: all 9 stages run in order to completion", stages == 10, F("%.0f of 10 stage states seen", stages));
+                    Expect("mission: drone mapped every crop location, then landed before the rover left", omd->CropsMapped() == 48 && omd->DroneLandedBeforeRover() && drone.y < 0.05f,
+                           F("%.0f of 48 crops mapped, drone at y %.3f", omd->CropsMapped(), drone.y));
+                    Expect("mission: rover sampled all 16 points via A* paths and returned to the dock", omd->SamplesTaken() == 16 && omd->PathFailures() == 0 && glm::length(glm::vec2(rover.x + 2.5f, rover.z + 0.7f)) < 0.1f,
+                           F("%.0f samples, %.0f path failures, ", omd->SamplesTaken(), omd->PathFailures()) + F("dock offset %.3f m", glm::length(glm::vec2(rover.x + 2.5f, rover.z + 0.7f))));
+                    UI::SetPanelsVisible(false);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 14;
+                    return false;
+                }
+                case 14: if (m_stepFrames - m_scratch[0] < 3) return false; m_backbufferRequested = true; m_backbufferReady = false; m_phase = 15; return false;
+                case 15:
+                    if (!m_backbufferReady) return false;
+                    writeBackbuffer("omd_presentation_mode");
+                    UI::SetPanelsVisible(true);
+                    return true;
+            }
+            return false;
+        }, 600.0 });
+
+        // Old-McDonald standalone CAD workspaces (rover, drone; Lab::CadWorkspace): the same assembly as the
+        // mission scene, isolated in a neutral studio; seven views, per-part picking, selection, explode,
+        // hide / show, transform + material edit, save + reopen. One parametrised step per workspace.
+        struct CadCase {
+            std::string title, scene, root, label, shotPrefix;
+            std::vector<std::string> named;          // groups / parts that must exist (shared hierarchy)
+            std::vector<std::string> wiringGroups;   // direct children are runs ("ESC leads" sub-groups skipped)
+            int minParts = 0, minRuns = 0, minViewParts = 0, minBottomParts = 0;
+            std::string hideGroup, hidePart, editPart, editMaterial, exploded, collapsed;
+            std::function<bool(GameContext&, std::string&)> explodedOk, collapsedOk;
+        };
+        auto cadStep = [this](CadCase c) {
+            return [this, c](GameContext& ctx) {
+                auto* cad = dynamic_cast<Lab::CadWorkspace*>(ctx.CurrentScene());
+                using CW = Lab::CadWorkspace;
+                auto writeBackbuffer = [&](const std::string& name) {
+                    const Render::FrameCapture& b = m_backbuffer;
+                    Assets::Image shot;
+                    shot.width = b.width;
+                    shot.height = b.height;
+                    shot.rgba.resize(b.rgba.size());
+                    for (int y = 0; y < b.height; ++y) std::copy_n(&b.rgba[size_t(b.height - 1 - y) * b.width * 4], size_t(b.width) * 4, &shot.rgba[size_t(y) * b.width * 4]);
+                    if (Assets::WritePng(m_runDirectory + "/" + name + ".png", shot)) m_writtenScreenshots.push_back(m_runDirectory + "/" + name + ".png");
+                };
+                auto requestBoth = [&] { m_backbufferRequested = true; m_backbufferReady = false; RequestCapture(); };
+                auto partsInView = [&](const std::string& ancestor) {
+                    const Entity root = Find(ctx, ancestor);
+                    std::vector<uint32_t> ids(m_capture.entityIds);
+                    std::sort(ids.begin(), ids.end());
+                    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+                    int n = 0;
+                    for (uint32_t id : ids) {
+                        if (!id || !root) continue;
+                        const Entity e = ctx.CurrentScene()->FromId(id - 1);
+                        if (e == root || e.IsDescendantOf(root)) ++n;
+                    }
+                    return n;
+                };
+                const char* views[CW::ViewCount] = { "perspective", "front", "rear", "left", "right", "top", "bottom" };
+                const std::string L = c.label;
+                switch (m_phase) {
+                    case 0: ctx.scenes->Request(c.scene); m_phase = 1; return false;
+                    case 1:
+                        if (ctx.scenes->CurrentName() != c.scene || !cad) return false;
+                        m_scratch[0] = float(m_stepFrames);
+                        m_phase = 2;
+                        return false;
+                    case 2: {
+                        if (m_stepFrames - m_scratch[0] < 40) return false;
+                        Scene& scene = *ctx.CurrentScene();
+                        // isolation: nothing from the greenhouse scene or the other vehicle; every rendered part is the assembly or the ground grid
+                        int foreign = 0;
+                        for (const char* g : { "Old-McDonald", "1 Greenhouse", "2 Growing Beds", "3 Mapping Drone", "4 Soil Rover", "5 Sampling Grid", "6 Mission Route",
+                                               "Rover dock", "Drone landing pad", "Floor slab", "Old-McDonald Soil Rover", "Old-McDonald Mapping Drone" })
+                            if (c.root != g && Find(ctx, g)) ++foreign;
+                        const Entity root = Find(ctx, c.root), ground = Find(ctx, "Ground grid");
+                        int parts = 0, other = 0;
+                        scene.Each<MeshRenderer>([&](Entity e, MeshRenderer&) { if (root && (e == root || e.IsDescendantOf(root))) ++parts; else if (!(e == ground)) ++other; });
+                        Expect(L + " CAD: assembly isolated (no greenhouse, beds, dock, pad, other vehicle, route)", foreign == 0 && other == 0 && parts >= c.minParts,
+                               F("%.0f assembly parts, ", parts) + F("%.0f unrelated scene objects, ", other) + F("%.0f foreign groups", foreign));
+                        int found = 0;
+                        for (const std::string& g : c.named) if (Find(ctx, g)) ++found;
+                        Expect(L + " CAD: same assembly hierarchy as the mission scene", found == int(c.named.size()), F("%.0f of %.0f named groups / parts", found, double(c.named.size())));
+                        const RenderStats r = GetRenderStats();
+                        Expect(L + " CAD: every part mesh loaded into a render object", r.meshObjects == CountRenderedEntities(ctx), F("%.0f render objects", r.meshObjects));
+                        float worst = 0.0f;
+                        int runs = 0;
+                        for (const std::string& g : c.wiringGroups)
+                            if (Entity w = Find(ctx, g)) for (Entity run : w.GetChildren()) {
+                                if (run.GetName().rfind("ESC leads", 0) == 0) continue;   // sub-group, listed separately
+                                worst = std::max(worst, Lab::ProjectKit::RunGap(scene, run.GetName()));
+                                ++runs;
+                            }
+                        Expect(L + " CAD: wiring runs continuous", runs >= c.minRuns && worst < 1e-4f, F("%.0f runs, worst gap %.2e m", runs, worst));
+                        // selection (studio picking / inspector target) of a single component
+                        Entity part = Find(ctx, c.editPart);
+                        if (part) Lab::Studio::Select(part.Id() + 1);
+                        Expect(L + " CAD: component selectable for the inspector", part && Lab::Studio::SelectedEntity() == part.Id() + 1 && part.Has<MeshRenderer>(), c.editPart);
+                        Lab::Studio::Select(0);
+                        const std::string file = m_runDirectory + "/" + c.shotPrefix + ".scene.json";
+                        Expect(L + " CAD scene file written", SceneSerializer::Save(scene, file), file);
+                        m_scratch[1] = 0.0f;   // view index
+                        m_phase = 3;
+                        return false;
+                    }
+                    case 3:
+                        cad->ApplyView(ctx, int(m_scratch[1]));
+                        m_scratch[0] = float(m_stepFrames);
+                        m_phase = 4;
+                        return false;
+                    case 4:
+                        if (m_stepFrames - m_scratch[0] < 30) return false;
+                        requestBoth();
+                        m_phase = 5;
+                        return false;
+                    case 5: {
+                        if (!m_backbufferReady || !m_captureReady) return false;
+                        const int v = int(m_scratch[1]);
+                        writeBackbuffer(c.shotPrefix + "_" + views[v]);
+                        const Entity cam = Find(ctx, "MainCamera");
+                        const bool ortho = cam && cam.Get<Camera>().projection == Projection::Orthographic;
+                        const int parts = partsInView(c.root);
+                        const int need = v == CW::Bottom ? c.minBottomParts : c.minViewParts;   // from below the lowest parts hide the rest
+                        Expect(L + " CAD view " + views[v] + ": components individually pickable", parts >= need && ortho == (v != CW::Perspective) && cad->CurrentView() == v,
+                               F("%.0f distinct parts in view, ", parts) + (ortho ? "orthographic" : "perspective"));
+                        m_scratch[1] += 1.0f;
+                        m_phase = int(m_scratch[1]) < CW::ViewCount ? 3 : 6;
+                        return false;
+                    }
+                    case 6:
+                        cad->SetExplodeTarget(1.0f);
+                        cad->ApplyView(ctx, CW::Perspective);
+                        m_scratch[0] = float(m_stepFrames);
+                        m_phase = 7;
+                        return false;
+                    case 7:
+                        if (cad->Explode() < 0.999f || m_stepFrames - m_scratch[0] < 20) return false;
+                        requestBoth();
+                        m_phase = 8;
+                        return false;
+                    case 8: {
+                        if (!m_backbufferReady || !m_captureReady) return false;
+                        writeBackbuffer(c.shotPrefix + "_exploded");
+                        std::string detail;
+                        const bool ok = c.explodedOk(ctx, detail);
+                        Expect(L + " CAD exploded view: " + c.exploded, ok, detail + F(", %.0f parts in view", partsInView(c.root)));
+                        cad->SetExplodeNow(0.0f);
+                        std::string back;
+                        const bool collapsed = c.collapsedOk(ctx, back);
+                        Expect(L + " CAD: " + c.collapsed, collapsed, back);
+                        // hide a subsystem and one individual component
+                        Lab::ProjectKit::SetVisible(Find(ctx, c.hideGroup), false);
+                        Lab::ProjectKit::SetVisible(Find(ctx, c.hidePart), false);
+                        cad->ApplyView(ctx, CW::Perspective);
+                        m_scratch[0] = float(m_stepFrames);
+                        m_phase = 9;
+                        return false;
+                    }
+                    case 9: if (m_stepFrames - m_scratch[0] < 5) return false; RequestCapture(); m_phase = 10; return false;
+                    case 10: {
+                        if (!m_captureReady) return false;
+                        const int group = partsInView(c.hideGroup), single = partsInView(c.hidePart), rest = partsInView(c.root);
+                        Lab::ProjectKit::SetVisible(Find(ctx, c.hideGroup), true);
+                        Lab::ProjectKit::SetVisible(Find(ctx, c.hidePart), true);
+                        Expect(L + " CAD: hidden subsystem and hidden component leave the image, the rest stays", group == 0 && single == 0 && rest >= c.minViewParts &&
+                               Lab::ProjectKit::AnyVisible(Find(ctx, c.hideGroup)) && Lab::ProjectKit::AnyVisible(Find(ctx, c.hidePart)),
+                               c.hideGroup + F(" %.0f, ", group) + c.hidePart + F(" %.0f, ", single) + F("other parts %.0f", rest));
+                        m_phase = 11;
+                        return false;
+                    }
+                    case 11: {   // edit a transform and a material, save, reopen
+                        Scene& scene = *ctx.CurrentScene();
+                        Find(ctx, c.editPart).LocalTransform().position += glm::vec3(0.0f, 0.02f, 0.0f);
+                        Render::MaterialDesc mat = *Render::FindMaterial(c.editMaterial);
+                        const glm::vec3 original = mat.baseColor;
+                        mat.baseColor = glm::vec3(0.9f, 0.3f, 0.1f);
+                        Render::RegisterMaterial(c.editMaterial, mat);
+                        const std::string path = m_runDirectory + "/" + c.shotPrefix + "_edit_test.scene.json";
+                        const std::string before = SceneSerializer::ToJson(scene);
+                        const size_t entities = scene.EntityCount();
+                        std::string error;
+                        const bool saved = SceneSerializer::Save(scene, path);
+                        Render::RegisterMaterial(c.editMaterial, Render::MaterialDesc());   // wiped: must come back from the file
+                        const bool loaded = saved && SceneSerializer::Load(scene, path, &error);
+                        const std::string after = SceneSerializer::ToJson(scene);
+                        const Render::MaterialDesc* m = Render::FindMaterial(c.editMaterial);
+                        Entity part = Find(ctx, c.editPart);
+                        Expect(L + " CAD: edits survive save + reopen (" + c.editPart + " transform, " + c.editMaterial + ")",
+                               loaded && after == before && scene.EntityCount() == entities && part && std::abs(part.LocalTransform().position.y - 0.02f) < 1e-5f && m && std::abs(m->baseColor.y - 0.3f) < 1e-5f,
+                               F("%.0f entities, %.0f bytes", double(entities), double(before.size())) + (error.empty() ? "" : ", " + error));
+                        Find(ctx, c.editPart).LocalTransform().position -= glm::vec3(0.0f, 0.02f, 0.0f);
+                        mat.baseColor = original;
+                        Render::RegisterMaterial(c.editMaterial, mat);
+                        m_scratch[0] = float(m_stepFrames);
+                        m_phase = 12;
+                        return false;
+                    }
+                    case 12: {
+                        if (m_stepFrames - m_scratch[0] < 10) return false;
+                        const RenderStats r = GetRenderStats();
+                        Expect(L + " CAD reopened: parts rebuilt", r.meshObjects == CountRenderedEntities(ctx) && Find(ctx, c.root), F("%.0f render objects", r.meshObjects));
+                        return true;
+                    }
+                }
+                return false;
+            };
+        };
+
+        {
+            CadCase rover;
+            rover.title = "Rover CAD: standalone rover workspace, views, explode, visibility, save";
+            rover.scene = "RoverCAD"; rover.root = Lab::RoverCadScene::ROOT; rover.label = "rover"; rover.shotPrefix = "rcad";
+            rover.named = { "Rover body", "Chassis", "Bodywork", "Drive system", "Electronics", "LiDAR", "Sensor-positioning arm", "End effector",
+                            "Soil sensor head", "Rover wiring", "Raspberry Pi Pico", "J1 Base yaw", "J4 Wrist", "Wheel FL", "Wheel RR", "Fender L", "Fender R" };
+            rover.wiringGroups = { "Rover wiring" };
+            rover.minParts = 90; rover.minRuns = 8; rover.minViewParts = 25; rover.minBottomParts = 10;   // from below the chassis box hides everything but the underside
+            rover.hideGroup = "Bodywork"; rover.hidePart = "Gripper"; rover.editPart = "Fender R"; rover.editMaterial = "OMD/RoverYellow";
+            rover.exploded = "LiDAR up, wheels out, arm lifted, wiring hidden";
+            rover.explodedOk = [this](GameContext& ctx, std::string& d) {
+                Entity lidar = Find(ctx, "LiDAR"), wheel = Find(ctx, "Wheel FR"), arm = Find(ctx, "Sensor-positioning arm"), wiring = Find(ctx, "Rover wiring");
+                d = F("LiDAR y %.3f, ", lidar.LocalTransform().position.y) + F("wheel FR z %.3f", wheel.LocalTransform().position.z);
+                return lidar.LocalTransform().position.y > 0.4f && wheel.LocalTransform().position.z > 0.4f && arm.LocalTransform().position.y > 0.4f && !Lab::ProjectKit::AnyVisible(wiring);
+            };
+            rover.collapsed = "collapses back to the assembled layout";
+            rover.collapsedOk = [this](GameContext& ctx, std::string& d) {
+                Entity lidar = Find(ctx, "LiDAR");
+                d = F("LiDAR y %.4f", lidar.LocalTransform().position.y);
+                return std::abs(lidar.LocalTransform().position.y - 0.168f) < 1e-4f && Lab::ProjectKit::AnyVisible(Find(ctx, "Rover wiring"));
+            };
+            m_steps.push_back({ rover.title, cadStep(rover), 120.0 });
+        }
+        {
+            CadCase drone;
+            drone.title = "Drone CAD: standalone drone workspace, views, explode, visibility, save";
+            drone.scene = "DroneCAD"; drone.root = Lab::DroneCadScene::ROOT; drone.label = "drone"; drone.shotPrefix = "dcad";
+            drone.named = { "Frame (F450 class)", "Propulsion", "Propellers", "Electronics", "Drone wiring", "Battery - LiPo", "GPS - ReadyToSky", "Landing gear",
+                            "Flight controller - Pixhawk 2.4.8", "Pixhawk 2.4.8 case", "GPS puck", "Top plate", "Arm beam 1", "Arm beam 4", "Motor 1", "Motor 4",
+                            "Propeller 1", "Propeller 4", "ESC 1", "ESC leads 4", "Motor mount 2", "Cable tie 3", "Prop nut 2" };
+            drone.wiringGroups = { "Drone wiring", "ESC leads 1", "ESC leads 2", "ESC leads 3", "ESC leads 4" };
+            drone.minParts = 60; drone.minRuns = 23; drone.minViewParts = 25; drone.minBottomParts = 15;
+            drone.hideGroup = "Propellers"; drone.hidePart = "GPS puck"; drone.editPart = "Top plate"; drone.editMaterial = "OMD/MotorRed";
+            drone.exploded = "FC up, battery and gear down, arms out, assembly lifted clear of the ground, wiring hidden";
+            drone.explodedOk = [this](GameContext& ctx, std::string& d) {
+                Entity fc = Find(ctx, "Flight controller - Pixhawk 2.4.8"), bat = Find(ctx, "Battery - LiPo"), arm = Find(ctx, "Arm beam 1"),
+                       root = Find(ctx, Lab::DroneCadScene::ROOT), gear = Find(ctx, "Landing gear");
+                const float lowest = std::min(bat.WorldPosition().y + 0.068f - 0.0175f, gear.WorldPosition().y);   // pack underside, skid underside
+                d = F("FC +%.3f, ", fc.LocalTransform().position.y) + F("battery %.3f, ", bat.LocalTransform().position.y) +
+                    F("arm 1 out %.3f, ", glm::length(arm.LocalTransform().position)) + F("lowest part y %.3f", lowest);
+                return fc.LocalTransform().position.y > 0.12f && bat.LocalTransform().position.y < -0.19f && glm::length(arm.LocalTransform().position) > 0.10f &&
+                       root.LocalTransform().position.y > 0.19f && lowest > 0.0f && !Lab::ProjectKit::AnyVisible(Find(ctx, "Drone wiring"));
+            };
+            drone.collapsed = "collapses back to the assembled layout (skids on the ground)";
+            drone.collapsedOk = [this](GameContext& ctx, std::string& d) {
+                Entity root = Find(ctx, Lab::DroneCadScene::ROOT), bat = Find(ctx, "Battery - LiPo");
+                d = F("root y %.4f, ", root.LocalTransform().position.y) + F("battery %.4f", bat.LocalTransform().position.y);
+                return std::abs(root.LocalTransform().position.y) < 1e-4f && std::abs(bat.LocalTransform().position.y) < 1e-4f && Lab::ProjectKit::AnyVisible(Find(ctx, "Drone wiring"));
+            };
+            m_steps.push_back({ drone.title, cadStep(drone), 120.0 });
+        }
 
         m_steps.push_back({ "Scene transition back to Sandbox", [this](GameContext& ctx) {
             if (m_phase == 0) { ctx.scenes->Request("Sandbox"); m_phase = 1; return false; }

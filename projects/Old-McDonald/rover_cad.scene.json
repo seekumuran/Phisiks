@@ -1,0 +1,5269 @@
+{
+  "entities": [
+    {
+      "name": "CAD Studio",
+      "parent": -1,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": false,
+        "material": "CAD/Ground",
+        "mesh": "Cube",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Ground grid",
+      "parent": 0,
+      "transform": {
+        "position": [
+          0.0,
+          -0.0010000000474974513,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          3.0,
+          0.0020000000949949026,
+          3.0
+        ]
+      }
+    },
+    {
+      "light": {
+        "castShadows": true,
+        "color": [
+          1.0,
+          0.9700000286102295,
+          0.9200000166893005
+        ],
+        "innerConeAngle": 0.3499999940395355,
+        "intensity": 2.4000000953674316,
+        "outerConeAngle": 0.6000000238418579,
+        "range": 10.0,
+        "type": "Directional"
+      },
+      "name": "Key light",
+      "parent": 0,
+      "transform": {
+        "position": [
+          2.5,
+          4.0,
+          3.0
+        ],
+        "rotation": [
+          0.8665228486061096,
+          -0.3650325536727905,
+          0.3137245774269104,
+          0.132160022854805
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "light": {
+        "castShadows": false,
+        "color": [
+          0.800000011920929,
+          0.8600000143051147,
+          1.0
+        ],
+        "innerConeAngle": 0.3499999940395355,
+        "intensity": 0.699999988079071,
+        "outerConeAngle": 0.6000000238418579,
+        "range": 10.0,
+        "type": "Directional"
+      },
+      "name": "Fill light",
+      "parent": 0,
+      "transform": {
+        "position": [
+          -3.0,
+          2.5,
+          -2.0
+        ],
+        "rotation": [
+          -0.4503439962863922,
+          0.14085514843463898,
+          0.8414754867553711,
+          0.26319023966789246
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "light": {
+        "castShadows": false,
+        "color": [
+          0.8999999761581421,
+          0.8999999761581421,
+          0.949999988079071
+        ],
+        "innerConeAngle": 0.3499999940395355,
+        "intensity": 0.3499999940395355,
+        "outerConeAngle": 0.6000000238418579,
+        "range": 10.0,
+        "type": "Directional"
+      },
+      "name": "Under light",
+      "parent": 0,
+      "transform": {
+        "position": [
+          0.5,
+          -3.0,
+          1.0
+        ],
+        "rotation": [
+          0.7993731498718262,
+          0.5551722049713135,
+          0.1887064129114151,
+          -0.13105838000774384
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Old-McDonald Soil Rover",
+      "parent": -1,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Rover body",
+      "parent": 5,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Chassis",
+      "parent": 6,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_chassis.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Chassis box",
+      "parent": 7,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_bumpers.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Bumpers",
+      "parent": 7,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Aluminium",
+        "mesh": "meshes/oldmcdonald/rover_standoffs.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Deck standoffs",
+      "parent": 7,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_deck.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Equipment deck",
+      "parent": 7,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Stainless",
+        "mesh": "meshes/oldmcdonald/rover_fasteners.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Deck fasteners",
+      "parent": 7,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_arm_platform.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Arm mounting platform",
+      "parent": 7,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Bodywork",
+      "parent": 6,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/RoverYellow",
+        "mesh": "meshes/oldmcdonald/rover_fender.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Fender L",
+      "parent": 14,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          -1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/RoverYellow",
+        "mesh": "meshes/oldmcdonald/rover_fender.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Fender R",
+      "parent": 14,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_fender_brackets.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Fender brackets",
+      "parent": 14,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/RoverYellow",
+        "mesh": "meshes/oldmcdonald/rover_front_panel.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Front panel",
+      "parent": 14,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Drive system",
+      "parent": 6,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/MotorBlack",
+        "mesh": "meshes/oldmcdonald/rover_motors.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Gearmotors",
+      "parent": 19,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Wheel FL",
+      "parent": 19,
+      "transform": {
+        "position": [
+          0.17000000178813934,
+          0.07000000029802322,
+          -0.2150000035762787
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Rubber",
+        "mesh": "meshes/oldmcdonald/rover_tyre.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Tyre",
+      "parent": 21,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/RimBlue",
+        "mesh": "meshes/oldmcdonald/rover_rim.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Rim",
+      "parent": 21,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_hub.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Hub",
+      "parent": 21,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Wheel FR",
+      "parent": 19,
+      "transform": {
+        "position": [
+          0.17000000178813934,
+          0.07000000029802322,
+          0.2150000035762787
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Rubber",
+        "mesh": "meshes/oldmcdonald/rover_tyre.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Tyre",
+      "parent": 25,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/RimBlue",
+        "mesh": "meshes/oldmcdonald/rover_rim.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Rim",
+      "parent": 25,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_hub.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Hub",
+      "parent": 25,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Wheel RL",
+      "parent": 19,
+      "transform": {
+        "position": [
+          -0.17000000178813934,
+          0.07000000029802322,
+          -0.2150000035762787
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Rubber",
+        "mesh": "meshes/oldmcdonald/rover_tyre.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Tyre",
+      "parent": 29,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/RimBlue",
+        "mesh": "meshes/oldmcdonald/rover_rim.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Rim",
+      "parent": 29,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_hub.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Hub",
+      "parent": 29,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Wheel RR",
+      "parent": 19,
+      "transform": {
+        "position": [
+          -0.17000000178813934,
+          0.07000000029802322,
+          0.2150000035762787
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Rubber",
+        "mesh": "meshes/oldmcdonald/rover_tyre.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Tyre",
+      "parent": 33,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/RimBlue",
+        "mesh": "meshes/oldmcdonald/rover_rim.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Rim",
+      "parent": 33,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/rover_hub.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Hub",
+      "parent": 33,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Electronics",
+      "parent": 6,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Raspberry Pi Pico",
+      "parent": 37,
+      "transform": {
+        "position": [
+          0.04500000178813934,
+          0.1679999977350235,
+          -0.0949999988079071
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Perfboard",
+        "mesh": "meshes/oldmcdonald/pico_carrier.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Carrier board",
+      "parent": 38,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/PicoGreen",
+        "mesh": "meshes/oldmcdonald/pico_pcb.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Pico board",
+      "parent": 38,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ICBlack",
+        "mesh": "meshes/oldmcdonald/pico_parts.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "RP2040 and parts",
+      "parent": 38,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Tin",
+        "mesh": "meshes/oldmcdonald/pico_metal.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "USB and crystal",
+      "parent": 38,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Motor driver",
+      "parent": 37,
+      "transform": {
+        "position": [
+          0.04500000178813934,
+          0.1679999977350235,
+          0.08500000089406967
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/DriverRed",
+        "mesh": "meshes/oldmcdonald/driver_board.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Driver board",
+      "parent": 43,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/driver_heatsink.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Heatsink",
+      "parent": 43,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/TerminalBlue",
+        "mesh": "meshes/oldmcdonald/driver_terminals.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Screw terminals",
+      "parent": 43,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ICBlack",
+        "mesh": "Cube",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Logic header",
+      "parent": 43,
+      "transform": {
+        "position": [
+          0.003800000064074993,
+          0.011850000359117985,
+          -0.01899999938905239
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.011500000022351742,
+          0.008500000461935997,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Battery",
+        "mesh": "meshes/oldmcdonald/rover_battery.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Battery pack",
+      "parent": 37,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "LiDAR",
+      "parent": 6,
+      "transform": {
+        "position": [
+          0.1850000023841858,
+          0.1679999977350235,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Aluminium",
+        "mesh": "meshes/oldmcdonald/lidar_mast.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "LiDAR mast",
+      "parent": 49,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/LidarBody",
+        "mesh": "meshes/oldmcdonald/lidar_base.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "LiDAR base",
+      "parent": 49,
+      "transform": {
+        "position": [
+          0.0,
+          0.05000000074505806,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "LiDAR head",
+      "parent": 49,
+      "transform": {
+        "position": [
+          0.0,
+          0.07999999821186066,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/LidarBody",
+        "mesh": "meshes/oldmcdonald/lidar_head.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Rotor housing",
+      "parent": 52,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/LidarWindow",
+        "mesh": "meshes/oldmcdonald/lidar_window.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Optical window",
+      "parent": 52,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Sensor-positioning arm",
+      "parent": 6,
+      "transform": {
+        "position": [
+          -0.10999999940395355,
+          0.1979999989271164,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/arm_base.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Base servo mount",
+      "parent": 55,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ServoBlue",
+        "mesh": "meshes/oldmcdonald/arm_servo.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Base servo",
+      "parent": 55,
+      "transform": {
+        "position": [
+          0.0,
+          0.02199999988079071,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          -0.7071067690849304,
+          -0.0,
+          -0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "J1 Base yaw",
+      "parent": 55,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/HornOrange",
+        "mesh": "meshes/oldmcdonald/arm_turntable.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Base turntable",
+      "parent": 58,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/arm_cradle.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Shoulder cradle",
+      "parent": 58,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ServoBlue",
+        "mesh": "meshes/oldmcdonald/arm_servo.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Shoulder actuator",
+      "parent": 58,
+      "transform": {
+        "position": [
+          0.0,
+          0.08799999952316284,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          0.0,
+          0.7071067690849304
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "J2 Shoulder",
+      "parent": 58,
+      "transform": {
+        "position": [
+          0.0,
+          0.08799999952316284,
+          0.0
+        ],
+        "rotation": [
+          0.6427876353263855,
+          0.0,
+          0.0,
+          0.7660444378852844
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/HornOrange",
+        "mesh": "meshes/oldmcdonald/arm_horn.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Shoulder horn",
+      "parent": 62,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/arm_upper.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Upper link",
+      "parent": 62,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ServoBlue",
+        "mesh": "meshes/oldmcdonald/arm_servo.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Elbow actuator",
+      "parent": 62,
+      "transform": {
+        "position": [
+          0.30000001192092896,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "J3 Elbow",
+      "parent": 62,
+      "transform": {
+        "position": [
+          0.30000001192092896,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.3826834261417389,
+          -0.0,
+          -0.0,
+          -0.9238795042037964
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/HornOrange",
+        "mesh": "meshes/oldmcdonald/arm_horn.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Elbow horn",
+      "parent": 66,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/arm_fore.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Forearm link",
+      "parent": 66,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Aluminium",
+        "mesh": "meshes/oldmcdonald/arm_tube.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Forearm tube",
+      "parent": 66,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ServoBlue",
+        "mesh": "meshes/oldmcdonald/arm_servo.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Wrist actuator",
+      "parent": 66,
+      "transform": {
+        "position": [
+          0.25999999046325684,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "J4 Wrist",
+      "parent": 66,
+      "transform": {
+        "position": [
+          0.25999999046325684,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.9537169337272644,
+          0.0,
+          0.0,
+          0.30070579051971436
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/HornOrange",
+        "mesh": "meshes/oldmcdonald/arm_horn.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Wrist horn",
+      "parent": 71,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/arm_wrist.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Wrist bracket",
+      "parent": 71,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "End effector",
+      "parent": 71,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ServoBlue",
+        "mesh": "meshes/oldmcdonald/arm_servo.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Wrist rotate servo",
+      "parent": 74,
+      "transform": {
+        "position": [
+          0.0,
+          -0.05299999937415123,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/HornOrange",
+        "mesh": "meshes/oldmcdonald/arm_horn_disc.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Rotate horn",
+      "parent": 74,
+      "transform": {
+        "position": [
+          0.0,
+          -0.05299999937415123,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Anodised",
+        "mesh": "meshes/oldmcdonald/arm_gripper.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Gripper",
+      "parent": 74,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/ServoBlue",
+        "mesh": "meshes/oldmcdonald/arm_servo.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Gripper servo",
+      "parent": 74,
+      "transform": {
+        "position": [
+          -0.004999999888241291,
+          -0.06599999964237213,
+          0.03999999910593033
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Soil sensor head",
+      "parent": 71,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Aluminium",
+        "mesh": "meshes/oldmcdonald/sensor_head.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Head bracket",
+      "parent": 79,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Soil moisture sensor",
+      "parent": 79,
+      "transform": {
+        "position": [
+          -0.029999999329447746,
+          -0.10000000149011612,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/DarkPlastic",
+        "mesh": "meshes/oldmcdonald/probe_moisture_body.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Moisture probe housing",
+      "parent": 81,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/PCBDark",
+        "mesh": "meshes/oldmcdonald/probe_moisture_blade.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Moisture probe blade",
+      "parent": 81,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Soil temperature sensor",
+      "parent": 79,
+      "transform": {
+        "position": [
+          0.0,
+          -0.10000000149011612,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Stainless",
+        "mesh": "meshes/oldmcdonald/probe_temperature.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "Temperature probe",
+      "parent": 84,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Soil pH sensor",
+      "parent": 79,
+      "transform": {
+        "position": [
+          0.029999999329447746,
+          -0.10000000149011612,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/DarkPlastic",
+        "mesh": "meshes/oldmcdonald/probe_ph_body.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "pH electrode body",
+      "parent": 86,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": false,
+        "material": "OMD/PHGlass",
+        "mesh": "meshes/oldmcdonald/probe_ph_tip.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "pH glass tip",
+      "parent": 86,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Rover wiring",
+      "parent": 6,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Pico GP to driver IN1",
+      "parent": 89,
+      "transform": {
+        "position": [
+          0.04500000178813934,
+          0.18709999322891235,
+          -0.08609999716281891
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Yellow",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 90,
+      "transform": {
+        "position": [
+          0.0,
+          0.004325002431869507,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.008650004863739014,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Yellow",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 90,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.0
+        ],
+        "rotation": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Yellow",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 90,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.07604999840259552
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.147599995136261,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Yellow",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 90,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.15209999680519104
+        ],
+        "rotation": [
+          0.0,
+          0.7071067690849304,
+          0.0,
+          0.7071067690849304
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Yellow",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 90,
+      "transform": {
+        "position": [
+          0.0,
+          0.0028249919414520264,
+          0.15209999680519104
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.011650010012090206,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "name": "Pico GP to driver IN2",
+      "parent": 89,
+      "transform": {
+        "position": [
+          0.047540001571178436,
+          0.18709999322891235,
+          -0.08609999716281891
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Green",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 96,
+      "transform": {
+        "position": [
+          0.0,
+          0.004325002431869507,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.008650004863739014,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Green",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 96,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.0
+        ],
+        "rotation": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Green",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 96,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.07604999840259552
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.147599995136261,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Green",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 96,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.15209999680519104
+        ],
+        "rotation": [
+          0.0,
+          0.7071067690849304,
+          0.0,
+          0.7071067690849304
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Green",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 96,
+      "transform": {
+        "position": [
+          0.0,
+          0.0028249919414520264,
+          0.15209999680519104
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.011650010012090206,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "name": "Pico GP to driver IN3",
+      "parent": 89,
+      "transform": {
+        "position": [
+          0.05008000135421753,
+          0.18709999322891235,
+          -0.08609999716281891
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Blue",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 102,
+      "transform": {
+        "position": [
+          0.0,
+          0.004325002431869507,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.008650004863739014,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Blue",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 102,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.0
+        ],
+        "rotation": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Blue",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 102,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.07604999840259552
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.147599995136261,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Blue",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 102,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.15209999680519104
+        ],
+        "rotation": [
+          0.0,
+          0.7071067690849304,
+          0.0,
+          0.7071067690849304
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Blue",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 102,
+      "transform": {
+        "position": [
+          0.0,
+          0.0028249919414520264,
+          0.15209999680519104
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.011650010012090206,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "name": "Pico GP to driver IN4",
+      "parent": 89,
+      "transform": {
+        "position": [
+          0.05262000113725662,
+          0.18709999322891235,
+          -0.08609999716281891
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/White",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 108,
+      "transform": {
+        "position": [
+          0.0,
+          0.004325002431869507,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.008650004863739014,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/White",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 108,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.0
+        ],
+        "rotation": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/White",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 108,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.07604999840259552
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.147599995136261,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/White",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 108,
+      "transform": {
+        "position": [
+          0.0,
+          0.01090000569820404,
+          0.15209999680519104
+        ],
+        "rotation": [
+          0.0,
+          0.7071067690849304,
+          0.0,
+          0.7071067690849304
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.001500000013038516,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/White",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 108,
+      "transform": {
+        "position": [
+          0.0,
+          0.0028249919414520264,
+          0.15209999680519104
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.001500000013038516,
+          0.011650010012090206,
+          0.001500000013038516
+        ]
+      }
+    },
+    {
+      "name": "LiDAR UART cable",
+      "parent": 89,
+      "transform": {
+        "position": [
+          0.14900000393390656,
+          0.2329999953508377,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.010124996304512024,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          -0.0,
+          0.7071067690849304
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.02025000751018524,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.024000003933906555,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.0024999999441206455,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.024000003933906555,
+          -0.028999999165534973,
+          0.0
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.05050000548362732,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.024000003933906555,
+          -0.057999998331069946,
+          0.0
+        ],
+        "rotation": [
+          0.5,
+          -0.4999999701976776,
+          0.4999999701976776,
+          -0.5
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.0024999999441206455,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.024000003933906555,
+          -0.057999998331069946,
+          -0.05195000022649765
+        ],
+        "rotation": [
+          0.7071067690849304,
+          -0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.09640000015497208,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "06 Bend",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.024000003933906555,
+          -0.057999998331069946,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          0.5,
+          -0.4999999701976776,
+          0.4999999701976776,
+          0.5
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.0024999999441206455,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "07 Wire",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.04749999940395355,
+          -0.057999998331069946,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          -0.0,
+          0.7071067690849304
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.039500005543231964,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "08 Bend",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.07100000232458115,
+          -0.057999998331069946,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.0024999999441206455,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "09 Wire",
+      "parent": 114,
+      "transform": {
+        "position": [
+          -0.07100000232458115,
+          -0.05007500946521759,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.0024999999441206455,
+          0.008349999785423279,
+          0.0024999999441206455
+        ]
+      }
+    },
+    {
+      "name": "Arm actuator bus",
+      "parent": 89,
+      "transform": {
+        "position": [
+          -0.09919999539852142,
+          0.20999999344348907,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.022349998354911804,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          0.0,
+          -0.7071067690849304
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.04469999298453331,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.049199994653463364,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.049199994653463364,
+          -0.019000008702278137,
+          0.0
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.028999999165534973,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.049199994653463364,
+          -0.03800000250339508,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          -0.0,
+          -0.7071067690849304
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.07619999349117279,
+          -0.03800000250339508,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          0.0,
+          -0.7071067690849304
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.04500000178813934,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "06 Bend",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.10319999605417252,
+          -0.03800000250339508,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          -0.7071067094802856,
+          -0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "07 Wire",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.10319999605417252,
+          -0.03800000250339508,
+          -0.05195000022649765
+        ],
+        "rotation": [
+          0.7071067690849304,
+          -0.7071067690849304,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.0948999896645546,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "08 Bend",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.10319999605417252,
+          -0.03800000250339508,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          0.5,
+          0.4999999701976776,
+          0.4999999701976776,
+          -0.5
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "09 Wire",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.11194999516010284,
+          -0.03800000250339508,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          0.0,
+          -0.7071067690849304
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.008500000461935997,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "10 Bend",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.12069999426603317,
+          -0.03800000250339508,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Cable",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "11 Wire",
+      "parent": 124,
+      "transform": {
+        "position": [
+          0.12069999426603317,
+          -0.028200000524520874,
+          -0.1039000004529953
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.010600000619888306,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "name": "Battery feed +",
+      "parent": 89,
+      "transform": {
+        "position": [
+          0.06200000271201134,
+          0.18559999763965607,
+          0.08100000023841858
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Red",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 136,
+      "transform": {
+        "position": [
+          0.0,
+          0.003949999809265137,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.007899998687207699,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Red",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 136,
+      "transform": {
+        "position": [
+          0.0,
+          0.012400001287460327,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Red",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 136,
+      "transform": {
+        "position": [
+          0.02149999514222145,
+          0.012400001287460327,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          0.0,
+          -0.7071067690849304
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.03399999439716339,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Red",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 136,
+      "transform": {
+        "position": [
+          0.0429999940097332,
+          0.012400001287460327,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Red",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 136,
+      "transform": {
+        "position": [
+          0.0429999940097332,
+          -0.004100009799003601,
+          0.0
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.024000002071261406,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "name": "Battery feed -",
+      "parent": 89,
+      "transform": {
+        "position": [
+          0.06200000271201134,
+          0.18559999763965607,
+          0.08900000154972076
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Black",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "01 Wire",
+      "parent": 142,
+      "transform": {
+        "position": [
+          0.0,
+          0.003949999809265137,
+          0.0
+        ],
+        "rotation": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.007899998687207699,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Black",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "02 Bend",
+      "parent": 142,
+      "transform": {
+        "position": [
+          0.0,
+          0.012400001287460327,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.7071067690849304,
+          0.7071067690849304,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Black",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "03 Wire",
+      "parent": 142,
+      "transform": {
+        "position": [
+          0.02149999514222145,
+          0.012400001287460327,
+          0.0
+        ],
+        "rotation": [
+          0.7071067690849304,
+          0.0,
+          0.0,
+          -0.7071067690849304
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.03399999439716339,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Black",
+        "mesh": "meshes/marina/tube_bend.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "04 Bend",
+      "parent": 142,
+      "transform": {
+        "position": [
+          0.0429999940097332,
+          0.012400001287460327,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.003000000026077032,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "material": "OMD/Wire/Black",
+        "mesh": "meshes/marina/rod.obj",
+        "uvScale": [
+          1.0,
+          1.0
+        ],
+        "visible": true
+      },
+      "name": "05 Wire",
+      "parent": 142,
+      "transform": {
+        "position": [
+          0.0429999940097332,
+          -0.004100009799003601,
+          0.0
+        ],
+        "rotation": [
+          -4.371138828673793e-08,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.003000000026077032,
+          0.024000002071261406,
+          0.003000000026077032
+        ]
+      }
+    },
+    {
+      "camera": {
+        "enabled": true,
+        "farPlane": 60.0,
+        "nearPlane": 0.009999999776482582,
+        "order": 0,
+        "orthoHeight": 0.9930152893066406,
+        "orthographic": false,
+        "primary": true,
+        "target": "",
+        "targetSize": [
+          512,
+          512
+        ],
+        "verticalFov": 0.6200000047683716,
+        "viewport": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ]
+      },
+      "name": "MainCamera",
+      "parent": -1,
+      "transform": {
+        "position": [
+          1.0152652263641357,
+          0.9020286798477173,
+          0.9860405325889587
+        ],
+        "rotation": [
+          0.900826096534729,
+          -0.1920042783021927,
+          0.38086315989494324,
+          0.08117810636758804
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "format": "phisiks-scene",
+  "materials": {
+    "CAD/Ground": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.800000011920929,
+        0.8100000023841858,
+        0.8299999833106995
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.014999999664723873,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 2,
+      "patternColor": [
+        0.699999988079071,
+        0.7099999785423279,
+        0.7400000095367432
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 10.0,
+      "roughness": 0.9200000166893005,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Aluminium": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.8600000143051147,
+        0.8700000047683716,
+        0.8799999952316284
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 1.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.3400000035762787,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Anodised": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.03500000014901161,
+        0.03700000047683716,
+        0.041999999433755875
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.6000000238418579,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.41999998688697815,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Battery": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.05000000074505806,
+        0.05000000074505806,
+        0.054999999701976776
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.5,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Cable": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.05999999865889549,
+        0.06199999898672104,
+        0.06800000369548798
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.6000000238418579,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/DarkPlastic": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.04500000178813934,
+        0.04699999839067459,
+        0.052000001072883606
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.550000011920929,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/DriverRed": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.41999998688697815,
+        0.03999999910593033,
+        0.03999999910593033
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.4000000059604645,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/HornOrange": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.8500000238418579,
+        0.3799999952316284,
+        0.05999999865889549
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.699999988079071,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.3499999940395355,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/ICBlack": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.017999999225139618,
+        0.017999999225139618,
+        0.019999999552965164
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.3499999940395355,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/LidarBody": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.029999999329447746,
+        0.03200000151991844,
+        0.035999998450279236
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.20000000298023224,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.3499999940395355,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/LidarWindow": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.019999999552965164,
+        0.019999999552965164,
+        0.029999999329447746
+      ],
+      "emissive": [
+        0.03999999910593033,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.05000000074505806,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/MotorBlack": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.03999999910593033,
+        0.03999999910593033,
+        0.04500000178813934
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.800000011920929,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.30000001192092896,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/PCBDark": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.05000000074505806,
+        0.10000000149011612,
+        0.07999999821186066
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.4000000059604645,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/PHGlass": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.8500000238418579,
+        0.9200000166893005,
+        0.949999988079071
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 0.44999998807907104,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.05000000074505806,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Perfboard": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.41999998688697815,
+        0.30000001192092896,
+        0.14000000059604645
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.550000011920929,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/PicoGreen": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.019999999552965164,
+        0.25999999046325684,
+        0.09000000357627869
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.3799999952316284,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/RimBlue": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.30000001192092896,
+        0.44999998807907104,
+        0.6200000047683716
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.8500000238418579,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.3199999928474426,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/RoverYellow": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.8500000238418579,
+        0.6200000047683716,
+        0.05000000074505806
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.44999998807907104,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Rubber": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.02500000037252903,
+        0.02500000037252903,
+        0.027000000700354576
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.9200000166893005,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/ServoBlue": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.029999999329447746,
+        0.36000001430511475,
+        0.7200000286102295
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.4000000059604645,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Stainless": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.6600000262260437,
+        0.6700000166893005,
+        0.6800000071525574
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 1.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.25999999046325684,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/TerminalBlue": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.05999999865889549,
+        0.20000000298023224,
+        0.550000011920929
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.5,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Tin": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.800000011920929,
+        0.800000011920929,
+        0.8199999928474426
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 1.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.30000001192092896,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Wire/Black": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.02500000037252903,
+        0.02500000037252903,
+        0.02800000086426735
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.44999998807907104,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Wire/Blue": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.05000000074505806,
+        0.18000000715255737,
+        0.699999988079071
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.44999998807907104,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Wire/Green": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.05000000074505806,
+        0.44999998807907104,
+        0.11999999731779099
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.44999998807907104,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Wire/Red": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.6200000047683716,
+        0.03999999910593033,
+        0.029999999329447746
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.44999998807907104,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Wire/White": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.8199999928474426,
+        0.8199999928474426,
+        0.800000011920929
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.44999998807907104,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    },
+    "OMD/Wire/Yellow": {
+      "albedoTexture": "",
+      "baseColor": [
+        0.800000011920929,
+        0.6200000047683716,
+        0.05000000074505806
+      ],
+      "emissive": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "lineWidth": 0.03999999910593033,
+      "metallic": 0.0,
+      "opacity": 1.0,
+      "pattern": 0,
+      "patternColor": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "patternGlow": 0.0,
+      "patternRoughness": -1.0,
+      "patternScale": 1.0,
+      "roughness": 0.44999998807907104,
+      "textureScale": 1.0,
+      "textureUsesMeshUV": false
+    }
+  },
+  "name": "RoverCAD",
+  "version": 1
+}

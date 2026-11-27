@@ -1,0 +1,24 @@
+{
+  "format": "phisiks-project",
+  "version": 1,
+  "name": "Old-McDonald",
+  "title": "Autonomous Agricultural Robotics - Engineering Visualisation",
+  "note": "Informational metadata. PhisiksLab builds the scene from OldMcDonaldScene.cpp and loads / saves the scene file below; it does not read this file.",
+  "lab_scene": "OldMcDonald",
+  "scene_file": "projects/Old-McDonald/old_mcdonald.scene.json",
+  "assets": "assets/meshes/oldmcdonald",
+  "materials": "saved inside the scene file (prefix OMD/)",
+  "configuration": "apps/lab/src/OldMcDonaldSpec.h",
+  "documentation": "projects/Old-McDonald/README.md",
+  "systems": {
+    "drone": ["Pixhawk 2.4.8 flight controller", "ReadyToSky GPS module", "brushless motors x4", "ESCs x4", "10 inch propellers x4", "power distribution (frame plate)", "LiPo battery", "F450-class frame and landing gear"],
+    "rover": ["Raspberry Pi Pico (not Pico W)", "2D LiDAR", "sensor-positioning arm (4 joints)", "soil sensor head", "drive system (4 wheels, gearmotors, motor driver)", "chassis and deck", "battery pack"],
+    "soil_sensors": ["moisture", "temperature", "pH"],
+    "sampling_grid": { "rows": ["A", "B", "C", "D"], "columns": 4, "points": 16 }
+  },
+  "mission": {
+    "sequence": ["drone survey", "crop-location mapping", "data transfer and processing", "sampling-grid generation", "rover departs", "rover visits sampling points", "arm positions sensors", "measurements collected", "rover returns to dock"],
+    "computed": ["rover route: engine A* on the navigation grid + NavAgent steering", "arm pose: inverse kinematics"],
+    "scripted": ["drone flight path", "crop mapping (assumed footprint)", "data processing", "measurements (no sensor values)"]
+  }
+}

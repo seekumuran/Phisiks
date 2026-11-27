@@ -291,8 +291,11 @@ add_dependencies(PhisiksCore check_layering)
 # Tools
 # ---------------------------------------------------------------------------------------------
 # assetgen: regenerates the CC0 sample assets in assets/ (deterministic; outputs are committed).
-add_executable(assetgen ${PHISIKS_ROOT}/tools/assetgen/assetgen.cpp ${PHISIKS_ROOT}/tools/assetgen/HeroMeshes.cpp)
-target_include_directories(assetgen PRIVATE ${PHISIKS_VENDOR}/stb_image ${PHISIKS_VENDOR}/glm)
+add_executable(assetgen ${PHISIKS_ROOT}/tools/assetgen/assetgen.cpp ${PHISIKS_ROOT}/tools/assetgen/HeroMeshes.cpp
+    ${PHISIKS_ROOT}/tools/assetgen/MarinaMeshes.cpp ${PHISIKS_ROOT}/tools/assetgen/OldMcDonaldMeshes.cpp
+    ${PHISIKS_ROOT}/tools/assetgen/MeshKit.h)
+# apps/lab/src for MarinaSpec.h / OldMcDonaldSpec.h (project dimensions, shared with the PhisiksLab scenes)
+target_include_directories(assetgen PRIVATE ${PHISIKS_VENDOR}/stb_image ${PHISIKS_VENDOR}/glm ${PHISIKS_ROOT}/apps/lab/src)
 phisiks_output(assetgen)
 
 # glprobe: checks whether the current GPU/driver meets the renderer's requirements.
@@ -379,6 +382,7 @@ elseif(UNIX)
     set_target_properties(${PHISIKS_PACKAGE_TARGETS} PROPERTIES INSTALL_RPATH "$ORIGIN")
 endif()
 install(DIRECTORY ${PHISIKS_ROOT}/assets/ DESTINATION assets)
+install(DIRECTORY ${PHISIKS_ROOT}/projects/ DESTINATION projects)   # engineering project files (Old-McDonald scene, docs)
 install(DIRECTORY ${PHISIKS_ROOT}/engine/shaders/ DESTINATION shaders FILES_MATCHING PATTERN "*.glsl")
 install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md
               ${PHISIKS_ROOT}/packaging/QUICKSTART.txt DESTINATION .)

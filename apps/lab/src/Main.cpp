@@ -16,6 +16,10 @@
 
 #include "AutoTest.h"
 #include "LessonScenes.h"
+#include "MarinaScene.h"
+#include "OldMcDonaldScene.h"
+#include "RoverCadScene.h"
+#include "DroneCadScene.h"
 #include "P9Scenes.h"
 #include "SandboxScenes.h"
 #include "Showcase.h"
@@ -35,6 +39,10 @@ namespace {
             Lab::RegisterScenes(scenes);
             Lab::RegisterLessonScenes(scenes);
             Lab::RegisterP9Scenes(scenes);
+            Lab::RegisterMarinaScene(scenes);   // Project Marina engineering visualisation (--scene ProjectMarina)
+            Lab::RegisterOldMcDonaldScene(scenes);   // Old-McDonald agricultural robotics (--scene OldMcDonald)
+            Lab::RegisterRoverCadScene(scenes);   // Old-McDonald rover, standalone CAD workspace (--scene RoverCAD)
+            Lab::RegisterDroneCadScene(scenes);   // Old-McDonald drone, standalone CAD workspace (--scene DroneCAD)
             Showcase::RegisterAll(scenes);   // the four P11 showcases (also standalone executables)
         }
         void OnStart(Phisiks::GameContext&) override {

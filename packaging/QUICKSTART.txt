@@ -5,7 +5,9 @@ Extract the archive anywhere and run the programs in this folder. No installer a
 tools are needed. The programs find assets/ and shaders/ next to themselves, so they work from
 any working directory (double-click, a shortcut, or a terminal).
 
-  PhisiksLab              interactive studio: sandbox, lessons, P9 scenes, SHOWCASE playlist
+  PhisiksLab              interactive studio: sandbox, lessons, P9 scenes, SHOWCASE playlist,
+                          Project Marina engineering scene (--scene ProjectMarina),
+                          Old-McDonald agricultural robotics project (--scene OldMcDonald)
   Showcase01_RoboticArm   6-DOF industrial arm: FK / IK, pick-and-place, joint + Cartesian jog
   Showcase02_PoolFluid    tiled pool with a buoyant ball, refraction, Fresnel, caustics
   Showcase03_BlackHole    ray-traced Schwarzschild black hole with a particle accretion disk
@@ -93,6 +95,31 @@ PHISIKSLAB STUDIO
   click an object in the viewport to select it, then use the inspector gizmo; << BACK TO LAB
   returns from a showcase scene.
 
+PROJECT MARINA (PhisiksLab: Simulation > Projects > Project Marina, or --scene ProjectMarina)
+  An editable engineering assembly of a waste-heat membrane-distillation desalination prototype:
+  computing unit with water block, closed coolant loop, pump, plate heat exchanger, membrane
+  distillation cell, seawater reservoir, condenser and freshwater bottle, sensors and wiring.
+  Every part is a scene entity: click it (or pick it in SCENE HIERARCHY / SUBSYSTEMS), then move,
+  rotate and scale it with the gizmo and edit its material in the inspector.
+  PROJECT MARINA panel: camera presets (Presentation, Front, Top plan, Electronics, Thermal loop,
+    Desalination), Callouts, CAD edges, Flow animation (+ speed), Fan spin, subsystem visibility,
+    flow legend, Save project / Reopen / Rebuild (projects/project_marina.json; File menu too).
+  Tab hides the panels for presentation: callouts, title block and flow legend stay on screen.
+  The flow animation shows the intended flow direction only; nothing is simulated or measured.
+  Moving a part does not re-route the tubing and wires attached to it (they are separate parts).
+
+OLD-McDONALD (PhisiksLab: Simulation > Projects > Old-McDonald, or --scene OldMcDonald)
+  Greenhouse with a mapping drone (Pixhawk 2.4.8, ReadyToSky GPS) and a soil rover (Raspberry Pi
+  Pico, LiDAR, sensor-positioning arm with moisture / temperature / pH probes), 16 sampling points.
+  OLD-McDONALD panel: cameras (Presentation, Drone close, Rover close, Overview, Top plan, Drone
+    explode, Rover explode, Mission), mission playback (play / pause / reset, follow, speed, the 9
+    stages), callouts, CAD edges, spin, explode sliders, subsystem visibility, Save project / Reopen
+    / Rebuild (projects/Old-McDonald/old_mcdonald.scene.json), Screenshot (PNG -> screenshots/).
+  Rover route = engine A* on the navigation grid; arm pose = inverse kinematics. Drone flight, crop
+  mapping, data processing and measurements are a scripted sequence (no sensor values).
+  Video: PhisiksLab --scene OldMcDonald --export-dir <dir> --export-frames (PNG sequence).
+  Details: projects/Old-McDonald/README.md
+
 USEFUL OPTIONS (all programs)
   --quality low|medium|high   scalability preset (low = 720p internal + FSR 1 upscale, for laptops)
   --gl41                      force the OpenGL 4.1 tier
@@ -105,11 +132,12 @@ USEFUL OPTIONS (all programs)
   --hot-reload [dir]          live-edit GLSL: edit the files in shaders/ (engine) or
                               assets/shaders/ (showcase post passes) while the program runs
   PhisiksLab --scene <name>   start in a scene: Sandbox, PhysicsTower, FieldLab, Rotors, Orbits, PBR,
-                              Fountain, Animation, VFX, Terrain, Joints, RoboticArm, PoolFluid,
-                              BlackHole, TurbineCad
+                              Fountain, Animation, VFX, Terrain, Joints, ProjectMarina, OldMcDonald,
+                              RoboticArm, PoolFluid, BlackHole, TurbineCad
 
 FOLDER CONTENTS
   assets/    meshes, textures, models, audio, post-pass shaders, Lua scripts (CC0, see assets/LICENSE.md)
+  projects/  engineering project files (Old-McDonald scene file, metadata and documentation)
   shaders/   engine GLSL sources (already built into the programs; used by --hot-reload)
   LICENSE    MIT licence          THIRD_PARTY_NOTICES.md   third-party libraries and their licences
   README.md  project overview

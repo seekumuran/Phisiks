@@ -45,9 +45,8 @@ namespace Phisiks::DebugOverlay {
     void Draw(GameContext& ctx) {
         const glm::vec2 screen = glm::vec2(Render::GetFramebufferSize());
         const glm::vec2 center = screen * 0.5f;
-        Centered("+", center, WHITE, SCALE);
-
-        const TraceHit target = Gameplay::TraceFromCamera(ctx, 6.0f);
+        const TraceHit target = ctx.crosshairVisible ? Gameplay::TraceFromCamera(ctx, 6.0f) : TraceHit();
+        if (ctx.crosshairVisible) Centered("+", center, WHITE, SCALE);
         if (target.hit && target.entity.Valid()) {
             Entity entity = target.entity;
             std::string label = entity.GetName();

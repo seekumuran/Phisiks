@@ -59,13 +59,15 @@ namespace Phisiks::SceneSerializer {
         json MaterialJson(const Render::MaterialDesc& m) {
             return { { "baseColor", V(m.baseColor) }, { "roughness", m.roughness }, { "metallic", m.metallic }, { "emissive", V(m.emissive) },
                      { "pattern", int(m.pattern) }, { "patternColor", V(m.patternColor) }, { "patternScale", m.patternScale }, { "lineWidth", m.lineWidth },
-                     { "patternRoughness", m.patternRoughness }, { "patternGlow", m.patternGlow }, { "albedoTexture", m.albedoTexture }, { "textureScale", m.textureScale } };
+                     { "patternRoughness", m.patternRoughness }, { "patternGlow", m.patternGlow }, { "albedoTexture", m.albedoTexture }, { "textureScale", m.textureScale },
+                     { "textureUsesMeshUV", m.textureUsesMeshUV }, { "opacity", m.opacity } };
         }
         Render::MaterialDesc MaterialFrom(const json& j) {
             Render::MaterialDesc m;
             Get(j, "baseColor", m.baseColor); Get(j, "roughness", m.roughness); Get(j, "metallic", m.metallic); Get(j, "emissive", m.emissive);
             GetEnum(j, "pattern", m.pattern); Get(j, "patternColor", m.patternColor); Get(j, "patternScale", m.patternScale); Get(j, "lineWidth", m.lineWidth);
             Get(j, "patternRoughness", m.patternRoughness); Get(j, "patternGlow", m.patternGlow); Get(j, "albedoTexture", m.albedoTexture); Get(j, "textureScale", m.textureScale);
+            Get(j, "textureUsesMeshUV", m.textureUsesMeshUV); Get(j, "opacity", m.opacity);
             return m;
         }
 

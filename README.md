@@ -56,6 +56,14 @@ Four demos, one shared framework, one very 1990s engineering-console UI. Each on
 | 03 | `Showcase03_BlackHole` | Science | A Schwarzschild black hole ray-traced per pixel, with a photon ring, a lensed starfield, and 16,000 disk particles. Yes, it's accurate. No, we will not be taking questions. |
 | 04 | `Showcase04_TurbineCad` | CAD | A 20-part turbine assembly with an exploded-view slider, a bill of materials, and orthographic blueprints. Your engineering manager will want screenshots. |
 
+## Project Marina
+
+`PhisiksLab --scene ProjectMarina` (or **Simulation > Projects** in the Lab) opens an editable engineering visualisation of a waste-heat membrane-distillation desalination prototype: a Raspberry Pi with a water block and fan, a closed coolant loop, a DC pump, a plate heat exchanger, an enclosed membrane distillation cell, a seawater reservoir, a condenser over a freshwater bottle, and the Arduino UNO / ESP32-C3 / breadboard electronics with their sensor wiring. Every part is a real scene entity, so you can select it, move it and edit its material, and the whole project saves to JSON and reopens. The flow animation shows which way things are meant to flow. It does not simulate anything, and it will not pretend to. Parts without specified hardware geometry are generic models, and they're labelled that way.
+
+## Old-McDonald
+
+`PhisiksLab --scene OldMcDonald` (also under **Simulation > Projects**) opens the second engineering project: a greenhouse with a mapping drone (Pixhawk 2.4.8, ReadyToSky GPS) and a soil rover (Raspberry Pi Pico, LiDAR, an arm that places moisture, temperature and pH probes on a fixed 16-point sampling grid). Mission playback runs the operational sequence in order. The rover's route really is planned by the engine's A* on a navigation grid built from the scene's colliders, and the arm really is placed by inverse kinematics. The drone's flight, the crop mapping and the measurements are scripted, and the project says so wherever it matters. It has exploded views, a top-plan sampling grid, and edits that save and reopen. See `projects/Old-McDonald/README.md`.
+
 ## Controls (the short version)
 
 - **Camera:** RMB orbit, MMB pan, wheel zoom. `F4` toggles orbit and first person. `V` cycles camera modes. `WASD` to move, because we are not animals.

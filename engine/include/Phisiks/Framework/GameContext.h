@@ -41,6 +41,7 @@ namespace Phisiks {
         GameState state = GameState::Booting;
         FrameStats stats;
         bool overlayVisible = true;
+        bool crosshairVisible = true;      // first-person crosshair + aimed-entity label (inspection scenes turn it off)
         bool physicsDebugDraw = false;
         bool quitRequested = false;
         Replay replay;                     // deterministic replay ring + timeline scrubbing (AppOptions::recordReplay)
