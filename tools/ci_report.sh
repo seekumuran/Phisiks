@@ -25,6 +25,10 @@ else
   "${prefix[@]}" "$@"
   code=$?
 fi
+# GitHub shows at most 10 error annotations per step: the crash backtrace goes first.
+if [ "$code" -ne 0 ] && [ -f "$bt" ]; then
+  grep -E "received signal|terminate called|what\(\)|Assertion|^#[0-9]+ " "$bt" | grep -vE "^#[0-9]+ +0x[0-9a-f]+ in (raise|abort|__pthread_kill|pthread_kill|gsignal|__GI_)" | head -8 | sed 's/^/::error title=gdb::/'
+fi
 if [ -f "$log" ]; then
   grep -m1 -E "Platform: window" "$log" | sed 's/^/::notice title=OpenGL::/'
   grep -m1 -E "Renderer: OpenGL" "$log" | sed 's/^/::notice title=GPU::/'
@@ -37,9 +41,6 @@ elif [ "${CI_NO_GL_OK:-0}" = "1" ] && [ -f "$log" ] && grep -q "could not create
   exit 0
 else
   echo "::error title=Runtime tests (exit $code)::no report written; last log lines follow"
-  if [ -f "$log" ]; then tail -n 12 "$log" | sed 's/^/::error title=engine.log::/'; fi
-fi
-if [ "$code" -ne 0 ] && [ -f "$bt" ]; then
-  grep -E "^(#[0-9]+|Thread .* received signal|Program received signal|.*Assertion)" "$bt" | head -40 | sed 's/^/::error title=gdb::/'
+  if [ -f "$log" ]; then tail -n 2 "$log" | sed 's/^/::error title=engine.log::/'; fi
 fi
 exit $code

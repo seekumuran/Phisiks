@@ -31,6 +31,7 @@ namespace Phisiks {
         int windowWidth = 0, windowHeight = 0;             // client size (0 = 75 % of the primary monitor)
         bool vsync = false;
         bool captureCursor = true;        // first-person start (cursor captured); editors start with a free cursor
+        bool sceneHotkeys = true;         // R reloads / N advances the scene (editors use their own guarded commands)
         uint64_t maxFrames = 0;                            // 0 = unlimited (safety cap for automated runs)
 
         // Simulation / recording

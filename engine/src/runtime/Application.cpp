@@ -204,8 +204,8 @@ namespace Phisiks {
         if (input.Pressed(Action::ToggleOverlay)) m_ctx.overlayVisible = !m_ctx.overlayVisible;
         if (input.Pressed(Action::TogglePhysicsDebug)) m_ctx.physicsDebugDraw = !m_ctx.physicsDebugDraw;
         if (m_ctx.state == GameState::Running) {
-            if (input.Pressed(Action::ReloadScene)) m_scenes.RequestReload();
-            if (input.Pressed(Action::NextScene)) m_scenes.RequestNext();
+            if (m_options.sceneHotkeys && input.Pressed(Action::ReloadScene)) m_scenes.RequestReload();
+            if (m_options.sceneHotkeys && input.Pressed(Action::NextScene)) m_scenes.RequestNext();
             if (input.Pressed(Action::CycleCamera)) {
                 m_ctx.camera.CycleMode();
                 SetCursor(Platform::CursorMode::Captured);

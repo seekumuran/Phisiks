@@ -1,5 +1,7 @@
 # Phisiks Roadmap
 
+> **Historical document.** Written before PHISIKS 1.1. Names here are the pre-1.1 ones: *PhisiksLab* / *the Lab* / *the studio* is now the PHISIKS editor (`apps/editor`, executable `Phisiks`); the Lab's lesson and P9 scenes are `PhisiksSamples` (`examples/samples`); Project Marina and Old-McDonald are separate programs in `projects/`. See `PHISIKS_ARCHITECTURE.md` and `PHISIKS_RELEASE_LOG.md` for the current structure.
+
 Phisiks is a general-purpose 3D simulation, visualisation and game engine:
 - C++20 on Windows, Linux and macOS; OpenGL 4.6 with an OpenGL 4.1 tier;
 - EnTT scenes; NVIDIA PhysX 5 or the native rigid-body solver;

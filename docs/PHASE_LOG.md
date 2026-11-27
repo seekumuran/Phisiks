@@ -1,5 +1,7 @@
 # Phase log
 
+> **Historical document.** Written before PHISIKS 1.1. Names here are the pre-1.1 ones: *PhisiksLab* / *the Lab* / *the studio* is now the PHISIKS editor (`apps/editor`, executable `Phisiks`); the Lab's lesson and P9 scenes are `PhisiksSamples` (`examples/samples`); Project Marina and Old-McDonald are separate programs in `projects/`. See `PHISIKS_ARCHITECTURE.md` and `PHISIKS_RELEASE_LOG.md` for the current structure.
+
 Every phase ends with a clean Release build, all automated checks green, a commit and a tag.
 
 ## P0 — Skeleton (tag `p0-skeleton`)

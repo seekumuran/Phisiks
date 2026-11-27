@@ -1,143 +1,114 @@
-PHISIKS 1.0.0 - QUICK START
-===========================
+PHISIKS 1.1 - QUICK START
+=========================
 
-Extract the archive anywhere and run the programs in this folder. No installer and no build
-tools are needed. The programs find assets/ and shaders/ next to themselves, so they work from
-any working directory (double-click, a shortcut, or a terminal).
+PHISIKS is a general-purpose 3D engine (C++20, OpenGL) with an editor. Extract the archive
+anywhere and run the programs in this folder: no installer, no build tools. The programs find
+assets/, shaders/ and projects/ next to themselves, so they work from any working directory.
 
-  PhisiksLab              interactive studio: sandbox, lessons, P9 scenes, SHOWCASE playlist,
-                          Project Marina engineering scene (--scene ProjectMarina),
-                          Old-McDonald agricultural robotics project (--scene OldMcDonald)
+  Phisiks                 the PHISIKS editor (starts with an empty scene)
+  PhisiksSamples          the engine sample scenes inside the editor, with a sample browser
   Showcase01_RoboticArm   6-DOF industrial arm: FK / IK, pick-and-place, joint + Cartesian jog
   Showcase02_PoolFluid    tiled pool with a buoyant ball, refraction, Fresnel, caustics
   Showcase03_BlackHole    ray-traced Schwarzschild black hole with a particle accretion disk
   Showcase04_TurbineCad   turbine assembly with exploded view and see-through casing
-  glprobe                 checks whether your GPU / driver can run Phisiks
+  ProjectMarina           example project: membrane-distillation prototype (projects/ProjectMarina)
+  OldMcDonald             example project: greenhouse drone + soil rover (projects/OldMcDonald)
+  glprobe                 checks whether your GPU / driver can run PHISIKS
 
-(Windows: the files end in .exe. Linux / macOS: run them as ./PhisiksLab etc.)
+(Windows: the files end in .exe. Linux / macOS: run them as ./Phisiks etc.)
+Every program accepts --help.
 
 REQUIREMENTS
-  - A GPU with OpenGL 4.6 (full feature tier) or OpenGL 4.1 (macOS; start with --gl41 elsewhere).
-    Run glprobe if a program does not start.
+  - A GPU with OpenGL 4.6 (full feature tier) or OpenGL 4.1 (start with --gl41; macOS always uses
+    4.1). Run glprobe if a program does not start.
   - Windows 10 / 11 x64. Everything needed (including the Visual C++ runtime) is in this folder.
-  - Linux x64: OpenGL drivers (Mesa or vendor), X11 or Wayland, ALSA / PulseAudio / PipeWire.
-  - macOS 11+: the programs are not signed. After extracting, run once in Terminal:
-        xattr -dr com.apple.quarantine <this folder>
-    macOS always uses the OpenGL 4.1 tier.
+  - Linux x64: OpenGL drivers (Mesa or vendor), X11, ALSA / PulseAudio / PipeWire.
+  - macOS (experimental, see KNOWN_ISSUES.md): the programs are not signed. After extracting, run
+    once in Terminal:   xattr -dr com.apple.quarantine <this folder>
 
-CONTROLS CHEAT SHEET
-====================
-Keyboard and mouse go to the 3D view only while the pointer is not over a console panel (and no
-text field is active). Showcases start in the orbit camera, PhisiksLab in first person. The camera
-does not move while the simulation is paused (Esc).
+THE EDITOR
+  Menu bar      File (New / Open / Save / Save as / Reopen / Quit), Edit (Delete, Deselect, Frame),
+                Create (empty, cube, sphere, plane, rigid cube, lights), View, Simulation, Help
+  Tool bar      MOVE / ROTATE / SCALE gizmo, WORLD / LOCAL, play / pause / step / reload, 4-WAY,
+                FRAME; status: scene name (* = unsaved), state, camera mode, FPS
+  SCENE         the hierarchy: click to select, drag onto another entity to parent (onto the
+                empty area to unparent), right-click for Create child / Unparent / Frame / Delete,
+                search box filters by name
+  INSPECTOR     name, transform (position / rotation / scale), mesh (pick from the asset folders)
+                and material, light, collider, rigidbody and the other components; add component
+  SETTINGS      physics (gravity, substeps, friction) and rendering (quality preset, upscaler,
+                exposure, bloom, SSAO, culling, shadows, fog, shader watching)
+  OUTPUT        CONSOLE (log, filter by level / text), TELEMETRY (frame time, GPU, physics, RAM),
+                TIMELINE (replay ring: step back / rewind / step forward / record / clear / scrub)
+  Drag the thin bars between panels to resize them. Tab hides every panel.
+  There is no undo: Delete asks first, and File > Reopen returns to the saved file. Quitting,
+  opening, New and Reload ask before discarding unsaved edits.
 
-CAMERA (all programs)
-  RMB drag            orbit around the target          (orbit camera)
-  MMB drag            pan the target                   (orbit camera)
-  Mouse wheel         zoom in / out                    (orbit camera)
-  F4                  toggle orbit camera <-> first person (orbit centres 8 m in front of the view)
-  V                   cycle camera: first person -> third person -> free fly
-  Mouse               look (first / third person, free fly; the cursor is captured)
-  WASD / arrows       move;  Shift sprint;  Space jump (free fly: Space up, Ctrl down)
+CONTROLS
+  RMB drag / MMB drag / wheel   orbit / pan / zoom (orbit camera)
+  LMB                           select in the viewport; drag a gizmo handle to transform
+  F                             frame the selection (or the whole scene)
+  F3                            4-way view (perspective + orthographic top / front / side)
+  F4                            orbit camera <-> first person;  V cycles first / third person / fly
+  WASD / arrows, Mouse          move / look in first person, third person and free fly
+  Delete                        delete the selection (asks first)
+  Ctrl+N / Ctrl+O / Ctrl+S      new / open / save;  Ctrl+Shift+S save as;  Ctrl+Q quit
+  Esc                           pause / resume the simulation (Q while paused quits)
+  Tab                           hide / show the panels
+  F1 / F2                       telemetry overlay / physics debug draw
+  Keyboard and mouse go to the 3D view only while the pointer is not over a panel and no text
+  field is active.
 
-CAMERA PRESETS AND VIEWS (showcases; also inside PhisiksLab's SHOWCASE scenes)
-  1 2 3 4 5           cinematic camera shots along spline paths (panel: Camera Shots, hover = name)
-  0                   stop the shot, back to the free camera (panel: FREE)
-  M                   cycle view mode: FINAL RENDER -> WIREFRAME -> SDF + FIELDS -> RAW PARTICLES
-                      -> CAD 4-WAY (panel: View Mode buttons)
-  F3                  CAD 4-way view on / off (perspective + orthographic top / front / side,
-                      blueprint grid, CAD ink). In PhisiksLab scenes F3 toggles the quad view.
+SAMPLES (PhisiksSamples)
+  The SAMPLES panel lists the sample scenes (hover a row for a description): transforms and rotors,
+  RK4 vs Euler orbits, friction and raycasts, rigid-body stacking, PBR lighting, GPU culling +
+  particles + XPBD + SDF, emitters and two-way coupling, glTF skinning + camera paths, bloom / SSAO /
+  trails / decals, terrain + foliage + navigation, joints + Lua scripting. The Samples menu too.
+  In the Sandbox sample (first person): E interact, LMB push / damage, Space jump.
 
-PANELS AND GENERAL
-  Tab                 hide / show the console panels (UI toggle)
-  F1                  overlay on / off           F2   physics debug draw on / off
-  Esc                 pause / resume;  Q while paused = quit (closing the window also quits)
-  PhisiksLab only:    R reload scene, N next scene, E interact, LMB push / damage
+SHOWCASES (Showcase01..04)
+  1 2 3 4 5    cinematic camera shots;  0 back to the free camera
+  M            cycle view mode: FINAL RENDER -> WIREFRAME -> SDF + FIELDS -> RAW PARTICLES -> CAD 4-WAY
+  F3           CAD 4-way blueprint view
+  01 RoboticArm   Program (RUN PROGRAM, HOME, gripper), Joint Jog J1..J6, Cartesian Jog X/Y/Z (IK),
+                  Timeline Replay (60 s joint-space recording), Display (frames, trail, CAD ink)
+  02 PoolFluid    left-click the water for a ripple; shader-pass breakdown; caustics / refraction;
+                  DROP BALL, RAIN, CALM
+  03 BlackHole    mass, inclination, Doppler, beaming, disk glow, time scale; integrator split test
+                  (Euler / Verlet / RK4); star and photon-ring brightness
+  04 TurbineCad   explode slider (AUTO, ASSEMBLE, EXPLODE ALL), casing opacity / wire, CAD ink,
+                  rotor RPM, bill of materials
 
-REPLAY TIMELINE TRANSPORT
-  PhisiksLab "Replay timeline" panel (30 s ring at 60 Hz):
-    |<  step back      >  play (continues from the scrubbed step)      ||  pause
-    []  stop (rewind to the first recorded step)    >|  step forward
-    (o) record on / off                               ^  eject (clear the timeline)
-    scrub slider: drag to any recorded step (pauses the simulation)
-  RoboticArm "Timeline Replay" group (60 s joint-space recording):
-    buttons left to right: |< first recorded step;  ^ (eject glyph) step back 0.25 s;
-    > play the recording;  || pause
-    LIVE  leave the replay, back to the live arm      scrub slider: jump to any step
+EXAMPLE PROJECTS
+  ProjectMarina   an editable assembly of a waste-heat membrane-distillation desalination
+                  prototype. The flow-direction animation is schematic: nothing is simulated or
+                  measured. Scene file: projects/ProjectMarina/scenes/project_marina.scene.json
+  OldMcDonald     a greenhouse with a mapping drone and a soil rover. Mission playback: rover route
+                  by engine A*, arm pose by IK; drone flight, crop mapping and measurements are
+                  scripted. Workspace menu: Greenhouse mission / Rover CAD / Drone CAD.
+                  Scene files: projects/OldMcDonald/scenes/
+  Each project has its own panel (left, below SCENE) with cameras, display options, subsystems and
+  Save / Reopen / Rebuild. Read projects/*/README.md for details.
 
-PER-DEMO CONTROLS (right-hand console panel)
-  01 RoboticArm
-    Program:        RUN PROGRAM (pick-and-place PTP / LIN cycle), HOME, OPEN / CLOSE gripper
-    Joint Jog:      J1 .. J6 sliders in degrees (switches to manual mode)
-    Cartesian Jog:  X / Y / Z sliders for the tool point in mm (IK); readouts XYZ, Euler Z-Y-X,
-                    quaternion W X Y Z, IK residual
-    Timeline Replay: see above
-    Display:        FRAMES (J1-J6 / tool axes), TRAIL (tool-point trail), CAD INK
-  02 PoolFluid
-    Left-click the water surface: ripple at that point
-    Shader Passes:  BREAKDOWN slider 0..3 plus WIRE / DEPTH / NORMALS / FINAL buttons
-    Optics:         CAUSTICS and REFRACTION strength sliders
-    Interaction:    DROP BALL (drops the ball back in), RAIN on / off, CALM (flatten the water)
-  03 BlackHole
-    Black Hole Parameters: MASS, INCLINATION, DOPPLER, BEAMING, DISK GLOW, TIME SCALE sliders
-    Integrator Split-Test: EULER / VERLET / RK4 buttons, SPLIT (each third of the disk gets its own
-                    integrator), RESET DISK; energy-drift readouts per integrator
-    Lens:           STARS and PHOTON RING brightness sliders
-  04 TurbineCad
-    CAD Assembly:   EXPLODE slider (parts separate along the shaft), AUTO (animate in / out),
-                    ASSEMBLE, EXPLODE ALL, CASING OPACITY slider, CASING WIRE, CAD INK + INK slider
-    Rotor:          ROTOR RPM slider
-    Bill of Materials: the 20 parts with their current exploded offset
-    F3 gives the 4-way orthographic blueprint view of the assembly
-
-PHISIKSLAB STUDIO
-  Menu bar File | View | Simulation | CAD | Help; lesson and SHOWCASE playlists (click a row);
-  click an object in the viewport to select it, then use the inspector gizmo; << BACK TO LAB
-  returns from a showcase scene.
-
-PROJECT MARINA (PhisiksLab: Simulation > Projects > Project Marina, or --scene ProjectMarina)
-  An editable engineering assembly of a waste-heat membrane-distillation desalination prototype:
-  computing unit with water block, closed coolant loop, pump, plate heat exchanger, membrane
-  distillation cell, seawater reservoir, condenser and freshwater bottle, sensors and wiring.
-  Every part is a scene entity: click it (or pick it in SCENE HIERARCHY / SUBSYSTEMS), then move,
-  rotate and scale it with the gizmo and edit its material in the inspector.
-  PROJECT MARINA panel: camera presets (Presentation, Front, Top plan, Electronics, Thermal loop,
-    Desalination), Callouts, CAD edges, Flow animation (+ speed), Fan spin, subsystem visibility,
-    flow legend, Save project / Reopen / Rebuild (projects/project_marina.json; File menu too).
-  Tab hides the panels for presentation: callouts, title block and flow legend stay on screen.
-  The flow animation shows the intended flow direction only; nothing is simulated or measured.
-  Moving a part does not re-route the tubing and wires attached to it (they are separate parts).
-
-OLD-McDONALD (PhisiksLab: Simulation > Projects > Old-McDonald, or --scene OldMcDonald)
-  Greenhouse with a mapping drone (Pixhawk 2.4.8, ReadyToSky GPS) and a soil rover (Raspberry Pi
-  Pico, LiDAR, sensor-positioning arm with moisture / temperature / pH probes), 16 sampling points.
-  OLD-McDONALD panel: cameras (Presentation, Drone close, Rover close, Overview, Top plan, Drone
-    explode, Rover explode, Mission), mission playback (play / pause / reset, follow, speed, the 9
-    stages), callouts, CAD edges, spin, explode sliders, subsystem visibility, Save project / Reopen
-    / Rebuild (projects/Old-McDonald/old_mcdonald.scene.json), Screenshot (PNG -> screenshots/).
-  Rover route = engine A* on the navigation grid; arm pose = inverse kinematics. Drone flight, crop
-  mapping, data processing and measurements are a scripted sequence (no sensor values).
-  Video: PhisiksLab --scene OldMcDonald --export-dir <dir> --export-frames (PNG sequence).
-  Details: projects/Old-McDonald/README.md
-
-USEFUL OPTIONS (all programs)
-  --quality low|medium|high   scalability preset (low = 720p internal + FSR 1 upscale, for laptops)
+USEFUL OPTIONS (editor-based programs)
+  --open <scene.json>         open a scene file at start
+  --scene <name>              start in a scene (PhisiksSamples: Sandbox, PhysicsTower, FieldLab,
+                              Rotors, Orbits, PBR, Fountain, Animation, VFX, Terrain, Joints;
+                              OldMcDonald: OldMcDonald, RoverCAD, DroneCAD)
+  --assets <dir>              an extra asset folder (e.g. Phisiks --assets projects/assets)
+  --quality low|medium|high   scalability preset (low = reduced internal resolution + FSR 1)
   --gl41                      force the OpenGL 4.1 tier
   --fullscreen                fullscreen window
-  --width W --height H        window size (showcases; default 1920 x 1080)
-  --autotest                  run the built-in verification; the exit code is the number of failed
-                              checks (showcases: add --quick to skip the frame-rate measurement)
-  --run-dir <dir>             where logs, reports and screenshots go (default: Build/runs/... under
-                              the current working directory)
-  --hot-reload [dir]          live-edit GLSL: edit the files in shaders/ (engine) or
-                              assets/shaders/ (showcase post passes) while the program runs
-  PhisiksLab --scene <name>   start in a scene: Sandbox, PhysicsTower, FieldLab, Rotors, Orbits, PBR,
-                              Fountain, Animation, VFX, Terrain, Joints, ProjectMarina, OldMcDonald,
-                              RoboticArm, PoolFluid, BlackHole, TurbineCad
+  --hot-reload [dir]          live-edit GLSL in shaders/ while the program runs
+  --run-dir <dir>             where logs and crash dumps go (default Build/runs/latest under the
+                              working directory, or the per-user folder if that is not writable)
+  Showcases: --width W --height H, --autotest [--quick] (built-in verification; exit code = failed
+  checks), --quality, --gl41, --hot-reload.
+  Environment: PHISIKS_UI_SCALE=1.25 sets the editor UI scale (default: the monitor's DPI scale).
 
 FOLDER CONTENTS
-  assets/    meshes, textures, models, audio, post-pass shaders, Lua scripts (CC0, see assets/LICENSE.md)
-  projects/  engineering project files (Old-McDonald scene file, metadata and documentation)
-  shaders/   engine GLSL sources (already built into the programs; used by --hot-reload)
-  LICENSE    MIT licence          THIRD_PARTY_NOTICES.md   third-party libraries and their licences
-  README.md  project overview
+  assets/                meshes, textures, models, audio, post-pass shaders, Lua scripts (CC0)
+  projects/              example projects: scene files, meshes (projects/assets) and READMEs
+  shaders/               the engine GLSL sources (embedded in the programs; used by --hot-reload)
+  THIRD_PARTY_LICENSES/  licence texts of the third-party libraries in the programs
+  LICENSE, THIRD_PARTY_NOTICES.md, README.md, KNOWN_ISSUES.md, QUICKSTART.txt

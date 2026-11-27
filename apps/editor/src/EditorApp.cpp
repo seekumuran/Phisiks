@@ -105,6 +105,7 @@ namespace Editor {
         o.enableUI = launch.ui && !o.headless;
         o.recordReplay = launch.ui && !o.headless && !o.deterministic;
         o.captureCursor = false;   // editor: orbit camera and a free cursor (F4 / V switch to first person)
+        o.sceneHotkeys = false;    // R / N would discard edits; the editor's Reload / scene menus ask first
         host.quality = launch.quality;
         host.openOnStart = launch.open;
         Phisiks::Application app;

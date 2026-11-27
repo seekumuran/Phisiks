@@ -1,5 +1,7 @@
 # Architecture Decisions
 
+> **Historical document.** Written before PHISIKS 1.1. Names here are the pre-1.1 ones: *PhisiksLab* / *the Lab* / *the studio* is now the PHISIKS editor (`apps/editor`, executable `Phisiks`); the Lab's lesson and P9 scenes are `PhisiksSamples` (`examples/samples`); Project Marina and Old-McDonald are separate programs in `projects/`. See `PHISIKS_ARCHITECTURE.md` and `PHISIKS_RELEASE_LOG.md` for the current structure.
+
 ## ADR-1: One static engine library, thin executables
 `PhisiksCore` is a static library with a public API (`engine/include/Phisiks`) and private implementation (`engine/src`). Apps (`apps/`), tests and tools link it. Third-party include paths are private to `PhisiksCore`, except glm and EnTT, which appear in public headers. `tools/check_layering.cmake` runs before every build and fails it on any layering or naming violation.
 
@@ -77,4 +79,7 @@ The P11 demos needed three very different full-screen effects (pool water with r
 
 ## ADR-26: See-through materials as a second blended pass of the same draw commands
 `MaterialDesc::opacity < 1` needed no new draw lists: while any such material exists, `mesh.vert` drops opaque or see-through instances by a `u_alphaPass` uniform (vertices moved outside the clip volume), so the GPU-culled indirect commands are drawn once opaque and once blended after the sky (no depth / id writes, both faces, silhouette-boosted alpha). Shadow passes skip see-through instances. Scenes without see-through materials pay nothing (the uniform is 0). Trade-off: no sorting, accepted for a few CAD shells.
+
+## ADR-14: The editor is a library; demos and projects are separate programs (1.1)
+PHISIKS 1.1 is positioned as a general-purpose engine, so the application a developer opens (`Phisiks`) contains no demo content: an empty document, the scene tools and the engine settings. The editor lives in a static library (`PhisiksEditor`) with a small launcher (`EditorApp.h`), so the samples, the example projects and the runtime tests are ordinary programs that link the engine and the editor, register their own scenes and add menus or a side panel through `Editor::AppConfig`. Scenes that need their own tools derive from `Editor::WorkspaceExtension`. Its persistence hooks (`OnBeforeSave`, `OnAfterSave`, `OnAfterLoad`) are called by every save and load path, which fixes the class of bug where state outside the scene file (exploded views, mission progress) went out of step with the file (release audit B4). The example projects' meshes moved to `projects/assets` (their own generator, `projectassetgen`), so the engine's `assets/` holds only engine and showcase content.
 

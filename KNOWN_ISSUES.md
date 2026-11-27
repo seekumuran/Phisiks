@@ -1,5 +1,49 @@
 # Known Issues
 
+Status for PHISIKS 1.1. The first sections cover the 1.1 product (platforms, editor, example projects, packaging). The later sections are the engine's known limitations, recorded per development phase. They still apply unless marked fixed.
+
+## Platforms (1.1)
+
+| Platform | Verified | Not verified |
+|---|---|---|
+| **Windows 10/11 x64** | Builds with MSVC (local: VS 2026 / v145, PhysX; CI: VS 2022, native physics). All ctest entries pass on a real GPU (Intel UHD), including the runtime tests on the OpenGL 4.6 and 4.1 tiers. | AMD / NVIDIA GPUs were not tested in 1.1. A machine without Visual Studio was not tested (the archive ships the MSVC runtime app-local). |
+| **Linux x64** | Builds with GCC on Ubuntu 24.04 (CI, the distribution default GCC 13) and GCC 12 on Ubuntu 22.04 (release workflow). Unit, layering and deterministic-replay tests pass on the runner. The runtime tests run on Mesa llvmpipe (software OpenGL 4.5, 4.1 tier) under Xvfb. See PHISIKS_RELEASE_LOG.md for the latest result. | No run on a Linux desktop with a hardware GPU. Wayland not tested. |
+| **macOS (arm64)** | Builds with Apple Clang on macOS 15 (CI). Unit, layering and deterministic-replay tests pass. | **The editor and every rendered program are untested on macOS.** GitHub's macOS runners cannot create an OpenGL context (`NSGL: Failed to find a suitable pixel format`: no OpenGL-capable GPU in the VM), and no physical Mac was available. Treat macOS as experimental. |
+
+macOS-specific limitations, by design:
+
+- macOS OpenGL stops at 4.1 and is deprecated by Apple. PHISIKS always uses its 4.1 tier there: CPU culling, CPU compute (particles, XPBD, fields), and texture-buffer storage instead of SSBOs. GPU compute paths and Hi-Z occlusion are not available.
+- PhysX is not supported. macOS uses the built-in physics solver.
+- Programs are plain executables (not `.app` bundles), unsigned and not notarised. Gatekeeper blocks them until the quarantine flag is removed (`xattr -dr com.apple.quarantine <folder>`).
+- A future Metal or Vulkan backend would be a renderer rewrite. It is not part of 1.1.
+
+## Editor (1.1)
+
+- **No undo / redo.** Deleting asks for confirmation; reopen the scene file to get back to the saved state.
+- **No asset-import pipeline.** Meshes are OBJ files referenced by path (anything under `assets/` or a folder added with `--assets`); the inspector's mesh list scans those folders. glTF models are loaded through `SkinnedModel` in code, not from the editor.
+- **No prefab / project system.** A "project" is a scene file plus the folders it references. There is no recent-files list.
+- **Play / Pause run the live scene.** There is no separate edit mode that restores the scene on Stop. Use the Reload button (it asks about unsaved changes) or reopen the file.
+- **Scene files do not store** `Joint`, `Script`, `NavAgent`, `Terrain`, `Decal`, `Trail`, `SkinnedModel` or `CameraPath`. Scenes that use them must re-create them in code after loading. The inspector says so on joints.
+- **Material edits are shared.** A material is edited by name, so every part that uses it changes (the inspector says so).
+- **Unsaved-changes tracking** covers edits made through the editor (inspector, gizmo, hierarchy, create / delete, workspace panels). Changes made by running scene logic, such as physics moving bodies or a mission animating parts, are not counted as edits.
+- **Panel layout** is fixed: left column, right column and bottom dock, each resizable with its splitter. Panels cannot be undocked or rearranged, and the layout is not saved between sessions.
+- **UI scale** follows the monitor's content scale at startup (Windows / Linux). Moving the window to a monitor with a different scale does not rescale it. Override with `PHISIKS_UI_SCALE`.
+- The Windows programs are console applications, so a console window with the log opens next to the editor.
+
+## Example projects (1.1)
+
+- **Project Marina** does not simulate. The flow-direction animation is schematic: constant speed, no data. No thermal or fluid model is run and no values are shown.
+- **Old-McDonald:** the rover route (A* on the navigation grid) and the arm pose (IK) are computed by the engine. The drone flight, crop mapping, data transfer and measurements are scripted: no flight dynamics, image processing or sensor values. The panel tags every mission stage with what drives it.
+- The CAD workspaces and the mission scene disable the replay timeline. Their state (explode offsets, mission progress) is more than entity transforms, and a transform replay would leave the two out of step.
+- The models are generic models of their component classes, styled from photographs where noted in the project READMEs. They are not measured from the prototypes.
+
+## Packaging (1.1)
+
+- Archives are unsigned. Windows SmartScreen may warn on first launch.
+- The `-win64` archive built by CI uses the native physics backend. The `-win64-physx` archive is built locally (`cpack` from the `vs2026-x64` preset).
+- Build public Windows packages with a released (non-preview) Visual Studio. The app-local MSVC runtime DLLs are those of the toolchain that built the package.
+- Logs, crash dumps and saves default to paths relative to the working directory (`Build/runs/latest`) and next to the executable (scene files). If those folders are not writable, they go to the per-user data folder instead: `%LOCALAPPDATA%\Phisiks`, `~/Library/Application Support/Phisiks`, `~/.local/share/phisiks`.
+
 ## Intel OpenGL driver: cold shader compiles
 Some Intel drivers (seen on UHD Graphics, driver 32.0.101.7076) corrupted the heap while compiling very large GLSL programs from source. The Phisiks renderer:
 - keeps its programs small (29 programs since P7, each one compute or graphics pass);
@@ -33,15 +77,11 @@ No crash has been observed with the Phisiks shaders: more than 10 cold compiles 
 - Deterministic replays are guaranteed for the same build on the same machine (PhysX and floating point are not bit-identical across CPUs or compilers).
 - Headless runs have no renderer, so they export data (CSV) but not PNG frames; use `--hidden` for frames.
 
-## Platform
-- Windows/MSVC x64 only for now: prebuilt PhysX and GLFW libraries, WASAPI audio.
-- `vendor/` is not committed, so a fresh clone needs the libraries listed in `docs/BUILD.md`.
-
 ## Input focus
-Keyboard state comes from GLFW, so the focused window receives keys. When PhisiksLab's window appears it takes focus. The autotest disables hardware input, so stray keystrokes can't affect a run.
+Keyboard state comes from GLFW, so the focused window receives keys. When a PHISIKS window appears it takes focus. The runtime tests disable hardware input, so stray keystrokes can't affect a run. Run them with `--hidden` (as ctest does): a visible test window that is resized, maximised or minimised by the desktop during a run changes the frame size and breaks pixel checks.
 
 ## P8 (cross-platform, studio)
-- **Linux / macOS not yet built:** the platform code, presets and CI workflow are written, and the portable configuration (native physics, miniaudio, FetchContent GLFW, fetched dependencies, OpenGL 4.1 tier) passes every test on Windows. No GCC or Apple Clang compile has happened yet; expect fixes on the first CI run.
+- **Linux / macOS builds (fixed since):** both now build in CI. See "Platforms (1.1)" above for what is verified.
 - **CPU compute cost:** on the 4.1 tier the FieldLab simulation (4096 particles with N-body + 4 XPBD bodies) takes about 7 ms per fixed step on 12 threads, against 0.7 ms of command recording on the GPU path. Dual-core laptops will be slower.
 - **FSR GPU vs CPU:** the GPU EASU + RCAS output differs from the C++ reference by at most 4/255 in 0.3% of values (float rounding on the GPU); the runtime check allows up to 6/255 in 1%.
 - **RCAS overshoot:** like the reference algorithm, RCAS limits its negative lobe only to avoid clipping; it can overshoot an edge's local min/max a little (bounded at 25% of the step in the unit test). EASU itself never rings.
@@ -68,7 +108,7 @@ Keyboard state comes from GLFW, so the focused window receives keys. When Phisik
 - **Buoyancy (FluidHarbor):** Archimedes forces use the column height of uncovered particle cells (read back asynchronously, 1-3 frames old); the measured boat draft is within 35 % of m / (rho A) (0.138 m vs 0.179 m in the last run), because particle contacts also support the hull.
 - **Robot arm:** links are gravity-compensated (gravity off on the arm bodies, holding torques are computed, not simulated); the gripper attaches the crate kinematically instead of by friction; IK avoidance takes priority over the tip in transit (residual up to ~6 cm there, <= 1.6 cm while gripping / placing).
 - **Joint anchors** (`Joint::anchor`, `connectedAnchor`) are in the entity's local, scaled units: on a box scaled to (0.2, 1.5, 0.2) an anchor of (0, -0.5, 0) is its bottom face. Passing metres moves the pivot (found while building the arm; now covered by a unit test).
-- **Lab:** showcase scenes replace the studio panels with their own HUD while they run (Tab still hides it).
+- **Showcases** draw their own HUD instead of the editor panels (Tab still hides it).
 - **Native `SetBodyState` with zero velocities** marks the body ready to sleep at once (meant for restoring resting replay snapshots), so a body restored in mid-air can hang there until something touches it; PhysX wakes it. Teleport with `Entity::SetWorldPose` / `Physics::SetPose` to drop it (the showcase vehicle reset does).
 - **Raycast vehicles** hit every layer in `VehicleDesc::groundLayers`; the Robotics rover excludes the arm and crate layers (on the native backend its rays otherwise landed on the arm reaching over it).
 
@@ -77,14 +117,8 @@ Keyboard state comes from GLFW, so the focused window receives keys. When Phisik
 - **Black hole** is Schwarzschild (non-rotating) only: no Kerr frame dragging. The disk is thin and its particles move in a pseudo-Newtonian (Paczynski-Wiita) potential; colour uses a blackbody-like ramp, not a spectral integration. The Binet integration has a fixed 160-step budget: rays that orbit the photon sphere for more than ~4 turns stop early (they fall back to a dimmed background sample).
 - **Robot arm** joints are kinematic servos (velocity-limited), not physics joints; the gripped part is pinned to the tool every tick rather than held by friction. IK is numerical (DLS) and can stop at a joint limit for unreachable targets (the residual is shown).
 - **See-through materials** (`MaterialDesc::opacity`) are not sorted and draw both faces in one blended pass: fine for a few shells, not for many overlapping transparent objects. They cast no shadows and write no ids / depth (CAD ink and picking see the parts behind them).
-- **Removed with the P10 demos:** the stunt-car `Vehicle` helper (and its unit test) and the vision-export ctest. Vision capture itself (`Render::RequestVisionCapture`, `--export-vision`) is unchanged and still covered by the PhisiksLab runtime test.
+- **Removed with the P10 demos:** the stunt-car `Vehicle` helper (and its unit test) and the vision-export ctest. Vision capture itself (`Render::RequestVisionCapture`, `--export-vision`) is unchanged and still covered by the runtime tests.
 
-## P12 release packages
-- **Only the Windows archive was run end to end** (locally: PhysX and portable configurations). On the first `release.yml` run the Windows-runner and Ubuntu 22.04 / GCC 12 builds configured, built, passed the headless ctest and packaged; the archive check then failed on a script bug (fixed). The Linux archive has not been launched on a Linux desktop.
-- **No macOS download:** the release workflow builds Windows and Linux only (GitHub rejected the `macos-14` runner configuration). macOS builds locally with the `macos-release` preset, unverified.
-- **CI archives use the native physics backend** on every OS, including Windows: the PhysX SDK binaries are vendored by hand and not available on the runners. A PhysX Windows archive is built locally (`cpack` from the `vs2026-x64` preset); both are named `Phisiks-1.0.0-win64.zip`.
-- **Not signed:** Windows SmartScreen may warn on first launch; macOS Gatekeeper blocks the unsigned binaries until the quarantine flag is removed (`xattr -dr com.apple.quarantine <folder>`, in `QUICKSTART.txt`). macOS programs are plain executables, not `.app` bundles.
-- **Console window:** the Windows programs are console applications (log output goes to the console), so double-clicking also opens a console window.
-- **Run outputs** (`--run-dir`, the Lab's scene save path `Build/scenes/scene.json`) are relative to the working directory; a read-only install folder works as long as the working directory is writable.
-- **Executable names** are the CMake target names (`Showcase01_RoboticArm`, ...), not the `examples/` folder names (`01_robotics_6dof_arm`, ...).
-
+## P12 release packages (1.0; superseded by "Packaging (1.1)" above)
+- 1.0 built Windows and Linux archives in CI. The Linux archive was never launched on a Linux desktop. 1.1 adds a macOS build and creates the GitHub Release as a draft.
+- Executable names are the CMake target names (`Phisiks`, `PhisiksSamples`, `Showcase01_RoboticArm`, ...), not the `examples/` folder names.

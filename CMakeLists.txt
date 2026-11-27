@@ -430,7 +430,7 @@ endif()
 #   *.dll / runtime libraries (PhysX on Windows when that backend is built, the MSVC runtime)
 #   assets/   meshes, textures, models, audio, post-pass shaders (assets/shaders), Lua (assets/scripts)
 #   shaders/  the engine GLSL sources (embedded in the executables; used by --hot-reload)
-#   LICENSE, THIRD_PARTY_NOTICES.md, README.md, QUICKSTART.txt
+#   THIRD_PARTY_LICENSES/ (vendor/licenses), LICENSE, THIRD_PARTY_NOTICES.md, README.md, KNOWN_ISSUES.md, QUICKSTART.txt
 # ---------------------------------------------------------------------------------------------
 set(PHISIKS_PACKAGE_TARGETS Phisiks PhisiksSamples glprobe)
 if(PHISIKS_BUILD_PROJECTS)
@@ -471,7 +471,7 @@ if(EXISTS ${PHISIKS_VENDOR}/licenses)
 else()
     message(WARNING "vendor/licenses is missing: run 'python tools/fetch_deps.py' so release packages include the third-party licence texts")
 endif()
-install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md
+install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md ${PHISIKS_ROOT}/KNOWN_ISSUES.md
               ${PHISIKS_ROOT}/packaging/QUICKSTART.txt DESTINATION .)
 
 if(WIN32 AND PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
