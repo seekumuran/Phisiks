@@ -9,6 +9,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cmath>
+#include <cstring>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -90,8 +93,37 @@ namespace Phisiks::Assets {
         S().extraRoots.push_back(fs::path(directory));
     }
 
+    void RemoveSearchPath(const std::string& directory) {
+        std::lock_guard<std::mutex> lock(S().mutex);
+        auto& roots = S().extraRoots;
+        roots.erase(std::remove(roots.begin(), roots.end(), fs::path(directory)), roots.end());
+    }
+
+    namespace {
+        std::mutex g_resolverMutex;
+        ReferenceResolver g_resolver;
+        std::string Lower(std::string s) { std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); }); return s; }
+        std::string Extension(const std::string& path) {
+            const size_t slash = path.find_last_of("/\\");
+            const size_t dot = path.find_last_of('.');
+            return dot == std::string::npos || (slash != std::string::npos && dot < slash) ? std::string() : Lower(path.substr(dot));
+        }
+    }
+
+    void SetReferenceResolver(ReferenceResolver resolver) {
+        std::lock_guard<std::mutex> lock(g_resolverMutex);
+        g_resolver = std::move(resolver);
+    }
+    bool IsReference(const std::string& path) { return path.rfind("asset:", 0) == 0; }
+
     std::string Resolve(const std::string& path) {
         std::error_code ec;
+        if (IsReference(path)) {
+            ReferenceResolver resolver;
+            { std::lock_guard<std::mutex> lock(g_resolverMutex); resolver = g_resolver; }
+            const std::string resolved = resolver ? resolver(path) : std::string();
+            return !resolved.empty() && fs::is_regular_file(resolved, ec) ? resolved : std::string();
+        }
         const fs::path p(path);
         if (p.is_absolute()) return fs::is_regular_file(p, ec) ? p.string() : std::string();
         std::vector<fs::path> roots;
@@ -291,6 +323,78 @@ namespace Phisiks::Assets {
             return false;
         }
         return ParseObj(std::string(bytes.begin(), bytes.end()), out, error);
+    }
+
+    bool ParseStl(const std::vector<uint8_t>& bytes, Render::MeshData& out, std::string* error) {
+        out = {};
+        auto fail = [&](const std::string& why) { if (error) *error = why; out = {}; return false; };
+        auto emit = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c) {
+            glm::vec3 n = glm::cross(b - a, c - a);
+            const float len = glm::length(n);
+            if (!(len > 0.0f) || !std::isfinite(len)) return;   // degenerate facet: skipped
+            n /= len;
+            const uint32_t base = uint32_t(out.vertices.size());
+            for (const glm::vec3& p : { a, b, c }) out.vertices.push_back({ p, n, glm::vec2(0.0f) });
+            out.indices.insert(out.indices.end(), { base, base + 1, base + 2 });
+        };
+        // binary: 80-byte header, uint32 count, 50 bytes per facet (the size must match exactly)
+        if (bytes.size() >= 84) {
+            uint32_t count = 0;
+            std::memcpy(&count, bytes.data() + 80, 4);
+            if (uint64_t(84) + uint64_t(count) * 50 == bytes.size()) {
+                if (count > 50000000u) return fail("too many facets");
+                out.vertices.reserve(size_t(count) * 3);
+                out.indices.reserve(size_t(count) * 3);
+                for (uint32_t i = 0; i < count; ++i) {
+                    const uint8_t* f = bytes.data() + 84 + size_t(i) * 50;
+                    float v[12];
+                    std::memcpy(v, f, sizeof(v));
+                    emit({ v[3], v[4], v[5] }, { v[6], v[7], v[8] }, { v[9], v[10], v[11] });
+                }
+                if (out.indices.empty()) return fail("no valid facets");
+                return true;
+            }
+        }
+        // ASCII: "solid ... facet normal ... outer loop vertex x y z (x3) endloop endfacet ... endsolid"
+        const std::string text(bytes.begin(), bytes.end());
+        std::istringstream in(text);
+        std::string word;
+        if (!(in >> word) || Lower(word) != "solid") return fail("not an STL file (binary size mismatch, no 'solid' keyword)");
+        std::vector<glm::vec3> loop;
+        while (in >> word) {
+            const std::string w = Lower(word);
+            if (w == "vertex") {
+                glm::vec3 p;
+                if (!(in >> p.x >> p.y >> p.z)) return fail("malformed vertex");
+                loop.push_back(p);
+            }
+            else if (w == "endloop") {
+                if (loop.size() != 3) return fail("facet with " + std::to_string(loop.size()) + " vertices");
+                emit(loop[0], loop[1], loop[2]);
+                loop.clear();
+            }
+        }
+        if (out.indices.empty()) return fail("no valid facets");
+        return true;
+    }
+
+    bool LoadStl(const std::string& path, Render::MeshData& out, std::string* error) {
+        std::vector<uint8_t> bytes;
+        if (!ReadBytes(path, bytes)) { if (error) *error = "file not found"; return false; }
+        return ParseStl(bytes, out, error);
+    }
+
+    bool IsMeshFile(const std::string& path) {
+        const std::string ext = Extension(path);
+        return ext == ".obj" || ext == ".stl";
+    }
+
+    bool LoadMesh(const std::string& path, Render::MeshData& out, std::string* error) {
+        const std::string ext = Extension(path);
+        if (ext == ".stl") return LoadStl(path, out, error);
+        if (ext == ".obj") return LoadObj(path, out, error);
+        if (error) *error = "unsupported mesh format '" + ext + "' (OBJ and STL are supported)";
+        return false;
     }
 
     Stats GetStats() {

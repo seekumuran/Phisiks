@@ -191,6 +191,10 @@ namespace Phisiks::Render {
     // Built-in unit meshes: "Cube" (1 m), "Sphere" (1 m diameter), "Plane" (1x1 m XZ, +Y up).
     bool RegisterMesh(const std::string& name, const MeshData& data);
     bool HasMesh(const std::string& name);
+    // An asset file changed (reimport, a missing file came back): a mesh loaded from it (OBJ / STL)
+    // is loaded again and every render object using it updates; a texture is decoded again into its
+    // layer. For a name that failed to load, the failure is forgotten so the next use retries.
+    void ReloadAsset(const std::string& name);
     // Replaces the vertices of a registered mesh (same vertex count; CPU skinning / deformation).
     bool UpdateMeshVertices(const std::string& name, const std::vector<Vertex>& vertices);
 

@@ -9,11 +9,19 @@
 #include "Phisiks/Render/Renderer.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace Phisiks::Assets {
     void AddSearchPath(const std::string& directory);         // searched before the defaults
+    void RemoveSearchPath(const std::string& directory);
+    // Asset references "asset:<16 hex digit guid>/<file name>" (AssetDatabase::Reference) are resolved
+    // by the active project database: they keep working when the file is moved or renamed. The
+    // resolver returns an absolute path, or "" when the asset is missing. Thread-safe.
+    using ReferenceResolver = std::function<std::string(const std::string& reference)>;
+    void SetReferenceResolver(ReferenceResolver resolver);   // empty = none
+    bool IsReference(const std::string& path);
     std::string Resolve(const std::string& path);             // existing file path, or "" if not found
     // Existing directory: absolute, or relative to the executable's folder, then the working directory.
     std::string ResolveDirectory(const std::string& path);
@@ -35,6 +43,14 @@ namespace Phisiks::Assets {
 
     bool ParseObj(const std::string& text, Render::MeshData& out, std::string* error = nullptr);
     bool LoadObj(const std::string& path, Render::MeshData& out, std::string* error = nullptr);
+    // STL (binary or ASCII): triangle soup, flat-shaded (facet normals recomputed from the winding),
+    // no UVs. STL has no units: the values are used as they are (a file in millimetres needs a
+    // 0.001 scale on the entity).
+    bool ParseStl(const std::vector<uint8_t>& bytes, Render::MeshData& out, std::string* error = nullptr);
+    bool LoadStl(const std::string& path, Render::MeshData& out, std::string* error = nullptr);
+    // Static meshes by extension (.obj, .stl), from a path or an asset reference.
+    bool IsMeshFile(const std::string& path);
+    bool LoadMesh(const std::string& path, Render::MeshData& out, std::string* error = nullptr);
 
     struct Stats {
         uint32_t filesRead = 0;

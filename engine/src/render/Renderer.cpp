@@ -139,6 +139,8 @@ namespace Phisiks::Render {
             int albedoUsed = 0;
             std::unordered_map<std::string, int> textureLayer;          // -1 = failed
             std::unordered_map<std::string, Assets::Ticket> textureTickets;
+            std::unordered_map<std::string, int> textureReload;          // path -> layer to upload a reloaded image into
+            std::unordered_set<std::string> fileMeshes;                  // meshes loaded from asset files (ReloadAsset)
 
             // scene
             std::unordered_map<uint64_t, Object> objects;
@@ -489,19 +491,23 @@ namespace Phisiks::Render {
                 Assets::Image image;
                 const Assets::Status status = Assets::PollImage(it->second, image);
                 if (status == Assets::Status::Pending) { ++it; continue; }
+                const auto reload = g->textureReload.find(it->first);
+                const int reloadLayer = reload != g->textureReload.end() ? reload->second : -1;
+                if (reload != g->textureReload.end()) g->textureReload.erase(reload);
                 if (status == Assets::Status::Failed) {
                     Log::Error() << "Renderer: texture '" << it->first << "' could not be loaded";
-                    g->textureLayer[it->first] = -1;
+                    if (reloadLayer < 0) g->textureLayer[it->first] = -1;   // a failed reload keeps the previous image
                 }
                 else {
                     Assets::Image sized;
                     if (image.width != TEXTURE_SIZE || image.height != TEXTURE_SIZE) Assets::ResizeImage(image, TEXTURE_SIZE, TEXTURE_SIZE, sized);
                     const Assets::Image& upload = sized.rgba.empty() ? image : sized;
-                    EnsureAlbedoCapacity(g->albedoUsed + 1);
-                    const int layer = g->albedoUsed++;
+                    if (reloadLayer < 0) EnsureAlbedoCapacity(g->albedoUsed + 1);
+                    const int layer = reloadLayer >= 0 ? reloadLayer : g->albedoUsed++;
+                    if (reloadLayer >= 0 && g->compat && size_t(layer) < g->albedoImages.size()) g->albedoImages[size_t(layer)] = upload.rgba;
                     g->albedoArray.UploadLayer(layer, GL_RGBA, GL_UNSIGNED_BYTE, upload.rgba.data());
                     g->albedoArray.GenerateMipmaps();
-                    if (g->compat) g->albedoImages.push_back(upload.rgba);
+                    if (g->compat && reloadLayer < 0) g->albedoImages.push_back(upload.rgba);
                     g->textureLayer[it->first] = layer;
                     Log::Info() << "Renderer: texture '" << it->first << "' (" << image.width << "x" << image.height << ") -> layer " << layer;
                 }
@@ -513,11 +519,12 @@ namespace Phisiks::Render {
         bool ResolveMesh(const std::string& name, uint32_t& index) {
             auto it = g->meshByName.find(name);
             if (it != g->meshByName.end()) { index = it->second; return true; }
-            const bool isObj = name.size() > 4 && name.compare(name.size() - 4, 4, ".obj") == 0;
-            if (isObj && !g->warned.count("mesh:" + name)) {
+            const bool isFile = Assets::IsMeshFile(name);   // .obj / .stl, a path or an asset reference
+            if (isFile && !g->warned.count("mesh:" + name)) {
                 MeshData data;
                 std::string error;
-                if (Assets::LoadObj(name, data, &error) && RegisterMesh(name, data)) {
+                if (Assets::LoadMesh(name, data, &error) && RegisterMesh(name, data)) {
+                    g->fileMeshes.insert(name);
                     Log::Info() << "Renderer: mesh '" << name << "' loaded (" << data.vertices.size() << " vertices, " << data.indices.size() / 3 << " triangles)";
                     index = g->meshByName[name];
                     return true;
@@ -934,6 +941,36 @@ namespace Phisiks::Render {
         return true;
     }
     bool HasMesh(const std::string& name) { return g && g->meshByName.count(name) != 0; }
+
+    void ReloadAsset(const std::string& name) {
+        if (!g || name.empty()) return;
+        g->warned.erase("mesh:" + name);
+        if (auto it = g->meshByName.find(name); it != g->meshByName.end() && g->fileMeshes.count(name)) {
+            MeshData data;
+            std::string error;
+            if (!Assets::LoadMesh(name, data, &error) || data.vertices.empty() || data.indices.empty()) {
+                Log::Warning() << "Renderer: reload of mesh '" << name << "' failed (" << error << "); the previous mesh stays";
+            }
+            else {
+                // The old range stays in the shared buffers (released with the renderer); the entry points at the new one.
+                MeshEntry& entry = g->meshes[it->second];
+                entry.firstIndex = uint32_t(g->indices.size());
+                entry.indexCount = uint32_t(data.indices.size());
+                entry.baseVertex = int32_t(g->vertices.size());
+                entry.radius = RenderMath::BoundingRadius(data);
+                entry.vertexCount = uint32_t(data.vertices.size());
+                g->vertices.insert(g->vertices.end(), data.vertices.begin(), data.vertices.end());
+                g->indices.insert(g->indices.end(), data.indices.begin(), data.indices.end());
+                g->meshesDirty = true;
+                Log::Info() << "Renderer: mesh '" << name << "' reloaded (" << data.vertices.size() << " vertices)";
+            }
+        }
+        if (auto it = g->textureLayer.find(name); it != g->textureLayer.end()) {
+            if (it->second >= 0) g->textureReload[name] = it->second;
+            else g->textureLayer.erase(it);   // failed before: retry with a new layer
+            if (!g->textureTickets.count(name)) g->textureTickets[name] = Assets::RequestImage(name);
+        }
+    }
 
     bool UpdateMeshVertices(const std::string& name, const std::vector<Vertex>& vertices) {
         if (!g) return false;
