@@ -104,7 +104,24 @@ All engine systems are unchanged apart from the fixes listed below. Every sample
 
 ### Verification
 
-VERIFICATION_TABLE
+| Check | Result |
+|---|---|
+| Clean from-scratch Windows Release build (PhysX, VS 2026 Insiders, CMake 4.5 RC) | exit 0, 0 compiler / linker warnings, 436 s |
+| Unit tests | 147 cases, 0 failed |
+| ctest, PhysX build (9 tests incl. 4 showcases, `RuntimeTests`, `RuntimeTestsGL41`) | 9/9 passed |
+| ctest, portable Windows build (native physics + miniaudio) | 9/9 passed |
+| Runtime tests, OpenGL 4.6 tier (hidden window) | 240 passed, 0 failed |
+| Runtime tests, OpenGL 4.1 tier | 227 passed, 0 failed (the Old-McDonald mission now completes) |
+| Project Marina / Old-McDonald load as separate programs | yes (ProjectMarina 347 entities, OldMcDonald 613; screenshots of the real executables) |
+| No text annotations in the project scenes | runtime check: 0 UI vertices and 0 bitmap glyphs over the scene with panels hidden (both projects); screenshots |
+| Main application without the demo interface | `Phisiks.exe` screenshot: empty document, no playlists or Lab branding |
+| Save / load | runtime checks: edits survive save + reopen (Marina, Old-McDonald, both CAD workspaces); File save / open while exploded (B4); damaged / newer file rejected without change (B5); atomic save |
+| Windows packages | `Phisiks-1.1.0-win64-physx.zip` (16.7 MB), `Phisiks-1.1.0-win64.zip` (15.1 MB) in `dist/`; the PhysX archive extracted and run from a foreign working directory (4 programs, 0 errors, no missing meshes; `Phisiks --open … --assets projects/assets` loads 149 entities) and from a write-denied folder (runs; logs fall back to `%LOCALAPPDATA%\Phisiks`) |
+| Linux CI (Ubuntu 24.04, GCC) | build + headless ctest pass. Runtime tests on llvmpipe: previously aborted in the hot-reload step (test bug, fixed in `ea818a4`); the re-run was still in progress when this log was written |
+| Linux release packaging (Ubuntu 22.04, GCC 12) | build, headless ctest, CPack, archive check incl. `ldd`: pass |
+| macOS CI (macOS 15, Apple Clang) | build + headless ctest pass; release packaging incl. `otool` check: pass |
+| macOS rendering | **not verified**: the runner cannot create an OpenGL context; no physical Mac |
+| Windows CI (VS 2022, portable) | build + headless ctest pass; packaging pass |
 
 ### Outstanding limitations
 

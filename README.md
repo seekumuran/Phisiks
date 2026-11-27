@@ -4,13 +4,13 @@
 
 ![platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-555) ![licence](https://img.shields.io/badge/licence-MIT-555)
 
-Platform status for 1.1 (details in [KNOWN_ISSUES.md](KNOWN_ISSUES.md)):
+Platform status for 1.1. What was verified, and how, is in [PHISIKS_RELEASE_LOG.md](PHISIKS_RELEASE_LOG.md); limitations are in [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
-| Platform | Build | Automated tests | Status |
+| Platform | Build | Tests | Status |
 |---|---|---|---|
-| Windows 10/11 x64 (MSVC) | local + CI | unit, layering, replay, showcases, runtime tests (4.6 + 4.1 tiers) on a real GPU | supported |
-| Linux x64 (GCC) | CI (Ubuntu 24.04) | unit, layering, replay on the runner; runtime tests on Mesa llvmpipe (software GL) | supported, see [BUILD_LINUX.md](BUILD_LINUX.md) |
-| macOS arm64 (Apple Clang) | CI (macOS 15) | see [BUILD_MACOS.md](BUILD_MACOS.md) | experimental: OpenGL 4.1 only |
+| Windows 10/11 x64 (MSVC) | local + CI | unit, layering, replay, showcases, runtime tests on the OpenGL 4.6 and 4.1 tiers (real GPU) | supported |
+| Linux x64 (GCC) | CI (Ubuntu 24.04, 22.04) + release archive | unit, layering, replay; runtime tests on Mesa llvmpipe (software GL, 4.1 tier) | supported; hardware-GPU desktops not yet tested |
+| macOS arm64 (Apple Clang) | CI (macOS 15) + release archive | unit, layering, replay. **Rendering untested:** no OpenGL-capable macOS runner or Mac was available | experimental (OpenGL 4.1, deprecated by Apple) |
 
 ## What the engine provides
 
