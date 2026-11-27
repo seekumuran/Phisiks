@@ -15,6 +15,7 @@ name: release
 on:
   push:
     tags: [ 'v*' ]
+    branches: [ 'release/**' ]   # release branches: build and check the archives (publish runs on tags only)
   workflow_dispatch:
 
 permissions:
