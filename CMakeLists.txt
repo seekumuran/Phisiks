@@ -119,16 +119,26 @@ endforeach()
 
 # GLFW: vendored prebuilt on Windows; a system / package-manager install elsewhere, else fetched.
 add_library(phisiks_glfw INTERFACE)
+set(PHISIKS_SDK_DEPENDENCIES "")          # find_dependency() lines for the installed package config
+set(PHISIKS_SDK_EXTRA_LIBS "")            # vendored static libraries copied into the SDK's lib/
 if(WIN32 AND EXISTS ${PHISIKS_VENDOR}/GLFW/lib)
-    target_include_directories(phisiks_glfw INTERFACE ${PHISIKS_VENDOR}/GLFW/include)
-    target_link_directories(phisiks_glfw INTERFACE ${PHISIKS_VENDOR}/GLFW/lib/${PHISIKS_LIBCFG})
-    target_link_libraries(phisiks_glfw INTERFACE glfw3 opengl32 user32 gdi32 shell32)
+    set(PHISIKS_GLFW_VENDORED ON)
+    target_include_directories(phisiks_glfw INTERFACE $<BUILD_INTERFACE:${PHISIKS_VENDOR}/GLFW/include>)
+    target_link_libraries(phisiks_glfw INTERFACE
+        $<BUILD_INTERFACE:${PHISIKS_VENDOR}/GLFW/lib/${PHISIKS_LIBCFG}/glfw3.lib>
+        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/lib/glfw3.lib>
+        opengl32 user32 gdi32 shell32)
+    list(APPEND PHISIKS_SDK_EXTRA_LIBS ${PHISIKS_VENDOR}/GLFW/lib/release/glfw3.lib)
 else()
     option(PHISIKS_BUNDLED_GLFW "Build GLFW from source (static) instead of using a system GLFW" OFF)
     if(NOT PHISIKS_BUNDLED_GLFW)
         find_package(glfw3 3.3 QUIET)
     endif()
+    if(NOT PHISIKS_BUNDLED_GLFW AND glfw3_FOUND)
+        string(APPEND PHISIKS_SDK_DEPENDENCIES "find_dependency(glfw3 3.3)\n")
+    endif()
     if(PHISIKS_BUNDLED_GLFW OR NOT glfw3_FOUND)
+        set(PHISIKS_GLFW_FETCHED ON)
         include(FetchContent)
         set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
         set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -139,6 +149,7 @@ else()
         FetchContent_MakeAvailable(glfw)
     endif()
     find_package(OpenGL REQUIRED)
+    string(APPEND PHISIKS_SDK_DEPENDENCIES "find_dependency(OpenGL)\n")
     target_link_libraries(phisiks_glfw INTERFACE glfw OpenGL::GL)
 endif()
 
@@ -147,15 +158,18 @@ set(PHISIKS_RUNTIME_DLLS)
 if(PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
     add_library(phisiks_physx INTERFACE)
     if(WIN32 AND EXISTS ${PHISIKS_VENDOR}/physx/lib)
-        target_include_directories(phisiks_physx INTERFACE ${PHISIKS_VENDOR}/physx/include ${PHISIKS_VENDOR}/physx/include/physx)
-        target_link_directories(phisiks_physx INTERFACE ${PHISIKS_VENDOR}/physx/lib/${PHISIKS_LIBCFG})
-        target_link_libraries(phisiks_physx INTERFACE
-            PhysX_64 PhysXCommon_64 PhysXCooking_64 PhysXFoundation_64
-            PhysXExtensions_static_64 PhysXPvdSDK_static_64 PhysXCharacterKinematic_static_64)
+        target_include_directories(phisiks_physx INTERFACE $<BUILD_INTERFACE:${PHISIKS_VENDOR}/physx/include> $<BUILD_INTERFACE:${PHISIKS_VENDOR}/physx/include/physx>)
+        foreach(lib PhysX_64 PhysXCommon_64 PhysXCooking_64 PhysXFoundation_64 PhysXExtensions_static_64 PhysXPvdSDK_static_64 PhysXCharacterKinematic_static_64)
+            target_link_libraries(phisiks_physx INTERFACE
+                $<BUILD_INTERFACE:${PHISIKS_VENDOR}/physx/lib/${PHISIKS_LIBCFG}/${lib}.lib>
+                $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/lib/${lib}.lib>)
+            list(APPEND PHISIKS_SDK_EXTRA_LIBS ${PHISIKS_VENDOR}/physx/lib/release/${lib}.lib)
+        endforeach()
         file(GLOB PHISIKS_RUNTIME_DLLS ${PHISIKS_VENDOR}/DLLs/*.dll)
     else()
         # vcpkg: `vcpkg install physx`, configure with CMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
         find_package(unofficial-omniverse-physx-sdk CONFIG REQUIRED)
+        string(APPEND PHISIKS_SDK_DEPENDENCIES "find_dependency(unofficial-omniverse-physx-sdk CONFIG)\n")
         target_link_libraries(phisiks_physx INTERFACE unofficial::omniverse-physx-sdk::sdk)
     endif()
 endif()
@@ -166,7 +180,7 @@ add_library(PhisiksImGui STATIC
     ${PHISIKS_VENDOR}/imgui/imgui_tables.cpp ${PHISIKS_VENDOR}/imgui/imgui_widgets.cpp
     ${PHISIKS_VENDOR}/imgui/backends/imgui_impl_glfw.cpp ${PHISIKS_VENDOR}/imgui/backends/imgui_impl_opengl3.cpp
     ${PHISIKS_VENDOR}/imguizmo/ImGuizmo.cpp)
-target_include_directories(PhisiksImGui PUBLIC ${PHISIKS_VENDOR}/imgui ${PHISIKS_VENDOR}/imguizmo)
+target_include_directories(PhisiksImGui PUBLIC $<BUILD_INTERFACE:${PHISIKS_VENDOR}/imgui> $<BUILD_INTERFACE:${PHISIKS_VENDOR}/imguizmo> $<INSTALL_INTERFACE:include/imgui>)
 target_include_directories(PhisiksImGui PRIVATE ${PHISIKS_VENDOR}/imgui/backends)
 target_link_libraries(PhisiksImGui PRIVATE phisiks_glfw)
 if(MSVC)
@@ -181,7 +195,7 @@ endif()
 file(GLOB PHISIKS_LUA_SOURCES ${PHISIKS_VENDOR}/lua/src/*.c)
 list(FILTER PHISIKS_LUA_SOURCES EXCLUDE REGEX "/(lua|luac)\\.c$")
 add_library(PhisiksLua STATIC ${PHISIKS_LUA_SOURCES})
-target_include_directories(PhisiksLua PUBLIC ${PHISIKS_VENDOR}/lua/src)
+target_include_directories(PhisiksLua PRIVATE ${PHISIKS_VENDOR}/lua/src)   # engine-private (Lua headers are not part of the SDK)
 set_target_properties(PhisiksLua PROPERTIES LINKER_LANGUAGE C)
 if(MSVC)
     target_compile_options(PhisiksLua PRIVATE /W0)
@@ -224,14 +238,17 @@ add_custom_command(
 configure_file(${PHISIKS_ROOT}/engine/include/Phisiks/Version.h.in ${PHISIKS_GENERATED_DIR}/include/Phisiks/Version.h @ONLY)
 
 add_library(PhisiksCore STATIC ${PHISIKS_ENGINE_SOURCES} ${PHISIKS_ENGINE_SHADERS} ${PHISIKS_EMBEDDED_SHADERS} ${PHISIKS_VENDOR}/glad/src/gl.c)
+add_library(Phisiks::Core ALIAS PhisiksCore)
 source_group(TREE ${PHISIKS_ROOT}/engine PREFIX "engine" FILES ${PHISIKS_ENGINE_SOURCES} ${PHISIKS_ENGINE_SHADERS})
 
 # Public API: engine headers + glm and EnTT (public headers/templates); Dear ImGui comes with PhisiksImGui.
 target_include_directories(PhisiksCore PUBLIC
-    ${PHISIKS_ROOT}/engine/include
-    ${PHISIKS_GENERATED_DIR}/include
-    ${PHISIKS_VENDOR}/glm
-    ${PHISIKS_VENDOR}/entt)
+    $<BUILD_INTERFACE:${PHISIKS_ROOT}/engine/include>
+    $<BUILD_INTERFACE:${PHISIKS_GENERATED_DIR}/include>
+    $<BUILD_INTERFACE:${PHISIKS_VENDOR}/glm>
+    $<BUILD_INTERFACE:${PHISIKS_VENDOR}/entt>
+    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:include/entt>)
 # Private: implementation headers and backends. Apps and tests cannot include these.
 target_include_directories(PhisiksCore PRIVATE
     ${PHISIKS_ROOT}/engine/src
@@ -240,6 +257,7 @@ target_include_directories(PhisiksCore PRIVATE
     ${PHISIKS_VENDOR}/stb_image
     ${PHISIKS_VENDOR}/nlohmann
     ${PHISIKS_VENDOR}/miniaudio
+    ${PHISIKS_VENDOR}/lua/src
     ${PHISIKS_VENDOR}/imgui/backends)
 target_link_libraries(PhisiksCore PUBLIC PhisiksImGui Threads::Threads)
 target_link_libraries(PhisiksCore PRIVATE phisiks_glfw PhisiksLua ${CMAKE_DL_LIBS})
@@ -255,11 +273,11 @@ endif()
 
 if(MSVC)
     target_compile_definitions(PhisiksCore PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(PhisiksCore PUBLIC /utf-8 /bigobj /Zc:__cplusplus /W3)
-    target_compile_options(PhisiksCore PRIVATE /MP)
+    target_compile_options(PhisiksCore PUBLIC /utf-8 /bigobj /Zc:__cplusplus)
+    target_compile_options(PhisiksCore PRIVATE /MP /W3)
     target_link_libraries(PhisiksCore PUBLIC dbghelp ole32 psapi)
 else()
-    target_compile_options(PhisiksCore PUBLIC -Wall)
+    target_compile_options(PhisiksCore PRIVATE -Wall)
     if(UNIX AND NOT APPLE)
         target_link_libraries(PhisiksCore PUBLIC m)
     endif()
@@ -324,7 +342,8 @@ endforeach()
 file(GLOB PHISIKS_EDITOR_SOURCES CONFIGURE_DEPENDS ${PHISIKS_ROOT}/apps/editor/src/*.cpp ${PHISIKS_ROOT}/apps/editor/src/*.h)
 list(FILTER PHISIKS_EDITOR_SOURCES EXCLUDE REGEX "/Main\\.cpp$")
 add_library(PhisiksEditor STATIC ${PHISIKS_EDITOR_SOURCES})
-target_include_directories(PhisiksEditor PUBLIC ${PHISIKS_ROOT}/apps/editor/src)
+add_library(Phisiks::Editor ALIAS PhisiksEditor)
+target_include_directories(PhisiksEditor PUBLIC $<BUILD_INTERFACE:${PHISIKS_ROOT}/apps/editor/src> $<INSTALL_INTERFACE:include/PhisiksEditor>)
 target_link_libraries(PhisiksEditor PUBLIC PhisiksCore)
 source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_EDITOR_SOURCES})
 
@@ -481,6 +500,7 @@ endif()
 #   shaders/  the engine GLSL sources (embedded in the executables; used by --hot-reload)
 #   THIRD_PARTY_LICENSES/ (vendor/licenses), LICENSE, THIRD_PARTY_NOTICES.md, README.md, KNOWN_ISSUES.md, QUICKSTART.txt
 # ---------------------------------------------------------------------------------------------
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME runtime)   # the application package; the SDK is component "sdk"
 set(PHISIKS_PACKAGE_TARGETS Phisiks PhisiksSamples glprobe)
 if(PHISIKS_BUILD_PROJECTS)
     list(APPEND PHISIKS_PACKAGE_TARGETS ProjectMarina OldMcDonald)
@@ -500,6 +520,7 @@ if(WIN32)
     # The MSVC C/C++ runtime, app-local (no Visual C++ Redistributable install needed).
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
     set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)                                      # UCRT ships with Windows 10+
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT runtime)
     include(InstallRequiredSystemLibraries)
 endif()
 # Executables find shared libraries placed next to them (none are needed by default).
@@ -541,6 +562,71 @@ install(FILES ${PHISIKS_BUILD_INFO} DESTINATION .)
 install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md ${PHISIKS_ROOT}/KNOWN_ISSUES.md
               ${PHISIKS_ROOT}/packaging/QUICKSTART.txt DESTINATION .)
 
+
+# ---------------------------------------------------------------------------------------------
+# SDK (install component "sdk", archive "...-sdk"): headers, static libraries and a CMake package.
+#   find_package(PHISIKS 1.1 CONFIG REQUIRED)        # or find_package(Phisiks ...)
+#   target_link_libraries(MyApp PRIVATE Phisiks::Core)      # engine
+#   target_link_libraries(MyApp PRIVATE Phisiks::Editor)    # + the editor (Editor.h, EditorApp.h)
+# Layout: include/ (Phisiks/, PhisiksEditor/, glm/, entt/, imgui/), lib/ (static libraries, plus the
+# vendored GLFW / PhysX import libraries on Windows), bin/ (PhysX DLLs), lib/cmake/phisiks/,
+# share/phisiks/ (licences, SDK guide). Release configuration (MSVC: /MD runtime).
+# ---------------------------------------------------------------------------------------------
+option(PHISIKS_INSTALL_SDK "Install the SDK (headers, libraries, CMake package) as component 'sdk'" ON)
+if(PHISIKS_INSTALL_SDK)
+    include(CMakePackageConfigHelpers)
+    set_target_properties(PhisiksCore PROPERTIES EXPORT_NAME Core)
+    set_target_properties(PhisiksEditor PROPERTIES EXPORT_NAME Editor)
+    set_target_properties(PhisiksImGui PROPERTIES EXPORT_NAME ImGui)
+    set_target_properties(PhisiksLua PROPERTIES EXPORT_NAME Lua)
+    set_target_properties(phisiks_glfw PROPERTIES EXPORT_NAME GlfwDependency)
+    set(PHISIKS_SDK_TARGETS PhisiksCore PhisiksEditor PhisiksImGui PhisiksLua phisiks_glfw)
+    if(TARGET phisiks_physx)
+        set_target_properties(phisiks_physx PROPERTIES EXPORT_NAME PhysXDependency)
+        list(APPEND PHISIKS_SDK_TARGETS phisiks_physx)
+    endif()
+    if(PHISIKS_GLFW_FETCHED)
+        list(APPEND PHISIKS_SDK_TARGETS glfw)   # the static GLFW built from source
+    endif()
+    if(PHISIKS_PREVIEW_TOOLCHAIN_REASONS AND NOT PHISIKS_ALLOW_PREVIEW_TOOLCHAIN)
+        install(CODE "if(NOT DEFINED ENV{PHISIKS_LOCAL_INSTALL})\n message(FATAL_ERROR \"Phisiks: SDK packaging is blocked: pre-release toolchain (${PHISIKS_PREVIEW_TEXT}). Set the environment variable PHISIKS_LOCAL_INSTALL=1 for a local test install.\")\n endif()" COMPONENT sdk)
+    endif()
+    install(TARGETS ${PHISIKS_SDK_TARGETS} EXPORT PhisiksTargets COMPONENT sdk
+            ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
+    if(PHISIKS_SDK_EXTRA_LIBS)
+        install(FILES ${PHISIKS_SDK_EXTRA_LIBS} DESTINATION lib COMPONENT sdk)
+    endif()
+    if(PHISIKS_RUNTIME_DLLS)
+        install(FILES ${PHISIKS_RUNTIME_DLLS} DESTINATION bin COMPONENT sdk)
+    endif()
+    install(DIRECTORY ${PHISIKS_ROOT}/engine/include/Phisiks DESTINATION include COMPONENT sdk FILES_MATCHING PATTERN "*.h")
+    install(FILES ${PHISIKS_GENERATED_DIR}/include/Phisiks/Version.h DESTINATION include/Phisiks COMPONENT sdk)
+    install(DIRECTORY ${PHISIKS_VENDOR}/glm/glm DESTINATION include COMPONENT sdk FILES_MATCHING PATTERN "*.hpp" PATTERN "*.inl" PATTERN "*.h")
+    install(DIRECTORY ${PHISIKS_VENDOR}/entt/ DESTINATION include/entt COMPONENT sdk FILES_MATCHING PATTERN "*.hpp")
+    install(FILES ${PHISIKS_VENDOR}/imgui/imgui.h ${PHISIKS_VENDOR}/imgui/imconfig.h ${PHISIKS_VENDOR}/imgui/imgui_internal.h
+                  ${PHISIKS_VENDOR}/imgui/imstb_rectpack.h ${PHISIKS_VENDOR}/imgui/imstb_textedit.h ${PHISIKS_VENDOR}/imgui/imstb_truetype.h
+                  ${PHISIKS_VENDOR}/imguizmo/ImGuizmo.h DESTINATION include/imgui COMPONENT sdk)
+    install(FILES ${PHISIKS_ROOT}/apps/editor/src/Editor.h ${PHISIKS_ROOT}/apps/editor/src/EditorApp.h DESTINATION include/PhisiksEditor COMPONENT sdk)
+    install(EXPORT PhisiksTargets NAMESPACE Phisiks:: DESTINATION lib/cmake/phisiks FILE phisiks-targets.cmake COMPONENT sdk)
+    configure_package_config_file(${PHISIKS_ROOT}/cmake/phisiks-config.cmake.in ${CMAKE_BINARY_DIR}/sdk/phisiks-config.cmake
+                                  INSTALL_DESTINATION lib/cmake/phisiks)
+    write_basic_package_version_file(${CMAKE_BINARY_DIR}/sdk/phisiks-config-version.cmake VERSION ${PROJECT_VERSION} COMPATIBILITY SameMinorVersion)
+    install(FILES ${CMAKE_BINARY_DIR}/sdk/phisiks-config.cmake ${CMAKE_BINARY_DIR}/sdk/phisiks-config-version.cmake DESTINATION lib/cmake/phisiks COMPONENT sdk)
+    install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/SDK.md ${PHISIKS_BUILD_INFO} DESTINATION share/phisiks COMPONENT sdk)
+    if(EXISTS ${PHISIKS_VENDOR}/licenses)
+        install(DIRECTORY ${PHISIKS_VENDOR}/licenses/ DESTINATION share/phisiks/THIRD_PARTY_LICENSES COMPONENT sdk)
+    endif()
+    install(DIRECTORY ${PHISIKS_ROOT}/examples/sdk_consumer/ DESTINATION share/phisiks/examples/sdk_consumer COMPONENT sdk)
+    # ctest: install the SDK into the build folder, copy the consumer example out of the source tree,
+    # configure it against the installed package only, build and run it.
+    add_test(NAME SdkConsumer COMMAND ${CMAKE_COMMAND}
+        -DBUILD_DIR=${CMAKE_BINARY_DIR} -DCONFIG=$<CONFIG> -DWORK=${CMAKE_BINARY_DIR}/sdk_consumer_test
+        -DSOURCE=${PHISIKS_ROOT}/examples/sdk_consumer -DGENERATOR=${CMAKE_GENERATOR} -DPLATFORM=${CMAKE_GENERATOR_PLATFORM}
+        -DC_COMPILER=${CMAKE_C_COMPILER} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -P ${PHISIKS_ROOT}/tools/test_sdk_consumer.cmake)
+    set_tests_properties(SdkConsumer PROPERTIES TIMEOUT 900)
+endif()
+
 if(WIN32 AND PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
     set(PHISIKS_PACKAGE_SYSTEM win64-physx)   # distinct name: the CI / portable archive is native physics
     set(PHISIKS_PACKAGE_GENERATOR ZIP)
@@ -566,6 +652,9 @@ endif()
 set(CPACK_PACKAGE_FILE_NAME "Phisiks-${PROJECT_VERSION}-${PHISIKS_PACKAGE_SYSTEM}")
 set(CPACK_PACKAGE_DIRECTORY ${PHISIKS_ROOT}/dist)
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)                                       # one Phisiks-<version>-<os>/ folder
-set(CPACK_ARCHIVE_COMPONENT_INSTALL OFF)
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)                   # runtime archive + SDK archive
+set(CPACK_COMPONENTS_ALL runtime sdk)
+set(CPACK_ARCHIVE_RUNTIME_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}")
+set(CPACK_ARCHIVE_SDK_FILE_NAME "Phisiks-${PROJECT_VERSION}-${PHISIKS_PACKAGE_SYSTEM}-sdk")
 set(CPACK_STRIP_FILES ON)
 include(CPack)

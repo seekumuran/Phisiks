@@ -69,7 +69,7 @@ jobs:
       - name: Configure
         run: ${{ matrix.configure }}
       - name: Build
-        run: cmake --build Build/release --config Release --parallel
+        run: bash tools/ci_build.sh cmake --build Build/release --config Release --parallel
       - name: Tests (unit, layering, deterministic replay)
         run: ctest --test-dir Build/release -C Release --output-on-failure
       - name: Package (CPack)
@@ -82,10 +82,12 @@ jobs:
         run: |
           shopt -s nullglob
           cd dist
-          archives=(Phisiks-*.zip Phisiks-*.tar.gz)
+          all=(Phisiks-*.zip Phisiks-*.tar.gz)
           echo "dist/: $(ls)"
-          if [ ${#archives[@]} -ne 1 ]; then echo "expected one archive, found ${#archives[@]}: ${archives[*]}"; exit 1; fi
-          archive=${archives[0]}
+          runtime=(); sdk=()
+          for a in "${all[@]}"; do case "$a" in *-sdk.*) sdk+=("$a");; *) runtime+=("$a");; esac; done
+          if [ ${#runtime[@]} -ne 1 ] || [ ${#sdk[@]} -ne 1 ]; then echo "expected one runtime and one SDK archive, found: ${all[*]}"; exit 1; fi
+          archive=${runtime[0]}
           echo "archive: $archive"
           rm -rf check && mkdir check
           (cd check && cmake -E tar xf "../$archive")
@@ -124,8 +126,26 @@ jobs:
             rm -f otool.txt
           fi
           rm -rf check
+          # SDK archive: package config, headers, libraries, licences, provenance
+          sdkarchive=${sdk[0]}
+          echo "SDK archive: $sdkarchive"
+          mkdir check && (cd check && cmake -E tar xf "../$sdkarchive")
+          sdkroots=(check/Phisiks-*/)
+          sdkroot=${sdkroots[0]%/}
+          for f in lib/cmake/phisiks/phisiks-config.cmake lib/cmake/phisiks/phisiks-config-version.cmake lib/cmake/phisiks/phisiks-targets.cmake \
+                   include/Phisiks/Version.h include/Phisiks/Runtime/Application.h include/PhisiksEditor/EditorApp.h include/glm/vec3.hpp \
+                   include/entt/entt.hpp include/imgui/imgui.h share/phisiks/LICENSE share/phisiks/SDK.md share/phisiks/BUILD_INFO.txt \
+                   share/phisiks/examples/sdk_consumer/CMakeLists.txt share/phisiks/THIRD_PARTY_LICENSES/glfw.txt; do
+            if [ ! -e "$sdkroot/$f" ]; then echo "SDK: missing $f"; missing=1; fi
+          done
+          libs=$(find "$sdkroot/lib" -maxdepth 1 \( -name '*.lib' -o -name '*.a' \) | wc -l)
+          echo "SDK: $libs static libraries"
+          if [ "$libs" -lt 4 ]; then echo "SDK: expected the PHISIKS static libraries"; missing=1; fi
+          grep -q "^toolchain: *released$" "$sdkroot/share/phisiks/BUILD_INFO.txt" || { echo "SDK BUILD_INFO: not a released toolchain"; missing=1; }
+          if grep -rq "$GITHUB_WORKSPACE" "$sdkroot/lib/cmake/phisiks"; then echo "SDK: package files refer to the build machine's source tree"; missing=1; fi
+          rm -rf check
           if [ "$missing" -ne 0 ]; then exit 1; fi
-          echo "archive OK"
+          echo "archives OK"
       - uses: actions/upload-artifact@v4
         with:
           name: phisiks-${{ matrix.name }}

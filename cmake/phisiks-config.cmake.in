@@ -1,0 +1,27 @@
+# PHISIKS SDK package (installed by the PHISIKS build: component "sdk").
+#
+#   find_package(PHISIKS 1.1 CONFIG REQUIRED)
+#   target_link_libraries(MyApp PRIVATE Phisiks::Core)     # engine
+#   target_link_libraries(MyApp PRIVATE Phisiks::Editor)   # engine + editor
+#
+# Variables: PHISIKS_VERSION, PHISIKS_PHYSICS_BACKEND (PhysX | Native), PHISIKS_ROOT_DIR.
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+@PHISIKS_SDK_DEPENDENCIES@
+include("${CMAKE_CURRENT_LIST_DIR}/phisiks-targets.cmake")
+
+set(PHISIKS_VERSION "@PROJECT_VERSION@")
+set(PHISIKS_PHYSICS_BACKEND "@PHISIKS_PHYSICS_BACKEND@")
+set_and_check(PHISIKS_ROOT_DIR "${PACKAGE_PREFIX_DIR}")
+if(WIN32 AND PHISIKS_PHYSICS_BACKEND STREQUAL "PhysX")
+    # The PhysX DLLs must be next to the executable: copy them with phisiks_copy_runtime(<target>).
+    file(GLOB PHISIKS_RUNTIME_DLLS "${PACKAGE_PREFIX_DIR}/bin/*.dll")
+endif()
+function(phisiks_copy_runtime target)
+    foreach(dll ${PHISIKS_RUNTIME_DLLS})
+        add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" $<TARGET_FILE_DIR:${target}>)
+    endforeach()
+endfunction()
+check_required_components(${CMAKE_FIND_PACKAGE_NAME})
