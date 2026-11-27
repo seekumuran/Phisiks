@@ -57,6 +57,49 @@ if(PHISIKS_AUDIO_BACKEND STREQUAL "WASAPI" AND NOT WIN32)
 endif()
 message(STATUS "Phisiks: physics ${PHISIKS_PHYSICS_BACKEND}, audio ${PHISIKS_AUDIO_BACKEND}, output ${PHISIKS_OUTPUT_DIR}")
 
+# ---------------------------------------------------------------------------------------------
+# Build provenance. Every package carries BUILD_INFO.txt (version, commit, toolchain, backends,
+# CI run). A pre-release toolchain (Visual Studio Preview / Insiders, a CMake release candidate)
+# must not produce release packages: the install step fails unless PHISIKS_ALLOW_PREVIEW_TOOLCHAIN
+# is ON, and such a package is then named "...-preview-toolchain" so it can't pass for a release.
+# ---------------------------------------------------------------------------------------------
+set(PHISIKS_PREVIEW_TOOLCHAIN_REASONS "")
+if(CMAKE_VERSION MATCHES "-rc|-g[0-9a-f]+|-dirty")   # release candidates and development builds
+    list(APPEND PHISIKS_PREVIEW_TOOLCHAIN_REASONS "CMake ${CMAKE_VERSION} is not a release")
+endif()
+if(MSVC)
+    foreach(path "${CMAKE_GENERATOR_INSTANCE}" "${CMAKE_CXX_COMPILER}")
+        if(path MATCHES "[Ii]nsiders|[Pp]review")
+            list(APPEND PHISIKS_PREVIEW_TOOLCHAIN_REASONS "Visual Studio pre-release (${path})")
+            break()
+        endif()
+    endforeach()
+endif()
+option(PHISIKS_ALLOW_PREVIEW_TOOLCHAIN "Allow packaging with a pre-release toolchain (local testing only; never publish)" OFF)
+set(PHISIKS_GIT_COMMIT "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse HEAD WORKING_DIRECTORY ${PHISIKS_ROOT}
+                    OUTPUT_VARIABLE PHISIKS_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND ${GIT_EXECUTABLE} status --porcelain --untracked-files=no WORKING_DIRECTORY ${PHISIKS_ROOT}
+                    OUTPUT_VARIABLE PHISIKS_GIT_DIRTY OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(PHISIKS_GIT_DIRTY)
+        string(APPEND PHISIKS_GIT_COMMIT " (uncommitted changes at configure time)")
+    endif()
+endif()
+if(DEFINED ENV{GITHUB_RUN_ID})
+    set(PHISIKS_BUILD_ORIGIN "GitHub Actions: $ENV{GITHUB_SERVER_URL}/$ENV{GITHUB_REPOSITORY}/actions/runs/$ENV{GITHUB_RUN_ID} (workflow $ENV{GITHUB_WORKFLOW}, ref $ENV{GITHUB_REF_NAME})")
+else()
+    set(PHISIKS_BUILD_ORIGIN "local build (not CI)")
+endif()
+if(PHISIKS_PREVIEW_TOOLCHAIN_REASONS)
+    string(REPLACE ";" "; " PHISIKS_PREVIEW_TEXT "${PHISIKS_PREVIEW_TOOLCHAIN_REASONS}")
+    set(PHISIKS_TOOLCHAIN_STATUS "PRE-RELEASE: ${PHISIKS_PREVIEW_TEXT}. NOT FOR PUBLIC RELEASE.")
+    message(WARNING "Phisiks: pre-release toolchain (${PHISIKS_PREVIEW_TEXT}). Packages from this build are blocked unless PHISIKS_ALLOW_PREVIEW_TOOLCHAIN=ON, and must never be published.")
+else()
+    set(PHISIKS_TOOLCHAIN_STATUS "released")
+endif()
+
 # The vendored PhysX libraries use the dynamic CRT.
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -177,12 +220,16 @@ add_custom_command(
     COMMENT "Embedding engine shaders"
     VERBATIM)
 
+# Public version header, generated from project(VERSION): Phisiks/Version.h.
+configure_file(${PHISIKS_ROOT}/engine/include/Phisiks/Version.h.in ${PHISIKS_GENERATED_DIR}/include/Phisiks/Version.h @ONLY)
+
 add_library(PhisiksCore STATIC ${PHISIKS_ENGINE_SOURCES} ${PHISIKS_ENGINE_SHADERS} ${PHISIKS_EMBEDDED_SHADERS} ${PHISIKS_VENDOR}/glad/src/gl.c)
 source_group(TREE ${PHISIKS_ROOT}/engine PREFIX "engine" FILES ${PHISIKS_ENGINE_SOURCES} ${PHISIKS_ENGINE_SHADERS})
 
 # Public API: engine headers + glm and EnTT (public headers/templates); Dear ImGui comes with PhisiksImGui.
 target_include_directories(PhisiksCore PUBLIC
     ${PHISIKS_ROOT}/engine/include
+    ${PHISIKS_GENERATED_DIR}/include
     ${PHISIKS_VENDOR}/glm
     ${PHISIKS_VENDOR}/entt)
 # Private: implementation headers and backends. Apps and tests cannot include these.
@@ -279,7 +326,6 @@ list(FILTER PHISIKS_EDITOR_SOURCES EXCLUDE REGEX "/Main\\.cpp$")
 add_library(PhisiksEditor STATIC ${PHISIKS_EDITOR_SOURCES})
 target_include_directories(PhisiksEditor PUBLIC ${PHISIKS_ROOT}/apps/editor/src)
 target_link_libraries(PhisiksEditor PUBLIC PhisiksCore)
-target_compile_definitions(PhisiksEditor PRIVATE PHISIKS_VERSION_STRING="${PROJECT_VERSION}")
 source_group(TREE ${PHISIKS_ROOT} FILES ${PHISIKS_EDITOR_SOURCES})
 
 add_executable(Phisiks ${PHISIKS_ROOT}/apps/editor/src/Main.cpp)
@@ -389,6 +435,9 @@ target_include_directories(PhisiksUnitTests PRIVATE ${PHISIKS_ROOT}/engine/src)
 phisiks_executable(PhisiksUnitTests)
 target_link_libraries(PhisiksUnitTests PRIVATE PhisiksShowcase)   # demo kinematics / solvers (examples/)
 target_include_directories(PhisiksUnitTests PRIVATE ${PHISIKS_ROOT}/examples)
+# Expected version for the Version.h test, straight from project(VERSION).
+target_compile_definitions(PhisiksUnitTests PRIVATE PHISIKS_EXPECTED_MAJOR=${PROJECT_VERSION_MAJOR} PHISIKS_EXPECTED_MINOR=${PROJECT_VERSION_MINOR}
+                           PHISIKS_EXPECTED_PATCH=${PROJECT_VERSION_PATCH} PHISIKS_EXPECTED_STRING="${PROJECT_VERSION}")
 
 add_test(NAME PhisiksUnitTests COMMAND PhisiksUnitTests WORKING_DIRECTORY ${PHISIKS_ROOT})
 add_test(NAME Layering COMMAND ${CMAKE_COMMAND} -DPHISIKS_ROOT=${PHISIKS_ROOT} -P ${PHISIKS_ROOT}/tools/check_layering.cmake)
@@ -471,6 +520,24 @@ if(EXISTS ${PHISIKS_VENDOR}/licenses)
 else()
     message(WARNING "vendor/licenses is missing: run 'python tools/fetch_deps.py' so release packages include the third-party licence texts")
 endif()
+# Provenance file (see "Build provenance" above), written at configure time.
+set(PHISIKS_BUILD_INFO ${CMAKE_BINARY_DIR}/BUILD_INFO.txt)
+file(WRITE ${PHISIKS_BUILD_INFO}
+"PHISIKS ${PROJECT_VERSION}
+commit:        ${PHISIKS_GIT_COMMIT}
+built by:      ${PHISIKS_BUILD_ORIGIN}
+system:        ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}
+compiler:      ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}
+generator:     ${CMAKE_GENERATOR}
+cmake:         ${CMAKE_VERSION}
+toolchain:     ${PHISIKS_TOOLCHAIN_STATUS}
+physics:       ${PHISIKS_PHYSICS_BACKEND}
+audio:         ${PHISIKS_AUDIO_BACKEND}
+")
+if(PHISIKS_PREVIEW_TOOLCHAIN_REASONS AND NOT PHISIKS_ALLOW_PREVIEW_TOOLCHAIN)
+    install(CODE "message(FATAL_ERROR \"Phisiks: packaging is blocked: pre-release toolchain (${PHISIKS_PREVIEW_TEXT}). Build release packages with a released Visual Studio / CMake, or configure with -DPHISIKS_ALLOW_PREVIEW_TOOLCHAIN=ON for a local, unpublishable test package.\")")
+endif()
+install(FILES ${PHISIKS_BUILD_INFO} DESTINATION .)
 install(FILES ${PHISIKS_ROOT}/LICENSE ${PHISIKS_ROOT}/THIRD_PARTY_NOTICES.md ${PHISIKS_ROOT}/README.md ${PHISIKS_ROOT}/KNOWN_ISSUES.md
               ${PHISIKS_ROOT}/packaging/QUICKSTART.txt DESTINATION .)
 
@@ -489,13 +556,16 @@ else()
 endif()
 set(CPACK_PACKAGE_NAME Phisiks)
 set(CPACK_PACKAGE_VENDOR "The Phisiks authors")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "PHISIKS: a general-purpose 3D engine and editor (C++20, OpenGL)")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "PHISIKS: a resource-aware 3D visualisation and simulation engine with an integrated editor (C++20, OpenGL)")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_RESOURCE_FILE_LICENSE ${PHISIKS_ROOT}/LICENSE)
 set(CPACK_GENERATOR ${PHISIKS_PACKAGE_GENERATOR})
+if(PHISIKS_PREVIEW_TOOLCHAIN_REASONS)
+    string(APPEND PHISIKS_PACKAGE_SYSTEM "-preview-toolchain")   # never a release name
+endif()
 set(CPACK_PACKAGE_FILE_NAME "Phisiks-${PROJECT_VERSION}-${PHISIKS_PACKAGE_SYSTEM}")
 set(CPACK_PACKAGE_DIRECTORY ${PHISIKS_ROOT}/dist)
-set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)                                       # one Phisiks-1.0.0-<os>/ folder
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)                                       # one Phisiks-<version>-<os>/ folder
 set(CPACK_ARCHIVE_COMPONENT_INSTALL OFF)
 set(CPACK_STRIP_FILES ON)
 include(CPack)

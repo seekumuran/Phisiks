@@ -209,7 +209,7 @@ namespace Projects::ProjectKit {
         ImGui::TextDisabled("%s", std::filesystem::path(path).filename().string().c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
         const float bw = Editor::RowButtonWidth(3);
-        if (Retro::Button("Save", bw) && !path.empty()) Editor::SaveScene(ctx, path, &status);
+        if (Retro::Button("Save", bw) && !path.empty()) Editor::RequestSave(ctx, path, &status);   // asks first if components would be lost
         ImGui::SameLine();
         if (Retro::Button("Reopen", bw) && !path.empty()) {
             if (Editor::HasUnsavedChanges(ctx)) Editor::RequestReload(ctx);   // asks first; reload rebuilds, then Reopen loads the file

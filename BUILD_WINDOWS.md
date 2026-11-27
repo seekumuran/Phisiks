@@ -4,8 +4,8 @@ Windows 10 / 11 x64. Two configurations:
 
 | Configuration | Physics | Audio | Third-party binaries | Used by |
 |---|---|---|---|---|
-| **PhysX** (`vs2026-x64` preset, the Windows default) | NVIDIA PhysX 5.3.1 | WASAPI | PhysX SDK + GLFW placed by hand in `vendor/` | local development, the `-win64-physx` archive |
-| **Portable** (`windows-portable` preset, or the CI command below) | built-in solver | miniaudio | none (GLFW built from source) | CI, the `-win64` archive |
+| **PhysX** (`vs2026-x64` preset, the Windows default) | NVIDIA PhysX 5.3.1 | WASAPI | PhysX SDK + GLFW placed by hand in `vendor/` | local development (not part of the 1.1.0 release) |
+| **Portable** (`windows-portable` preset, or the CI command below) | built-in solver | miniaudio | none (GLFW built from source) | CI and the released `-win64` archive |
 
 ## Requirements
 
@@ -108,8 +108,8 @@ ctest --test-dir Build/vs2026 -C Release -R Unit           # a subset
 
 ```powershell
 cmake --install Build/vs2026 --config Release --prefix C:\Temp\Phisiks     # the release layout, unzipped
-cpack --config Build/vs2026/CPackConfig.cmake -C Release                    # dist/Phisiks-1.1.0-win64-physx.zip
-cpack --config Build/portable/CPackConfig.cmake -C Release                  # dist/Phisiks-1.1.0-win64.zip (portable)
+cpack --config Build/vs2026/CPackConfig.cmake -C Release                    # dist/Phisiks-<version>-win64-physx.zip
+cpack --config Build/portable/CPackConfig.cmake -C Release                  # dist/Phisiks-<version>-win64.zip (portable)
 ```
 
 The package is one folder with everything next to the executables:
@@ -120,15 +120,22 @@ The package is one folder with everything next to the executables:
 - the MSVC runtime, app-local (the UCRT is part of Windows 10+);
 - `assets/`, `shaders/`, and `projects/` (scene files, meshes and READMEs; no sources);
 - `THIRD_PARTY_LICENSES/`;
-- `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`, `QUICKSTART.txt`.
+- `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`, `KNOWN_ISSUES.md`, `QUICKSTART.txt`;
+- `BUILD_INFO.txt`: version, commit, CI run (or "local build"), compiler, CMake version, toolchain status and backends.
 
 Release notes:
 
-- **Toolchain:** build public packages with a released (non-preview) Visual Studio. The app-local MSVC runtime DLLs come from the toolchain that built the package.
+- **Released toolchains only:** configure detects pre-release toolchains, meaning Visual Studio Preview / Insiders (from the installation path) and CMake release candidates or development builds.
+  - On such a toolchain, packaging stops with an error, so `cmake --install` and `cpack` fail.
+  - `-DPHISIKS_ALLOW_PREVIEW_TOOLCHAIN=ON` allows a local test package. It's named `...-preview-toolchain.zip`, and its `BUILD_INFO.txt` says `NOT FOR PUBLIC RELEASE`.
+  - The app-local MSVC runtime DLLs come from the toolchain that built the package.
+- **What is published:** the 1.1.0 release publishes only the archives the `release` workflow builds on GitHub's runners (Visual Studio 2022, native physics). No PhysX archive is published. To use PhysX, build from source with the `vs2026-x64` preset (section 2).
 - **PhysX:** a PhysX package ships NVIDIA's DLLs under BSD-3. Their licence text is in `THIRD_PARTY_LICENSES/physx.txt`.
 - **Not signed:** Windows SmartScreen may warn on first launch.
 - **Console window:** the programs are console applications, so double-clicking also opens a console window with the log.
 
 ## Tested
 
-Windows 11 Home (26200), Intel Core i5-12450H, Intel UHD Graphics, Visual Studio 18 (2026) Insiders, CMake 4.5.0-rc1, PhysX configuration. Results are recorded in [PHISIKS_RELEASE_LOG.md](PHISIKS_RELEASE_LOG.md).
+Development machine: Windows 11 Home (26200), Intel Core i5-12450H, Intel UHD Graphics, Visual Studio 18 (2026) **Insiders** and CMake 4.5.0-rc1, in both the PhysX and the portable configuration. These are pre-release tools, so this machine is used for development and testing only. It can't produce release packages (see above).
+
+GitHub Actions builds the released Windows archive (`windows-2022`, Visual Studio 2022). Results are recorded in [PHISIKS_RELEASE_LOG.md](PHISIKS_RELEASE_LOG.md).

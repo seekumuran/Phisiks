@@ -2,11 +2,13 @@
 #include "Editor.h"
 #include "EditorInternal.h"
 
+#include "Phisiks/Core/Log.h"
 #include "Phisiks/Framework/GameContext.h"
 #include "Phisiks/Framework/SceneManager.h"
 #include "Phisiks/Platform/System.h"
 #include "Phisiks/Render/Renderer.h"
 #include "Phisiks/Scene/SceneSerializer.h"
+#include "Phisiks/Version.h"
 #include "Phisiks/UI/ImGuiLayer.h"
 #include "Phisiks/UI/RetroDeck.h"
 
@@ -45,6 +47,18 @@ namespace Editor {
         Pending g_pending;
         bool g_askUnsaved = false;
         bool g_proceedAfterSaveAs = false;
+
+        // ---- a save that would drop components, waiting for the user's decision
+        struct PendingSave {
+            bool active = false;
+            bool openRequest = false;
+            std::string path;
+            bool proceedAfter = false;    // then run `then` (unsaved-changes prompt, Save as + proceed)
+            Pending then;
+            std::vector<SceneSerializer::UnsavedComponent> lost;
+            int shownFrame = -100;        // ImGui frame the dialog was last drawn in
+        };
+        PendingSave g_save;
 
         // ---- file dialog
         enum class DialogMode { None, Open, SaveAs };
@@ -116,9 +130,28 @@ namespace Editor {
             }
         }
 
+        std::string LostList(const std::vector<SceneSerializer::UnsavedComponent>& lost) {
+            std::string text;
+            for (const SceneSerializer::UnsavedComponent& c : lost) text += (text.empty() ? "" : ", ") + c.type + " x" + std::to_string(c.count);
+            return text;
+        }
+
+        // Every interactive save: writes now, or parks the save behind the confirmation dialog.
+        SaveRequest Save(GameContext& ctx, const std::string& path, std::string* status, bool proceedAfter, const Pending& then) {
+            std::vector<SceneSerializer::UnsavedComponent> lost = ComponentsLostOnSave(ctx);
+            if (lost.empty()) {
+                if (!SaveScene(ctx, path, status)) return SaveRequest::Failed;
+                if (proceedAfter) Proceed(ctx, then);
+                return SaveRequest::Saved;
+            }
+            g_save = PendingSave{ true, true, path, proceedAfter, then, std::move(lost) };
+            if (status) *status = "not saved yet: confirm the components that scene files do not store";
+            return SaveRequest::AwaitingConfirmation;
+        }
+
         void SaveCurrent(GameContext& ctx) {
             if (g_path.empty()) { OpenFileDialog(DialogMode::SaveAs); return; }
-            SaveScene(ctx, g_path, &g_status);
+            Save(ctx, g_path, &g_status, false, {});
         }
 
         // ------------------------------------------------------------------ dialogs
@@ -135,8 +168,8 @@ namespace Editor {
                 if (Retro::Button("SAVE", w)) {
                     const Pending p = g_pending;
                     ImGui::CloseCurrentPopup();
-                    if (SaveScene(ctx, g_path, &g_status)) Proceed(ctx, p);
                     g_pending = {};
+                    Save(ctx, g_path, &g_status, true, p);
                 }
             }
             else if (Retro::Button("SAVE AS...", w)) {
@@ -154,6 +187,34 @@ namespace Editor {
             }
             ImGui::SameLine();
             if (Retro::Button("CANCEL", w) || ImGui::IsKeyPressed(ImGuiKey_Escape)) { g_pending = {}; ImGui::CloseCurrentPopup(); }
+            ImGui::EndPopup();
+        }
+
+        void SaveLossDialog(GameContext& ctx) {
+            const char* id = "Components will not be saved";
+            if (!g_save.active) return;
+            if (g_save.openRequest) { ImGui::OpenPopup(id); g_save.openRequest = false; }
+            ImGui::SetNextWindowPos(Centre(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            if (!ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                if (!ImGui::IsPopupOpen(id)) g_save.openRequest = true;   // closed from outside: ask again
+                return;
+            }
+            g_save.shownFrame = ImGui::GetFrameCount();
+            size_t total = 0;
+            for (const SceneSerializer::UnsavedComponent& c : g_save.lost) total += c.count;
+            ImGui::TextColored(Internal::Amber(), "Scene files do not store %zu component%s in this scene:", total, total == 1 ? "" : "s");
+            for (const SceneSerializer::UnsavedComponent& c : g_save.lost)
+                ImGui::BulletText("%s  x%zu", c.type.c_str(), c.count);
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Their data will not survive a save / reopen cycle: the file is written");
+            ImGui::TextUnformatted("without them, and reopening it brings the scene back without them.");
+            ImGui::TextUnformatted("The scene open now keeps them until it is reloaded or closed.");
+            ImGui::TextDisabled("%s", ShortPath(g_save.path).c_str());
+            ImGui::Spacing();
+            const float s = g_layout.scale;
+            if (Retro::Button("SAVE WITHOUT THEM", 190.0f * s)) { ImGui::CloseCurrentPopup(); ResolveSaveConfirmation(ctx, true); }
+            ImGui::SameLine();
+            if (Retro::Button("CANCEL", 120.0f * s) || ImGui::IsKeyPressed(ImGuiKey_Escape)) { ImGui::CloseCurrentPopup(); ResolveSaveConfirmation(ctx, false); }
             ImGui::EndPopup();
         }
 
@@ -218,13 +279,17 @@ namespace Editor {
                 if (g_dialog == DialogMode::SaveAs) {
                     if (file.extension() != ".json") file += ".scene.json";
                     std::string status;
-                    if (SaveScene(ctx, file.string(), &status)) {
+                    const bool proceedAfter = g_proceedAfterSaveAs;
+                    const Pending then = g_pending;
+                    const SaveRequest result = Save(ctx, file.string(), &status, proceedAfter, then);
+                    if (result == SaveRequest::Failed) g_dialogError = status;
+                    else {
                         g_status = status;
+                        g_proceedAfterSaveAs = false;
+                        g_pending = {};
                         ImGui::CloseCurrentPopup();
                         g_dialog = DialogMode::None;
-                        if (g_proceedAfterSaveAs) { g_proceedAfterSaveAs = false; const Pending p = g_pending; g_pending = {}; Proceed(ctx, p); }
                     }
-                    else g_dialogError = status;
                 }
                 else {
                     if (fs::is_regular_file(file, ec)) {
@@ -447,9 +512,50 @@ namespace Editor {
         return (fs::exists(copy, ec) || !fs::exists(primary, ec) ? copy : primary).lexically_normal().string();
     }
 
-    bool SaveScene(GameContext& ctx, const std::string& requested, std::string* status) {
+    std::vector<SceneSerializer::UnsavedComponent> ComponentsLostOnSave(GameContext& ctx) {
+        Scene* scene = ctx.CurrentScene();
+        if (!scene) return {};
+        std::vector<SceneSerializer::UnsavedComponent> lost = SceneSerializer::UnsavedComponents(*scene);
+        if (WorkspaceExtension* ws = Internal::Workspace(ctx)) {
+            const std::vector<std::string> restored = ws->ComponentsRestoredAfterLoad();
+            std::erase_if(lost, [&](const SceneSerializer::UnsavedComponent& c) { return std::find(restored.begin(), restored.end(), c.type) != restored.end(); });
+        }
+        return lost;
+    }
+
+    SaveRequest RequestSave(GameContext& ctx, const std::string& path, std::string* status) {
+        return Save(ctx, path, status, false, {});
+    }
+
+    bool SaveConfirmationPending() { return g_save.active; }
+    bool SaveConfirmationVisible() { return g_save.active && ImGui::GetCurrentContext() && ImGui::GetFrameCount() - g_save.shownFrame <= 1; }
+
+    void ResolveSaveConfirmation(GameContext& ctx, bool confirm) {
+        if (!g_save.active) return;
+        const PendingSave save = std::move(g_save);
+        g_save = {};
+        if (!confirm) {
+            g_status = "save cancelled: " + ShortPath(save.path) + " was not written";
+            Phisiks::Log::Info() << "Editor: save cancelled (" << LostList(save.lost) << " not stored in scene files); " << save.path << " untouched";
+            return;
+        }
+        if (SaveScene(ctx, save.path, &g_status, true)) {
+            Phisiks::Log::Warning() << "Editor: saved " << save.path << " without " << LostList(save.lost) << " (not stored in scene files)";
+            if (save.proceedAfter) Proceed(ctx, save.then);
+        }
+    }
+
+    bool SaveScene(GameContext& ctx, const std::string& requested, std::string* status, bool allowComponentLoss) {
         Scene* scene = ctx.CurrentScene();
         if (!scene) { if (status) *status = "no scene"; return false; }
+        if (!allowComponentLoss) {
+            const std::vector<SceneSerializer::UnsavedComponent> lost = ComponentsLostOnSave(ctx);
+            if (!lost.empty()) {
+                if (status) *status = "not saved: scene files do not store " + LostList(lost) + " (confirm to save without them)";
+                Phisiks::Log::Warning() << "Editor: refused to save " << requested << ": scene files do not store " << LostList(lost);
+                return false;
+            }
+        }
         std::string path = requested;
         // A read-only shipped file is saved to the per-user copy instead (ResolveScenePath picks it).
         if (!Platform::IsWritableDirectory(fs::path(path).parent_path().string())) {
@@ -591,6 +697,7 @@ namespace Editor {
         Shortcuts(ctx, scene);
         UnsavedDialog(ctx);
         if (g_dialog != DialogMode::None) FileDialog(ctx);
+        SaveLossDialog(ctx);
         InfoDialogs();
     }
 }

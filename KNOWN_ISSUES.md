@@ -23,7 +23,11 @@ macOS-specific limitations, by design:
 - **No asset-import pipeline.** Meshes are OBJ files referenced by path (anything under `assets/` or a folder added with `--assets`); the inspector's mesh list scans those folders. glTF models are loaded through `SkinnedModel` in code, not from the editor.
 - **No prefab / project system.** A "project" is a scene file plus the folders it references. There is no recent-files list.
 - **Play / Pause run the live scene.** There is no separate edit mode that restores the scene on Stop. Use the Reload button (it asks about unsaved changes) or reopen the file.
-- **Scene files do not store** `Joint`, `Script`, `NavAgent`, `Terrain`, `Decal`, `Trail`, `SkinnedModel` or `CameraPath`. Scenes that use them must re-create them in code after loading. The inspector says so on joints.
+- **Scene files do not store some components:** `Joint`, `Script`, `NavigationSurface`, `NavAgent`, `Terrain`, `FoliageScatter`, `Decal`, `Trail`, `Beam`, `OrbitPath`, `SkinnedModel`, `CameraPath`, `Health` and `Interactable`. Scenes that use them must re-create them in code after loading.
+  - Saving warns first. File > Save, Save as, the unsaved-changes prompt and the workspace Save buttons list the affected types with their counts. They write nothing until you choose SAVE WITHOUT THEM or CANCEL; cancelling leaves the file untouched.
+  - `Editor::SaveScene` called from code refuses such a save unless it passes `allowComponentLoss`.
+  - A workspace that re-creates components itself after loading declares them (`ComponentsRestoredAfterLoad`) and isn't warned about. Old-McDonald does this for its navigation components.
+  - The editor can only *add* stored components (mesh renderer, light, box collider, rigidbody), so scenes built entirely in the editor never hit the warning.
 - **Material edits are shared.** A material is edited by name, so every part that uses it changes (the inspector says so).
 - **Unsaved-changes tracking** covers edits made through the editor (inspector, gizmo, hierarchy, create / delete, workspace panels). Changes made by running scene logic, such as physics moving bodies or a mission animating parts, are not counted as edits.
 - **Panel layout** is fixed: left column, right column and bottom dock, each resizable with its splitter. Panels cannot be undocked or rearranged, and the layout is not saved between sessions.
@@ -41,8 +45,8 @@ macOS-specific limitations, by design:
 ## Packaging (1.1)
 
 - Archives are unsigned. Windows SmartScreen may warn on first launch.
-- The `-win64` archive built by CI uses the native physics backend. The `-win64-physx` archive is built locally (`cpack` from the `vs2026-x64` preset).
-- Build public Windows packages with a released (non-preview) Visual Studio. The app-local MSVC runtime DLLs are those of the toolchain that built the package.
+- The release contains only the three archives built by the `release` workflow on GitHub's runners (`-win64`, `-linux-x86_64`, `-macos-arm64`). All three use the native physics backend, so **no PhysX build is published**; PhysX is available when building from source on Windows.
+- Each archive contains `BUILD_INFO.txt` (commit, CI run, compiler, CMake version, backends). Configure detects pre-release toolchains (Visual Studio Preview / Insiders, CMake release candidates) and blocks packaging with them; `PHISIKS_ALLOW_PREVIEW_TOOLCHAIN=ON` allows a local test package, which is named `...-preview-toolchain` and is never published.
 - Logs, crash dumps and saves default to paths relative to the working directory (`Build/runs/latest`) and next to the executable (scene files). If those folders are not writable, they go to the per-user data folder instead: `%LOCALAPPDATA%\Phisiks`, `~/Library/Application Support/Phisiks`, `~/.local/share/phisiks`.
 
 ## Intel OpenGL driver: cold shader compiles

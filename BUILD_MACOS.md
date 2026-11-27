@@ -56,6 +56,8 @@ Run from the repository root (assets are found next to the executable first, the
 cpack --config Build/macos-release/CPackConfig.cmake   # dist/Phisiks-1.1.0-macos-arm64.zip
 ```
 
+The archive contains `BUILD_INFO.txt` (commit, CI run, compiler, CMake version). The published macOS archive is the one built by the `release` workflow; see "Release packages" in the README.
+
 After downloading and extracting a package:
 
 ```sh

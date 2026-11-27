@@ -42,6 +42,8 @@ namespace Projects {
         void OnBeforeSave(Phisiks::GameContext& ctx) override;
         void OnAfterSave(Phisiks::GameContext& ctx) override;
         void OnAfterLoad(Phisiks::GameContext& ctx) override;
+        // The navigation surface and the rover's agent are re-attached by EnsureRuntime after every load.
+        std::vector<std::string> ComponentsRestoredAfterLoad() const override { return { "NavigationSurface", "NavAgent" }; }
         void DrawWorkspacePanel(Phisiks::GameContext& ctx) override;
         const char* DefaultScenePath() const override { return "projects/OldMcDonald/scenes/old_mcdonald.scene.json"; }
 

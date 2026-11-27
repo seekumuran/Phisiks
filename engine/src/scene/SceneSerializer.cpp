@@ -5,6 +5,12 @@
 #include "Phisiks/Physics/Fields.h"
 #include "Phisiks/Render/Renderer.h"
 #include "Phisiks/Scene/Scene.h"
+#include "Phisiks/AI/Navigation.h"
+#include "Phisiks/Animation/Animation.h"
+#include "Phisiks/Framework/GameplayComponents.h"
+#include "Phisiks/Script/Script.h"
+#include "Phisiks/VFX/VFX.h"
+#include "Phisiks/World/Terrain.h"
 
 #if defined(_MSC_VER)
 #pragma warning(push, 0)
@@ -323,6 +329,32 @@ namespace Phisiks::SceneSerializer {
 
     // Atomic save: the scene is written to "<path>.tmp" and renamed over the target only when the
     // write succeeded, so an interrupted or failed save leaves the previous file intact.
+    std::vector<UnsavedComponent> UnsavedComponents(Scene& scene) {
+        std::vector<UnsavedComponent> out;
+        entt::registry& registry = scene.Registry();
+        auto count = [&]<class T>(const char* name) {
+            size_t n = 0;
+            for (auto entity : registry.view<T>()) { (void)entity; ++n; }
+            if (n) out.push_back({ name, n });
+        };
+        // Keep in step with the header comment and ToJson: every user-facing component ToJson skips.
+        count.template operator()<Joint>("Joint");
+        count.template operator()<Script>("Script");
+        count.template operator()<NavigationSurface>("NavigationSurface");
+        count.template operator()<NavAgent>("NavAgent");
+        count.template operator()<Terrain>("Terrain");
+        count.template operator()<FoliageScatter>("FoliageScatter");
+        count.template operator()<Decal>("Decal");
+        count.template operator()<Trail>("Trail");
+        count.template operator()<Beam>("Beam");
+        count.template operator()<OrbitPath>("OrbitPath");
+        count.template operator()<SkinnedModel>("SkinnedModel");
+        count.template operator()<CameraPath>("CameraPath");
+        count.template operator()<Health>("Health");
+        count.template operator()<Interactable>("Interactable");
+        return out;
+    }
+
     bool Save(Scene& scene, const std::string& path) {
         namespace fs = std::filesystem;
         std::error_code ec;

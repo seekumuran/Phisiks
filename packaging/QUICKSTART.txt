@@ -1,9 +1,10 @@
 PHISIKS 1.1 - QUICK START
 =========================
 
-PHISIKS is a general-purpose 3D engine (C++20, OpenGL) with an editor. Extract the archive
-anywhere and run the programs in this folder: no installer, no build tools. The programs find
-assets/, shaders/ and projects/ next to themselves, so they work from any working directory.
+PHISIKS is a resource-aware 3D visualisation and simulation engine (C++20, OpenGL) with an
+integrated editor. Extract the archive anywhere and run the programs in this folder: no
+installer, no build tools. The programs find assets/, shaders/ and projects/ next to
+themselves, so they work from any working directory.
 
   Phisiks                 the PHISIKS editor (starts with an empty scene)
   PhisiksSamples          the engine sample scenes inside the editor, with a sample browser
@@ -43,6 +44,9 @@ THE EDITOR
   Drag the thin bars between panels to resize them. Tab hides every panel.
   There is no undo: Delete asks first, and File > Reopen returns to the saved file. Quitting,
   opening, New and Reload ask before discarding unsaved edits.
+  Scene files do not store every component (joints, scripts, terrain, ...; see KNOWN_ISSUES.md).
+  If a save would drop some, the editor lists them and writes nothing until you confirm.
+  BUILD_INFO.txt records the commit and the CI run this package was built by.
 
 CONTROLS
   RMB drag / MMB drag / wheel   orbit / pan / zoom (orbit camera)

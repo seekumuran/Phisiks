@@ -6,6 +6,8 @@
 #   Phisiks-<version>-linux-x86_64.tar.gz  Linux x64    (GCC 12 on Ubuntu 22.04: glibc 2.35+)
 #   Phisiks-<version>-macos-arm64.zip      macOS arm64  (Apple Clang, OpenGL 4.1 tier, unsigned)
 #
+# These three CI archives are the only release artifacts: no locally built package is attached.
+# Each carries BUILD_INFO.txt (commit, run, toolchain), checked below before upload.
 # All builds use the portable backends (the vendored PhysX SDK binaries are not available on the
 # runners) and build GLFW from source as a static library (PHISIKS_BUNDLED_GLFW), so the archives
 # need nothing but the OS and its OpenGL driver. Runners have no GPU: the headless tests run before
@@ -97,12 +99,20 @@ jobs:
           for exe in Phisiks PhisiksSamples ProjectMarina OldMcDonald Showcase01_RoboticArm Showcase02_PoolFluid Showcase03_BlackHole Showcase04_TurbineCad glprobe; do
             if [ ! -f "$root/$exe$ext" ]; then echo "missing $exe$ext"; missing=1; fi
           done
-          for f in QUICKSTART.txt LICENSE THIRD_PARTY_NOTICES.md README.md assets/shaders/black_hole.frag.glsl assets/meshes/hero assets/scripts \
+          for f in BUILD_INFO.txt QUICKSTART.txt LICENSE THIRD_PARTY_NOTICES.md README.md assets/shaders/black_hole.frag.glsl assets/meshes/hero assets/scripts \
                    shaders/tonemap.frag.glsl projects/assets/meshes/marina projects/assets/meshes/oldmcdonald \
                    projects/OldMcDonald/scenes/old_mcdonald.scene.json projects/ProjectMarina/README.md \
                    THIRD_PARTY_LICENSES/dear-imgui.txt THIRD_PARTY_LICENSES/glfw.txt THIRD_PARTY_LICENSES/lua.txt; do
             if [ ! -e "$root/$f" ]; then echo "missing $f"; missing=1; fi
           done
+          # Provenance: built by this CI run with a released toolchain, from this commit.
+          if [ -f "$root/BUILD_INFO.txt" ]; then
+            cat "$root/BUILD_INFO.txt"
+            grep -q "^toolchain: *released$" "$root/BUILD_INFO.txt" || { echo "BUILD_INFO: not a released toolchain"; missing=1; }
+            grep -q "actions/runs/$GITHUB_RUN_ID " "$root/BUILD_INFO.txt" || { echo "BUILD_INFO: not built by this run"; missing=1; }
+            grep -q "^commit: *$GITHUB_SHA$" "$root/BUILD_INFO.txt" || { echo "BUILD_INFO: commit is not $GITHUB_SHA"; missing=1; }
+          fi
+          case "$archive" in *preview-toolchain*) echo "preview-toolchain archive"; missing=1;; esac
           if [ "${{ matrix.name }}" = "linux" ]; then
             ldd "$root/Phisiks" | tee ldd.txt
             if grep -q "not found" ldd.txt; then echo "unresolved shared libraries"; missing=1; fi
@@ -141,7 +151,7 @@ jobs:
         run: |
           ls -l dist
           (cd dist && sha256sum Phisiks-* > SHA256SUMS.txt)
-          notes="PHISIKS ${GITHUB_REF_NAME}: portable builds of the PHISIKS 3D engine editor, the sample browser, the four showcases and the two example projects. Extract the archive for your OS and run Phisiks (see QUICKSTART.txt inside). See PHISIKS_RELEASE_LOG.md and KNOWN_ISSUES.md."
+          notes="PHISIKS ${GITHUB_REF_NAME}: portable builds of the PHISIKS editor, the sample browser, the four showcases and the two example projects. Extract the archive for your OS and run Phisiks (see QUICKSTART.txt inside). All archives were built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} from commit ${GITHUB_SHA} with the native physics backend; each contains BUILD_INFO.txt, and SHA256SUMS.txt lists their checksums. Platform status and limitations: PHISIKS_RELEASE_LOG.md and KNOWN_ISSUES.md."
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
           else

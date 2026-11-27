@@ -12,6 +12,9 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
+
+#include "Phisiks/Scene/SceneSerializer.h"
 
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -40,6 +43,10 @@ namespace Editor {
         virtual void OnBeforeSave(Phisiks::GameContext&) {}
         virtual void OnAfterSave(Phisiks::GameContext&) {}
         virtual void OnAfterLoad(Phisiks::GameContext&) {}
+        // Component types (SceneSerializer::UnsavedComponent names) that scene files do not store but
+        // this workspace re-creates itself after every load, so a save does not lose them and the
+        // editor does not warn about them.
+        virtual std::vector<std::string> ComponentsRestoredAfterLoad() const { return {}; }
     };
 
     struct AppConfig {
@@ -72,8 +79,24 @@ namespace Editor {
     std::string ResolveScenePath(const std::string& path);
     // Save / load through the workspace hooks, with the editor's bookkeeping (selection, replay,
     // unsaved-changes snapshot). `status` receives a one-line result.
-    bool SaveScene(Phisiks::GameContext& ctx, const std::string& path, std::string* status = nullptr);
+    // SaveScene refuses (returns false, file untouched) when the scene holds components that scene
+    // files do not store (ComponentsLostOnSave), unless `allowComponentLoss` says the caller has
+    // confirmed it. Interactive saves go through RequestSave, which asks the user.
+    bool SaveScene(Phisiks::GameContext& ctx, const std::string& path, std::string* status = nullptr, bool allowComponentLoss = false);
     bool LoadScene(Phisiks::GameContext& ctx, const std::string& path, std::string* status = nullptr);
+    // Components of the current scene a save would drop: SceneSerializer::UnsavedComponents minus
+    // the types the scene's workspace restores after loading.
+    std::vector<Phisiks::SceneSerializer::UnsavedComponent> ComponentsLostOnSave(Phisiks::GameContext& ctx);
+    // The save behind File > Save / Save as and the workspace Save buttons: writes at once, or, when
+    // components would be lost, opens the "Components will not be saved" dialog (list, counts,
+    // SAVE WITHOUT THEM / CANCEL) and writes nothing until the user confirms.
+    enum class SaveRequest { Saved, Failed, AwaitingConfirmation };
+    SaveRequest RequestSave(Phisiks::GameContext& ctx, const std::string& path, std::string* status = nullptr);
+    bool SaveConfirmationPending();
+    bool SaveConfirmationVisible();                    // the dialog was drawn in the last UI frame
+    // The dialog's buttons: `confirm` writes the file without the listed components; otherwise the
+    // save is cancelled and the file is left as it was.
+    void ResolveSaveConfirmation(Phisiks::GameContext& ctx, bool confirm);
     // Scene switch / reload that asks about unsaved changes first.
     void RequestScene(Phisiks::GameContext& ctx, const std::string& sceneName);
     void RequestReload(Phisiks::GameContext& ctx);

@@ -17,6 +17,10 @@ Engine         PhisiksCore: public API engine/include/Phisiks, private engine/sr
 Platform       OpenGL 4.6 / 4.1 · GLFW · PhysX 5 or native physics · WASAPI or miniaudio
 ```
 
+The engine version is in the public header `Phisiks/Version.h` (`PHISIKS_VERSION_MAJOR` / `_MINOR` / `_PATCH`, `PHISIKS_VERSION_STRING`, `PHISIKS_VERSION`). It's generated into `<build>/generated/include` from `project(Phisiks VERSION ...)`, the only place the version is written. The template is `engine/include/Phisiks/Version.h.in`.
+
+Applications are built **in-tree**: no installable SDK package (installed headers / libraries, `find_package` configuration) is provided. See "Building on PHISIKS" in the README.
+
 Everything above the engine uses **only the public API** (`#include "Phisiks/..."`, glm, EnTT, Dear ImGui / ImGuizmo for UI). `tools/check_layering.cmake` runs before every build and fails it if an app, example, project or the runtime test includes an engine-private header or a backend library header (OpenGL loader, GLFW, PhysX). Unit tests may use engine-private headers (white-box), but not backend headers.
 
 ## Engine modules (`engine/include/Phisiks/<Module>`)
@@ -61,7 +65,7 @@ At startup the renderer chooses **4.6** (SSBOs, GPU culling, Hi-Z occlusion, GPU
 
 ### Scene files
 
-`SceneSerializer` writes `phisiks-scene` JSON, version 1: entities with parent indices, transforms, built-in components, and the procedural materials they use. Loading parses and validates the **whole** file before the open scene is touched; a damaged or newer-version file fails with an error and changes nothing. Saving writes `<file>.tmp` and renames it over the target. Not stored: joints, scripts, navigation, terrain, decals, trails, skinned models, camera paths.
+`SceneSerializer` writes `phisiks-scene` JSON, version 1: entities with parent indices, transforms, built-in components, and the procedural materials they use. Loading parses and validates the **whole** file before the open scene is touched; a damaged or newer-version file fails with an error and changes nothing. Saving writes `<file>.tmp` and renames it over the target. Not stored: joints, scripts, navigation, terrain and foliage, decals, trails, beams, orbit paths, skinned models, camera paths, and the gameplay `Health` / `Interactable`. `SceneSerializer::UnsavedComponents(scene)` lists the ones a scene holds, with counts. The editor uses it to warn before a save would drop them (see the extension points below).
 
 ### Command-line simulation runs and export
 
@@ -110,9 +114,15 @@ PhisiksSamples --scene PhysicsTower --hidden --deterministic --max-frames 300 --
   - `DefaultScenePath`: the file that File > Save / Reopen use;
   - `SupportsReplay`;
   - `OnBeforeSave` / `OnAfterSave` / `OnAfterLoad`. Every save / load path (File menu, workspace buttons, reopen) goes through these hooks, so state that is not part of the file is kept consistent. The CAD workspaces use them to collapse exploded views before writing.
+  - `ComponentsRestoredAfterLoad`: component types the workspace re-creates itself after loading, so the save warning skips them. Old-McDonald returns its navigation components.
 - **Editor services** for apps and workspaces:
   - selection: `SelectedEntity`, `Select`;
   - scene files: `SaveScene`, `LoadScene`, `ResolveScenePath`;
+  - the save warning:
+    - `ComponentsLostOnSave` lists what a save would drop.
+    - `RequestSave` saves at once, or opens the confirmation dialog; it's used by File > Save and the workspace Save buttons.
+    - `SaveConfirmationPending` / `SaveConfirmationVisible` / `ResolveSaveConfirmation` let code or tests inspect and answer the dialog.
+    - `SaveScene` refuses a lossy save unless it gets `allowComponentLoss = true`, so no path can drop components without a decision;
   - guarded navigation that asks about unsaved changes: `RequestScene`, `RequestReload`;
   - `MarkEdited` for edits the editor cannot see;
   - layout: `ViewportRect`, `RowButtonWidth`;

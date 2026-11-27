@@ -85,7 +85,7 @@ cmake --install Build/linux-release --prefix /opt/phisiks   # the release layout
 cpack --config Build/linux-release/CPackConfig.cmake       # dist/Phisiks-1.1.0-linux-x86_64.tar.gz
 ```
 
-The archive is one folder with the programs, `assets/`, `shaders/`, `projects/`, `THIRD_PARTY_LICENSES/` and the documents. Executables use `$ORIGIN` as their run path.
+The archive is one folder with the programs, `assets/`, `shaders/`, `projects/`, `THIRD_PARTY_LICENSES/`, the documents and `BUILD_INFO.txt` (commit, CI run, compiler, CMake version). Executables use `$ORIGIN` as their run path. The published Linux archive is the one built by the `release` workflow; see "Release packages" in the README.
 
 Runtime dependencies on the target are those of any OpenGL application:
 - the system C/C++ runtime (glibc 2.35+, libstdc++);

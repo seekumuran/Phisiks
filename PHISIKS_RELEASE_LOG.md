@@ -2,7 +2,7 @@
 
 ## 1.1.0 (prepared 2026-11-27; not yet tagged or published)
 
-**Product direction.** PHISIKS is now presented as a **general-purpose 3D engine** with an editor. The main application, `Phisiks`, opens an empty document with development tools and no demo content. The sample scenes, the four showcases and the two engineering projects (Project Marina, Old-McDonald) are separate programs built on the engine.
+**Product direction.** PHISIKS is now presented as a **resource-aware C++20 3D visualisation and simulation engine with an integrated editor**, not as a demo collection. 1.1.0 is the final planned release. The main application, `Phisiks`, opens an empty document with development tools and no demo content. The sample scenes, the four showcases and the two engineering projects (Project Marina, Old-McDonald) are separate programs built on the engine.
 
 ### Git and release safety
 
@@ -79,7 +79,7 @@ All engine systems are unchanged apart from the fixes listed below. Every sample
 | H4 | inspector rotation stuck at ±90° | **fixed** (cached Euler angles) |
 | H5 | gizmo misaligned in quad view | **fixed**: gizmo uses the camera's viewport rect and aspect; the 4-way view is framed to the scene |
 | H6 | documentation overclaims and inconsistencies | **fixed**: README, BUILD_*, KNOWN_ISSUES, QUICKSTART rewritten; platform claims match the verification table |
-| H7 | preview toolchain (VS Insiders, CMake RC) for local packages | **open**: publish the CI-built archives, or rebuild the PhysX archive with a released Visual Studio |
+| H7 | preview toolchain (VS Insiders, CMake RC) for local packages | **fixed**: only the three CI-built archives are released; no PhysX archive is published. Configure detects pre-release toolchains and blocks packaging with them; every archive carries `BUILD_INFO.txt`, checked by the release workflow |
 | H8 | runtime-test frame cap failed the mission on the 4.1 tier | **fixed**: the frame cap scales with the step budget; the mission passes on 4.1 |
 
 ### Other fixes made during 1.1
@@ -102,21 +102,50 @@ All engine systems are unchanged apart from the fixes listed below. Every sample
   - runtime-test jobs on Mesa llvmpipe (Linux) and macOS;
   - the results published as annotations (summary, renderer, failed checks, gdb backtrace) instead of being hidden behind `continue-on-error`.
 
+### Finalisation (after the product completion audit)
+
+- **Packaging provenance (H7):**
+  - CMake writes `BUILD_INFO.txt` into every package: version, commit, CI run URL or "local build", compiler, generator, CMake version, toolchain status and backends.
+  - Configure detects pre-release toolchains: Visual Studio Preview / Insiders from the installation path, and CMake `-rc` or development versions.
+  - On such a toolchain, packaging fails. `PHISIKS_ALLOW_PREVIEW_TOOLCHAIN=ON` allows a local test package named `...-preview-toolchain` that is marked `NOT FOR PUBLIC RELEASE`.
+  - `release.yml` rejects an archive whose `BUILD_INFO.txt` doesn't name a released toolchain, the current run and the current commit, or whose name says `preview-toolchain`.
+  - The draft release notes name the run and the commit.
+  - The stale `Phisiks-1.0.0` CPack comment is fixed.
+- **No silent data loss on save:**
+  - `SceneSerializer::UnsavedComponents` lists the components a scene holds that scene files don't store: 14 types, with counts.
+  - The interactive save paths go through `Editor::RequestSave`: File > Save, Save as, the unsaved-changes prompt's SAVE, and the workspace Save buttons. If anything would be lost, the "Components will not be saved" dialog lists the types and counts and explains the save/reopen loss. SAVE WITHOUT THEM writes the file; CANCEL leaves it untouched.
+  - `Editor::SaveScene` refuses a lossy save unless the caller passes `allowComponentLoss`.
+  - A workspace can declare components it re-creates after loading (`WorkspaceExtension::ComponentsRestoredAfterLoad`); Old-McDonald does this for its navigation surface and agent.
+  - The serialisation format is unchanged.
+- **Version API:**
+  - Public `Phisiks/Version.h`, generated from `project(VERSION)`, with `PHISIKS_VERSION_MAJOR` / `_MINOR` / `_PATCH`, `PHISIKS_VERSION_STRING` and `PHISIKS_VERSION`.
+  - The editor's About dialog uses it, replacing a private compile definition.
+- **Documentation:**
+  - README positioning (strengths, and what PHISIKS is not).
+  - "Building on PHISIKS": in-tree use, no installable SDK package, and the third-party types in the API (GLM 1.0.1, EnTT 3.11.1, Dear ImGui 1.93.0).
+  - An "Assets" section: formats, editor access, search order, limits.
+  - A "Release packages" section on provenance.
+  - BUILD_WINDOWS, KNOWN_ISSUES, ARCHITECTURE and QUICKSTART updated to match.
+- **Tests added:**
+  - unit tests: version header; `UnsavedComponents` (empty case; all 14 types with counts in a fixed order; round-trip loss);
+  - runtime checks on both tiers: listing, refusal, dialog shown, cancel leaves the file untouched, confirm writes without the components, and the workspace exclusion in Old-McDonald.
+
 ### Verification
 
 | Check | Result |
 |---|---|
 | Clean from-scratch Windows Release build (PhysX, VS 2026 Insiders, CMake 4.5 RC) | exit 0, 0 compiler / linker warnings, 436 s |
-| Unit tests | 147 cases, 0 failed |
+| Unit tests | 150 cases, 0 failed (147 + version header + 2 save-warning cases) |
 | ctest, PhysX build (9 tests incl. 4 showcases, `RuntimeTests`, `RuntimeTestsGL41`) | 9/9 passed |
 | ctest, portable Windows build (native physics + miniaudio) | 9/9 passed |
-| Runtime tests, OpenGL 4.6 tier (hidden window) | 240 passed, 0 failed |
-| Runtime tests, OpenGL 4.1 tier | 227 passed, 0 failed (the Old-McDonald mission now completes) |
+| Runtime tests, OpenGL 4.6 tier (hidden window) | 247 passed, 0 failed (240 + 7 save-warning checks) |
+| Runtime tests, OpenGL 4.1 tier | 234 passed, 0 failed (227 + 7 save-warning checks; the Old-McDonald mission completes) |
+| Packaging gate on the development machine (VS 2026 Insiders, CMake 4.5.0-rc1) | `cpack` without the allow flag: fails with the pre-release message, no archive written. With `PHISIKS_ALLOW_PREVIEW_TOOLCHAIN=ON` (portable build): `Phisiks-1.1.0-win64-preview-toolchain.zip`, whose `BUILD_INFO.txt` says `NOT FOR PUBLIC RELEASE`; extracted and run from a foreign folder (OpenGL 4.6, exit 0, 0 OpenGL errors). This test archive isn't a release artifact. |
 | Project Marina / Old-McDonald load as separate programs | yes (ProjectMarina 347 entities, OldMcDonald 613; screenshots of the real executables) |
 | No text annotations in the project scenes | runtime check: 0 UI vertices and 0 bitmap glyphs over the scene with panels hidden (both projects); screenshots |
 | Main application without the demo interface | `Phisiks.exe` screenshot: empty document, no playlists or Lab branding |
 | Save / load | runtime checks: edits survive save + reopen (Marina, Old-McDonald, both CAD workspaces); File save / open while exploded (B4); damaged / newer file rejected without change (B5); atomic save |
-| Windows packages | `Phisiks-1.1.0-win64-physx.zip` (16.7 MB), `Phisiks-1.1.0-win64.zip` (15.1 MB) in `dist/`; the PhysX archive extracted and run from a foreign working directory (4 programs, 0 errors, no missing meshes; `Phisiks --open … --assets projects/assets` loads 149 entities) and from a write-denied folder (runs; logs fall back to `%LOCALAPPDATA%\Phisiks`) |
+| Windows packages (before finalisation; local, pre-release toolchain, **not release artifacts**) | `Phisiks-1.1.0-win64-physx.zip` (16.7 MB), `Phisiks-1.1.0-win64.zip` (15.1 MB) in `dist/`; the PhysX archive extracted and run from a foreign working directory (4 programs, 0 errors, no missing meshes; `Phisiks --open … --assets projects/assets` loads 149 entities) and from a write-denied folder (runs; logs fall back to `%LOCALAPPDATA%\Phisiks`) |
 | Linux CI (Ubuntu 24.04, GCC) | build + headless ctest pass. Runtime tests on llvmpipe: previously aborted in the hot-reload step (test bug, fixed in `ea818a4`). The re-run completed 225 of 227 checks; the two failures were test assumptions that do not hold on a slow software renderer (the replay check counted frames instead of fixed steps; the top-plan check counted 8 mm stakes that fall below a pixel). Both checks were fixed and still pass on Windows (GL 4.6: 240/240, GL 4.1: 227/227); CI run 46021235119 on `50fc2f3` (2026-11-27): **227/227 pass** on llvmpipe, GL 4.1 tier |
 | Linux release packaging (Ubuntu 22.04, GCC 12) | build, headless ctest, CPack, archive check incl. `ldd`: pass |
 | macOS CI (macOS 15, Apple Clang) | build + headless ctest pass; release packaging incl. `otool` check: pass |
@@ -131,15 +160,17 @@ See [KNOWN_ISSUES.md](KNOWN_ISSUES.md). Most important:
 - no undo / redo;
 - no asset-import pipeline;
 - play does not restore the scene on stop;
-- scene files do not store joints, scripts, navigation, terrain or animation components;
+- scene files do not store joints, scripts, navigation, terrain or animation components (a save now lists them and asks first);
+- no installable SDK package: applications are built in-tree;
+- no PhysX build is published (native physics in all release archives);
 - unsigned binaries.
 
 ### Remaining release actions (need explicit approval)
 
 1. Review `release/1.1.0`, then merge it into `main` (no force-push).
 2. Tag `v1.1.0` on the merged commit. `release.yml` builds the Windows / Linux / macOS archives and creates a **draft** release.
-3. Optional: attach the locally built `-win64-physx` archive, built with a released Visual Studio (H7).
-4. Review the draft release and publish it.
+3. Review the draft release: three archives plus `SHA256SUMS.txt`; open one archive's `BUILD_INFO.txt` and check that its run and commit match the tag. Attach nothing built locally.
+4. Publish the draft.
 
 ## 1.0.0 (2026-11-22)
 
