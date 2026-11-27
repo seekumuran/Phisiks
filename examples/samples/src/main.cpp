@@ -15,6 +15,7 @@ int main(int argc, char** argv) {
     config.sidePanelTitle = "SAMPLES";
     config.sidePanel = Samples::BrowserPanel;
     config.menus = Samples::SamplesMenu;
+    config.playOnLoad = [](const std::string&) { return true; };   // samples demonstrate the simulation: they start playing (Stop returns to the authored scene)
     Editor::Configure(config);
     Editor::Host host;
     host.registerScenes = Samples::RegisterAll;

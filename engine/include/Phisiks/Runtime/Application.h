@@ -32,6 +32,7 @@ namespace Phisiks {
         bool vsync = false;
         bool captureCursor = true;        // first-person start (cursor captured); editors start with a free cursor
         bool sceneHotkeys = true;         // R reloads / N advances the scene (editors use their own guarded commands)
+        bool pauseOnSceneLoad = false;    // a newly loaded scene starts paused (editors: edit mode until Play)
         uint64_t maxFrames = 0;                            // 0 = unlimited (safety cap for automated runs)
 
         // Simulation / recording

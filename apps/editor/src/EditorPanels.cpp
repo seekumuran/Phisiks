@@ -246,7 +246,7 @@ namespace Editor::Internal {
         if (!e) { ImGui::CloseCurrentPopup(); ImGui::EndPopup(); return; }
         const int children = CountDescendants(e);
         ImGui::Text("Delete '%s'%s?", e.GetName().c_str(), children ? (" and its " + std::to_string(children) + " descendants").c_str() : "");
-        ImGui::TextDisabled("There is no undo; reopen the scene file to get it back.");
+        ImGui::TextDisabled("Edit > Undo (Ctrl+Z) brings it back.");
         const float w = 110.0f * GetLayout().scale;
         if (Retro::Button("DELETE", w)) {
             if (SelectedEntity() == g_deleteId || (SelectedEntity() && scene.FromId(SelectedEntity() - 1).IsDescendantOf(e))) Select(0);

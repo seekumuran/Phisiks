@@ -51,4 +51,12 @@ namespace Editor::Internal {
     bool MouseInViewport();
     int& GizmoOperation();              // ImGuizmo::OPERATION
     int& GizmoMode();                   // ImGuizmo::MODE
+
+    // ---- history + play mode (EditorHistory.cpp)
+    bool IsEditorEntity(const Phisiks::Entity& e);   // the 4-way view cameras (not part of the document)
+    void HistoryNoteEdit();
+    void HistoryReset(Phisiks::GameContext& ctx);    // new scene / file: empty history, fresh baseline
+    void HistoryBeginFrame(Phisiks::GameContext& ctx);
+    void HistoryEndFrame(Phisiks::GameContext& ctx);
+    double HistoryCaptureMs();
 }

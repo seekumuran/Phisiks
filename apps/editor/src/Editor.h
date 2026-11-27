@@ -54,6 +54,9 @@ namespace Editor {
         std::string emptyScene = "Untitled";                   // File > New / Open target (RegisterEmptyScene)
         bool insetViewport = true;                             // false: the 3D view fills the window under the panels
         std::function<void(Phisiks::GameContext&)> menus;      // extra menus between Simulation and Help
+        // Scenes that start in play mode when loaded (samples, demos); empty = every scene starts in
+        // edit mode (the PHISIKS editor and the example projects).
+        std::function<bool(const std::string& sceneName)> playOnLoad;
         // Left panel for scenes that are not workspaces (default: render / physics settings).
         std::string sidePanelTitle;
         std::function<void(Phisiks::GameContext&)> sidePanel;
@@ -123,6 +126,44 @@ namespace Editor {
     // scene's renderable objects.
     void SetQuadView(Phisiks::Scene& scene, bool enabled, const QuadFraming* framing = nullptr);
     bool IsQuadView(Phisiks::Scene& scene);
+
+    // ---- undo / redo (EditorHistory.cpp)
+    // Every edit made in edit mode becomes one undo step: inspector values, gizmo moves / rotations /
+    // scales, renames, create / delete / duplicate, re-parenting, components added or removed,
+    // materials, asset assignments, workspace tools that call MarkEdited, and code edits wrapped in
+    // BeginEdit / EndEdit (the agent interface). The editor diffs the authored document (what Save
+    // writes) when an interaction ends, so a gizmo drag or a value drag is one step. Not recorded:
+    // anything while playing (discarded by Stop), selection, camera and view settings. Loading a file
+    // or switching scenes clears the history.
+    struct HistoryState {
+        bool canUndo = false, canRedo = false;
+        std::string undoLabel, redoLabel;
+        size_t undoCount = 0, redoCount = 0;
+        size_t bytes = 0;              // memory held by the history
+        double lastCaptureMs = 0.0;    // cost of the last document capture
+    };
+    HistoryState History();
+    bool Undo(Phisiks::GameContext& ctx);
+    bool Redo(Phisiks::GameContext& ctx);
+    void ClearHistory();
+    void SetHistoryLimits(size_t maxEntries, size_t maxBytes);   // defaults: 256 steps, 64 MiB
+    // A code edit as one labelled step: BeginEdit, change the scene, EndEdit (false: nothing changed).
+    // BeginEdit fails while playing.
+    bool BeginEdit(Phisiks::GameContext& ctx, const std::string& label);
+    bool EndEdit(Phisiks::GameContext& ctx);
+    // Automation (tests, the agent interface): behave as if a widget were held, so edits over several
+    // frames coalesce into one step when it is released.
+    void SetInteractionHeld(bool held);
+
+    // ---- edit / play mode (EditorHistory.cpp)
+    // Edit: the simulation is stopped, edits are recorded and can be saved. Play: the simulation runs
+    // (and can be paused / stepped); EnterPlay captured the edit state first and StopPlay restores it,
+    // so nothing done while playing reaches the document. While playing, Save, Undo / Redo, New /
+    // Open are unavailable; inspector edits still work and are discarded by Stop.
+    enum class Mode { Edit, Play };
+    Mode CurrentMode();
+    bool EnterPlay(Phisiks::GameContext& ctx, std::string* status = nullptr, bool setRunning = true);
+    bool StopPlay(Phisiks::GameContext& ctx, std::string* status = nullptr);
 
     // An empty, editable scene (ground grid, sun, orbit camera), the editor's default document.
     void RegisterEmptyScene(Phisiks::SceneManager& scenes, const std::string& name = "Untitled");

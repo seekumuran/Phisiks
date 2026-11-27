@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <string>
 
 namespace Phisiks {
@@ -45,6 +46,10 @@ namespace Phisiks {
         bool physicsDebugDraw = false;
         bool quitRequested = false;
         Replay replay;                     // deterministic replay ring + timeline scrubbing (AppOptions::recordReplay)
+        // Called by the application before it changes `state` itself (the pause key), so a host can
+        // act first: the editor enters play mode on Paused -> Running and captures the edit state
+        // before the first simulated step.
+        std::function<void(GameContext& ctx, GameState from, GameState to)> beforeStateChange;
 
         std::deque<std::string> eventLog;  // recent gameplay events shown by the debug overlay
         void PushEvent(const std::string& message);

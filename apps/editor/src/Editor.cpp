@@ -84,6 +84,7 @@ namespace Editor {
         void Proceed(GameContext& ctx, const Pending& p);
 
         void Guard(GameContext& ctx, Action action, const std::string& argument = std::string()) {
+            if (CurrentMode() == Mode::Play && action != Action::Quit) StopPlay(ctx, &g_status);   // back to the edit state first
             const Pending p{ action, argument };
             if (!HasUnsavedChanges(ctx)) { Proceed(ctx, p); return; }
             g_pending = p;
@@ -147,6 +148,33 @@ namespace Editor {
             g_save = PendingSave{ true, true, path, proceedAfter, then, std::move(lost) };
             if (status) *status = "not saved yet: confirm the components that scene files do not store";
             return SaveRequest::AwaitingConfirmation;
+        }
+
+        void DuplicateSelected(GameContext& ctx, Scene& scene) {
+            Entity sel = Internal::Selected(scene);
+            if (!sel || Internal::IsEditorEntity(sel)) return;
+            const std::string name = sel.GetName();
+            const bool recorded = BeginEdit(ctx, "Duplicate '" + name + "'");
+            std::string error;
+            Entity copy = SceneSerializer::EntityFromJson(scene, SceneSerializer::EntityToJson(sel, true), sel.GetParent(), false, &error);
+            if (copy) {
+                copy.SetName(name + " (copy)");
+                Select(copy.Id() + 1);
+                g_status = "duplicated '" + name + "'";
+            }
+            else g_status = "duplicate failed: " + error;
+            if (recorded) EndEdit(ctx);
+            else Internal::NoteEdit();
+        }
+
+        void PlayOrResume(GameContext& ctx) {
+            if (CurrentMode() == Mode::Edit) EnterPlay(ctx, &g_status);
+            else ctx.state = GameState::Running;
+        }
+        void StepFrame(GameContext& ctx) {
+            if (CurrentMode() == Mode::Edit) EnterPlay(ctx, &g_status, false);
+            ctx.state = GameState::Running;
+            g_stepPending = true;
         }
 
         void SaveCurrent(GameContext& ctx) {
@@ -350,8 +378,9 @@ namespace Editor {
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("New scene", "Ctrl+N")) Guard(ctx, Action::New);
                 if (ImGui::MenuItem("Open...", "Ctrl+O")) OpenFileDialog(DialogMode::Open);
-                if (ImGui::MenuItem("Save", "Ctrl+S", false, scene != nullptr)) SaveCurrent(ctx);
-                if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S", false, scene != nullptr)) OpenFileDialog(DialogMode::SaveAs);
+                const bool editing = CurrentMode() == Mode::Edit;
+                if (ImGui::MenuItem(editing ? "Save" : "Save (stop playing first)", "Ctrl+S", false, scene != nullptr && editing)) SaveCurrent(ctx);
+                if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S", false, scene != nullptr && editing)) OpenFileDialog(DialogMode::SaveAs);
                 if (ImGui::MenuItem("Reopen from disk", nullptr, false, scene && !g_path.empty())) Guard(ctx, Action::Open, g_path);
                 ImGui::Separator();
                 if (ImGui::MenuItem("Quit", "Ctrl+Q")) Guard(ctx, Action::Quit);
@@ -359,6 +388,13 @@ namespace Editor {
             }
             if (ImGui::BeginMenu("Edit")) {
                 Entity sel = scene ? Internal::Selected(*scene) : Entity();
+                const HistoryState h = History();
+                const std::string undo = h.canUndo ? "Undo " + h.undoLabel : std::string(CurrentMode() == Mode::Play ? "Undo (stop playing first)" : "Undo");
+                const std::string redo = h.canRedo ? "Redo " + h.redoLabel : std::string("Redo");
+                if (ImGui::MenuItem(undo.c_str(), "Ctrl+Z", false, h.canUndo)) Undo(ctx);
+                if (ImGui::MenuItem(redo.c_str(), "Ctrl+Y", false, h.canRedo)) Redo(ctx);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, bool(sel))) DuplicateSelected(ctx, *scene);
                 if (ImGui::MenuItem("Delete", "Delete", false, bool(sel))) Internal::RequestDelete(sel);
                 if (ImGui::MenuItem("Deselect", nullptr, false, bool(sel))) g_selected = 0;
                 if (ImGui::MenuItem("Frame selection", "F", false, scene != nullptr)) Internal::FrameSelected(ctx, *scene);
@@ -377,9 +413,12 @@ namespace Editor {
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Simulation")) {
-                const bool paused = ctx.state == GameState::Paused;
-                if (ImGui::MenuItem(paused ? "Play" : "Pause", "Esc")) ctx.state = paused ? GameState::Running : GameState::Paused;
-                if (ImGui::MenuItem("Step one frame", nullptr, false, paused)) { ctx.state = GameState::Running; g_stepPending = true; }
+                const bool playing = CurrentMode() == Mode::Play;
+                const bool running = playing && ctx.state == GameState::Running;
+                if (ImGui::MenuItem(!playing ? "Play" : running ? "Pause" : "Resume", "Esc", false, scene != nullptr)) { if (running) ctx.state = GameState::Paused; else PlayOrResume(ctx); }
+                if (ImGui::MenuItem("Stop (back to the edit state)", "Shift+Esc", false, playing)) StopPlay(ctx, &g_status);
+                if (ImGui::MenuItem("Step one frame", nullptr, false, scene && !running)) StepFrame(ctx);
+                ImGui::Separator();
                 if (ImGui::MenuItem("Reload scene", nullptr, false, scene != nullptr)) Guard(ctx, Action::Reload);
                 ImGui::EndMenu();
             }
@@ -413,14 +452,21 @@ namespace Editor {
             ImGui::SameLine();
             if (Retro::Button(mode == ImGuizmo::WORLD ? "WORLD" : "LOCAL", w, 2)) mode = mode == ImGuizmo::WORLD ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
             ImGui::SameLine(0.0f, 18.0f * L.scale);
-            const bool paused = ctx.state == GameState::Paused;
-            if (Retro::TransportButton("##tb_play", Retro::Glyph::Play, !paused, "Play simulation")) ctx.state = GameState::Running;
+            const bool playing = CurrentMode() == Mode::Play;
+            const bool running = playing && ctx.state == GameState::Running;
+            if (Retro::TransportButton("##tb_play", Retro::Glyph::Play, running, playing ? "Resume (Esc)" : "Play: capture the edit state and run (Esc)") && scene) PlayOrResume(ctx);
             ImGui::SameLine();
-            if (Retro::TransportButton("##tb_pause", Retro::Glyph::Pause, paused, "Pause simulation (Esc)")) ctx.state = GameState::Paused;
+            if (Retro::TransportButton("##tb_pause", Retro::Glyph::Pause, playing && !running, "Pause (Esc)") && running) ctx.state = GameState::Paused;
             ImGui::SameLine();
-            if (Retro::TransportButton("##tb_step", Retro::Glyph::StepForward, false, "Step one frame (while paused)") && paused) { ctx.state = GameState::Running; g_stepPending = true; }
+            if (Retro::TransportButton("##tb_step", Retro::Glyph::StepForward, false, "Step one frame") && scene && !running) StepFrame(ctx);
             ImGui::SameLine();
-            if (Retro::TransportButton("##tb_reload", Retro::Glyph::Stop, false, "Reload the scene (asks about unsaved changes)") && scene) Guard(ctx, Action::Reload);
+            if (Retro::TransportButton("##tb_stop", Retro::Glyph::Stop, false, "Stop: back to the edit state (Shift+Esc)") && playing) StopPlay(ctx, &g_status);
+            ImGui::SameLine();
+            if (Retro::TransportButton("##tb_reload", Retro::Glyph::Eject, false, "Reload the scene (asks about unsaved changes)") && scene) Guard(ctx, Action::Reload);
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            if (playing) ImGui::TextColored(Internal::Amber(), running ? "PLAY" : "PLAY (PAUSED)");
+            else ImGui::TextColored(Internal::Phosphor(), "EDIT");
             ImGui::SameLine(0.0f, 18.0f * L.scale);
             const bool quad = scene && IsQuadView(*scene);
             if (Retro::Button("4-WAY", w, quad ? 1 : 0) && scene) SetQuadView(*scene, !quad);
@@ -429,8 +475,8 @@ namespace Editor {
             // status, right-aligned
             char status[256];
             const float fps = ctx.stats.cpuFrameMs > 0.0f ? 1000.0f / ctx.stats.cpuFrameMs : 0.0f;
-            std::snprintf(status, sizeof(status), "%s%s  |  %s  |  %s  |  %.0f FPS", scene ? scene->Name().c_str() : "-", HasUnsavedChanges(ctx) ? " *" : "",
-                          ToString(ctx.state), ToString(ctx.camera.GetMode()), double(fps));
+            std::snprintf(status, sizeof(status), "%s%s  |  %s  |  %.0f FPS", scene ? scene->Name().c_str() : "-", HasUnsavedChanges(ctx) ? " *" : "",
+                          ToString(ctx.camera.GetMode()), double(fps));
             const float tw = ImGui::CalcTextSize(status).x;
             ImGui::SameLine(std::max(ImGui::GetWindowContentRegionMax().x - tw, ImGui::GetCursorPosX() + 10.0f));
             ImGui::AlignTextToFramePadding();
@@ -462,6 +508,10 @@ namespace Editor {
             if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_N, false)) Guard(ctx, Action::New);
             if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Q, false)) Guard(ctx, Action::Quit);
             if (!scene) return;
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) { if (io.KeyShift) Redo(ctx); else Undo(ctx); }
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) Redo(ctx);
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) DuplicateSelected(ctx, *scene);
+            if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Escape, false) && CurrentMode() == Mode::Play) StopPlay(ctx, &g_status);
             if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) SetQuadView(*scene, !IsQuadView(*scene));
             if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) if (Entity sel = Internal::Selected(*scene)) Internal::RequestDelete(sel);
             if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false) && (Internal::MouseInViewport() || !io.WantCaptureMouse)) Internal::FrameSelected(ctx, *scene);
@@ -476,7 +526,11 @@ namespace Editor {
         ImVec4 Amber() { return ImVec4(Retro::AMBER[0], Retro::AMBER[1], Retro::AMBER[2], 1.0f); }
         ImVec4 Phosphor() { return ImVec4(Retro::PHOSPHOR[0], Retro::PHOSPHOR[1], Retro::PHOSPHOR[2], 1.0f); }
         ImVec4 Muted() { return ImVec4(0.54f, 0.56f, 0.64f, 1.0f); }
-        void NoteEdit() { g_edited = true; }
+        void NoteEdit() {
+            if (CurrentMode() == Mode::Play) return;   // play-mode changes are discarded by Stop: not unsaved edits
+            g_edited = true;
+            HistoryNoteEdit();
+        }
     }
 
     // ===================================================================== public API
@@ -486,7 +540,7 @@ namespace Editor {
     uint32_t SelectedEntity() { return g_selected; }
     void Select(uint32_t id) { g_selected = id; }
     std::string& ScenePath() { return g_path; }
-    void MarkEdited() { g_edited = true; }
+    void MarkEdited() { Internal::NoteEdit(); }
     void DrawSettingsPanel(GameContext& ctx) { Internal::SettingsPanelContents(ctx, ctx.CurrentScene()); }
     float RowButtonWidth(int perRow) {
         const int n = std::max(perRow, 1);
@@ -548,6 +602,10 @@ namespace Editor {
     bool SaveScene(GameContext& ctx, const std::string& requested, std::string* status, bool allowComponentLoss) {
         Scene* scene = ctx.CurrentScene();
         if (!scene) { if (status) *status = "no scene"; return false; }
+        if (CurrentMode() == Mode::Play) {
+            if (status) *status = "not saved: stop playing first (play-mode changes are not part of the document)";
+            return false;
+        }
         if (!allowComponentLoss) {
             const std::vector<SceneSerializer::UnsavedComponent> lost = ComponentsLostOnSave(ctx);
             if (!lost.empty()) {
@@ -577,6 +635,7 @@ namespace Editor {
     bool LoadScene(GameContext& ctx, const std::string& path, std::string* status) {
         Scene* scene = ctx.CurrentScene();
         if (!scene) { if (status) *status = "no scene"; return false; }
+        if (CurrentMode() == Mode::Play) StopPlay(ctx);
         std::string error;
         const bool quad = IsQuadView(*scene);
         if (!SceneSerializer::Load(*scene, path, &error)) {
@@ -590,6 +649,7 @@ namespace Editor {
         Internal::ResetPanelState();
         g_path = path;
         g_edited = false;
+        Internal::HistoryReset(ctx);   // a new document: the history of the previous one does not apply
         if (status) *status = "opened " + ShortPath(path);
         return true;
     }
@@ -609,11 +669,14 @@ namespace Editor {
         WorkspaceExtension* ws = Internal::Workspace(ctx);
         ctx.replay.SetEnabled(ws && !ws->SupportsReplay() ? false : g_replayDefault);
         g_path = ws && ws->DefaultScenePath() ? ResolveScenePath(ws->DefaultScenePath()) : std::string();
+        Internal::HistoryReset(ctx);
         if (!g_pendingOpen.empty()) {
             const std::string path = g_pendingOpen;
             g_pendingOpen.clear();
             LoadScene(ctx, path, &g_status);
         }
+        if (g_config.playOnLoad && g_config.playOnLoad(scene->Name())) EnterPlay(ctx);
+        else ctx.state = GameState::Paused;   // edit mode
     }
 
     bool OnQuitRequested(GameContext& ctx) {
@@ -628,6 +691,8 @@ namespace Editor {
     void Draw(GameContext& ctx) {
         if (!UI::IsActive()) return;
         OnSceneLoaded(ctx);
+        Internal::HistoryBeginFrame(ctx);
+        struct EndOfFrame { GameContext& c; ~EndOfFrame() { Internal::HistoryEndFrame(c); } } endOfFrame{ ctx };
         if (g_stepPending && ctx.state == GameState::Running) { ctx.state = GameState::Paused; g_stepPending = false; }
         Internal::Layout& L = g_layout;
         L.scale = UI::Scale();

@@ -119,6 +119,7 @@ namespace Phisiks {
 
     void Application::SetState(GameState state) {
         if (m_ctx.state == state) return;
+        if (m_ctx.beforeStateChange && (m_ctx.state == GameState::Running || m_ctx.state == GameState::Paused)) m_ctx.beforeStateChange(m_ctx, m_ctx.state, state);
         Log::Info() << "Game state: " << ToString(m_ctx.state) << " -> " << ToString(state);
         m_ctx.state = state;
     }
@@ -230,7 +231,7 @@ namespace Phisiks {
     void Application::RunGameFrame() {
         const float dt = Time::DeltaTime();
         m_ctx.stats.deltaTime = dt;
-        const bool running = m_ctx.state == GameState::Running;
+        bool running = m_ctx.state == GameState::Running;
         Scene* scene = nullptr;
 
         {
@@ -246,6 +247,8 @@ namespace Phisiks {
             if (m_scenes.ApplyPending(m_ctx)) {
                 Advanced::Clear();   // GPU particles / soft bodies of the previous scene
                 GlobalEvents().Enqueue(SceneLoadedEvent{ m_scenes.CurrentName() });
+                // Editors start a scene in edit mode: nothing is simulated until they decide to play.
+                if (m_options.pauseOnSceneLoad && m_ctx.state == GameState::Running) { m_ctx.state = GameState::Paused; running = false; }
             }
             scene = m_scenes.Current();
             if (scene) World::UpdateScene(*scene);       // terrain meshes / colliders / foliage for new components
@@ -256,6 +259,9 @@ namespace Phisiks {
                 Gameplay::UpdatePlayerActions(m_ctx);
                 if (scene) scene->Update(m_ctx, dt);
                 if (scene) Scripting::Update(*scene, m_ctx, dt);   // Lua on_start / on_update
+            }
+            else if (scene && scene->RunsWhilePaused()) {
+                scene->Update(m_ctx, dt);                // editor workspaces: tools and view animation in edit mode
             }
             if (scene) Animation::UpdateScene(*scene, running ? dt : 0.0f);   // clips + dual-quaternion skinning
             m_ctx.player.CaptureInput(m_ctx.input, running && m_ctx.camera.GetMode() != CameraMode::FreeFly && m_ctx.camera.GetMode() != CameraMode::Orbit);

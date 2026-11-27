@@ -28,6 +28,9 @@ int main(int argc, char** argv) {
     config.sidePanelTitle = "SAMPLES";
     config.sidePanel = Samples::BrowserPanel;
     config.menus = Samples::SamplesMenu;
+    // as PhisiksSamples: samples and the mission start playing; the CAD workspaces and the empty
+    // document start in edit mode (as in the OldMcDonald and PHISIKS programs)
+    config.playOnLoad = [](const std::string& name) { return name != "RoverCAD" && name != "DroneCAD" && name != "Untitled"; };
     Editor::Configure(config);
     Editor::Host host;
     host.registerScenes = [](Phisiks::SceneManager& scenes) {

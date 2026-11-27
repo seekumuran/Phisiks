@@ -925,6 +925,8 @@ namespace Phisiks::Advanced {
 namespace Phisiks::Physics::Advanced {
     namespace W = Phisiks::Advanced;
 
+    void ResetSimulations() { if (W::Available()) W::Clear(); }
+
     Stats GetStats() {
         Stats s;
         if (!W::g) return s;

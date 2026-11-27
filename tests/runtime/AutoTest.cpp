@@ -2655,8 +2655,9 @@ namespace Phisiks {
             switch (m_phase) {
                 case 0: ctx.scenes->Request("Joints"); m_phase = 1; return false;
                 case 1: {
-                    if (!ctx.CurrentScene() || ctx.CurrentScene()->Name() != "Joints") return false;
+                    if (!ctx.CurrentScene() || ctx.CurrentScene()->Name() != "Joints" || m_stepFrames < 5) return false;   // the editor has seen the new scene
                     Scene& scene = *ctx.CurrentScene();
+                    if (Editor::CurrentMode() == Editor::Mode::Play) Editor::StopPlay(ctx);   // the sample starts playing; files are saved in edit mode
                     const std::string stored = m_runDirectory + "/joints_v2.scene.json";
                     std::string status, error;
                     const bool savedV2 = Editor::SaveScene(ctx, stored, &status);
@@ -2699,7 +2700,182 @@ namespace Phisiks {
                     Expect("confirm: the file is written without the callback; the open scene still has it",
                            !Editor::SaveConfirmationPending() && loaded && target && target.Has<Health>() && !target.Get<Health>().onDeath && joints(reopened) == size_t(m_scratch[0])
                            && reopened.EntityCount() == ctx.CurrentScene()->EntityCount() && bool(ctx.CurrentScene()->FindByName("Callback target").Get<Health>().onDeath),
-                           F("%.0f entities reopened", double(reopened.EntityCount())) + F(" of %.0f; ", double(ctx.CurrentScene()->EntityCount())) + error);
+                           F("%.0f entities reopened", double(reopened.EntityCount())) + F(" of %.0f; ", double(ctx.CurrentScene()->EntityCount())) + error + "; save: " + status
+                           + "; mode " + (Editor::CurrentMode() == Editor::Mode::Play ? "play" : "edit"));
+                    return true;
+                }
+            }
+            return false;
+        } });
+
+        // Undo / redo and edit / play mode (EditorHistory.cpp), in the empty document (edit mode).
+        m_steps.push_back({ "Editor: undo / redo and edit / play separation", [this](GameContext& ctx) {
+            static uint64_t box = 0, parent = 0, child = 0, faller = 0;
+            static std::string authored;
+            static size_t undoBeforePlay = 0;
+            Scene* scene = ctx.CurrentScene();
+            auto find = [&](uint64_t g) { return scene ? scene->FindByGuid(g) : Entity(); };
+            auto stateOf = [&](uint64_t g) { Entity e = find(g); return e ? SceneSerializer::EntityToJson(e, true) : std::string("<missing>"); };
+            // the document independent of in-memory handle order: entity JSON + parent id, by entity id
+            auto document = [&]() {
+                std::map<uint64_t, std::string> byId;
+                scene->Each<Transform>([&](Entity e, Transform&) {
+                    if (scene->IsPendingDestroy(e)) return;
+                    byId[e.GetGuid()] = SceneSerializer::EntityToJson(e, false) + "|" + std::to_string(e.GetParent() ? e.GetParent().GetGuid() : 0);
+                });
+                std::string out;
+                for (const auto& [id, text] : byId) out += text + '\n';
+                return out;
+            };
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("Untitled"); m_phase = 1; return false;
+                case 1: {
+                    if (!scene || scene->Name() != "Untitled" || m_stepFrames < 3) return false;
+                    Expect("the empty document opens in edit mode with an empty history", Editor::CurrentMode() == Editor::Mode::Edit && ctx.state == GameState::Paused && !Editor::History().canUndo,
+                           std::string(ToString(ctx.state)));
+                    Expect("undo with an empty history does nothing", !Editor::Undo(ctx) && !Editor::Redo(ctx), "");
+                    // create (one labelled step)
+                    Editor::BeginEdit(ctx, "Create 'Box'");
+                    Entity e = scene->CreateEntity("Box");
+                    e.Add<MeshRenderer>(MeshRenderer{ "Cube", "" });
+                    e.Get<Transform>().position = glm::vec3(1.0f, 0.5f, 0.0f);
+                    Editor::EndEdit(ctx);
+                    box = e.GetGuid();
+                    Expect("a code edit is one labelled step", Editor::History().undoCount == 1 && Editor::History().undoLabel == "Create 'Box'", Editor::History().undoLabel);
+                    // a drag over several frames (interaction held): one step
+                    Editor::SetInteractionHeld(true);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                }
+                case 2: {
+                    Entity e = find(box);
+                    e.Get<Transform>().position.x += 0.25f;
+                    Editor::MarkEdited();
+                    if (m_stepFrames - m_scratch[0] < 8) return false;
+                    Editor::SetInteractionHeld(false);
+                    m_phase = 3;
+                    return false;
+                }
+                case 3: {
+                    const Editor::HistoryState h = Editor::History();
+                    Expect("a continuous drag over 8 frames coalesces into one step", h.undoCount == 2 && h.undoLabel.find("'Box'") != std::string::npos,
+                           F("%.0f steps, last: ", double(h.undoCount)) + h.undoLabel);
+                    Entity e = find(box);
+                    const float dragged = e.Get<Transform>().position.x;
+                    Editor::Undo(ctx);
+                    Expect("undo the drag: the box is back where it was created", std::fabs(find(box).Get<Transform>().position.x - 1.0f) < 1e-5f && Editor::History().canRedo,
+                           F("x %.3f (dragged ", find(box).Get<Transform>().position.x) + F("%.3f)", dragged));
+                    Editor::Redo(ctx);
+                    Expect("redo the drag", std::fabs(find(box).Get<Transform>().position.x - dragged) < 1e-5f, F("x %.3f", find(box).Get<Transform>().position.x));
+                    // three sequential edits through the per-frame path: rename, add a component, change it
+                    find(box).SetName("Crate");
+                    Editor::MarkEdited();
+                    m_phase = 4;
+                    return false;
+                }
+                case 4: find(box).Add<Rigidbody>().mass = 2.0f; Editor::MarkEdited(); m_phase = 5; return false;
+                case 5: find(box).Get<Rigidbody>().mass = 7.0f; Editor::MarkEdited(); m_phase = 6; return false;
+                case 6: {
+                    const Editor::HistoryState h = Editor::History();
+                    Expect("three sequential edits are three steps (rename, add, edit)", h.undoCount == 5 && h.undoLabel.find("rigidbody") != std::string::npos, F("%.0f steps, last: ", double(h.undoCount)) + h.undoLabel);
+                    const std::string after = stateOf(box);
+                    Editor::Undo(ctx); Editor::Undo(ctx); Editor::Undo(ctx);
+                    Entity e = find(box);
+                    Expect("three undos: name and components are back", e && e.GetName() == "Box" && !e.Has<Rigidbody>(), e ? e.GetName() : std::string("missing"));
+                    Editor::Redo(ctx); Editor::Redo(ctx); Editor::Redo(ctx);
+                    Expect("three redos restore the exact state", stateOf(box) == after, "");
+                    // repeated cycles keep the state stable
+                    bool stable = true;
+                    for (int i = 0; i < 10; ++i) { Editor::Undo(ctx); Editor::Redo(ctx); stable = stable && stateOf(box) == after; }
+                    Expect("10 undo / redo cycles are stable", stable, "");
+                    // a new edit after undo discards the redo branch
+                    Editor::Undo(ctx);
+                    Editor::BeginEdit(ctx, "Nudge");
+                    find(box).Get<Transform>().position.z = 3.0f;
+                    Editor::EndEdit(ctx);
+                    Expect("a new edit after undo clears redo", !Editor::History().canRedo && Editor::History().undoLabel == "Nudge", Editor::History().redoLabel);
+                    // hierarchy: parent + child, delete the subtree, undo restores both with the link and the same ids
+                    Editor::BeginEdit(ctx, "Create assembly");
+                    Entity p = scene->CreateEntity("Assembly");
+                    Entity c = scene->CreateEntity("Part");
+                    c.SetParent(p, false);
+                    c.Add<Light>();
+                    Editor::EndEdit(ctx);
+                    parent = p.GetGuid(); child = c.GetGuid();
+                    Editor::BeginEdit(ctx, "Reparent 'Crate'");
+                    find(box).SetParent(p, true);
+                    Editor::EndEdit(ctx);
+                    Editor::Undo(ctx);
+                    Expect("undo a re-parent", find(box) && !find(box).GetParent(), "");
+                    Editor::Redo(ctx);
+                    Editor::BeginEdit(ctx, "Delete 'Assembly'");
+                    scene->DestroyImmediate(find(parent));
+                    Editor::EndEdit(ctx);
+                    Expect("delete takes the subtree", !find(parent) && !find(child) && !find(box), "");
+                    Editor::Undo(ctx);
+                    Expect("undo the delete: the subtree is back with its ids, links and components",
+                           find(parent) && find(child) && find(child).GetParent() == find(parent) && find(box) && find(box).GetParent() == find(parent) && find(child).Has<Light>(), "");
+                    // history limits
+                    Editor::SetHistoryLimits(3, size_t(64) << 20);
+                    Expect("history limit: the oldest steps are dropped", Editor::History().undoCount == 3, F("%.0f steps", double(Editor::History().undoCount)));
+                    Editor::SetHistoryLimits(256, size_t(64) << 20);
+                    // edit / play: a dynamic body falls while playing; Stop restores the edit state
+                    Editor::BeginEdit(ctx, "Create 'Faller'");
+                    Entity f = scene->CreateEntity("Faller");
+                    f.Get<Transform>().position = glm::vec3(0.0f, 4.0f, 0.0f);
+                    f.Add<MeshRenderer>(MeshRenderer{ "Sphere", "" });
+                    Collider col; col.shape.shape = Physics::ShapeType::Sphere; col.shape.radius = 0.5f;
+                    f.Add<Collider>(col);
+                    f.Add<Rigidbody>();
+                    Editor::EndEdit(ctx);
+                    faller = f.GetGuid();
+                    authored = document();
+                    m_scratch[2] = Editor::HasUnsavedChanges(ctx) ? 1.0f : 0.0f;
+                    undoBeforePlay = Editor::History().undoCount;
+                    m_scratch[1] = float(f.Id());
+                    std::string status;
+                    Expect("Play enters play mode and runs", Editor::EnterPlay(ctx, &status) && Editor::CurrentMode() == Editor::Mode::Play && ctx.state == GameState::Running, status);
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 7;
+                    return false;
+                }
+                case 7: {
+                    if (m_stepFrames - m_scratch[0] < 40) return false;
+                    Entity f = find(faller);
+                    Expect("while playing, the dynamic body falls", f && f.Get<Transform>().position.y < 3.5f, F("y %.3f", f ? f.Get<Transform>().position.y : -1.0f));
+                    // runtime changes: create, delete, change a component
+                    scene->CreateEntity("Spawned at runtime").Add<MeshRenderer>();
+                    scene->DestroyImmediate(find(child));
+                    find(box).Get<MeshRenderer>().mesh = "Sphere";
+                    Editor::MarkEdited();
+                    std::string status;
+                    Expect("while playing, saving is refused", !Editor::SaveScene(ctx, m_runDirectory + "/play_mode.scene.json", &status) && status.find("stop playing") != std::string::npos, status);
+                    Expect("while playing, undo is unavailable and nothing is recorded", !Editor::Undo(ctx) && Editor::History().undoCount == undoBeforePlay && Editor::HasUnsavedChanges(ctx) == (m_scratch[2] > 0.5f), "");
+                    Expect("Stop restores the edit state", Editor::StopPlay(ctx, &status) && Editor::CurrentMode() == Editor::Mode::Edit && ctx.state == GameState::Paused, status);
+                    Entity g = find(faller);
+                    Expect("after Stop: the body is back at its authored pose; the same entity handle survives", g && std::fabs(g.Get<Transform>().position.y - 4.0f) < 1e-5f && float(g.Id()) == m_scratch[1],
+                           F("y %.3f", g ? g.Get<Transform>().position.y : -1.0f));
+                    Expect("after Stop: runtime-created entities are gone, deleted ones are back, component edits are reverted",
+                           !scene->FindByName("Spawned at runtime") && find(child) && find(child).GetParent() == find(parent) && find(box).Get<MeshRenderer>().mesh == "Cube", "");
+                    Expect("after Stop: the document equals the authored state", document() == authored, "");
+                    Expect("after Stop: the history is intact and usable", Editor::History().undoCount == undoBeforePlay && Editor::Undo(ctx) && !find(faller) && Editor::Redo(ctx) && find(faller), "");
+                    // repeated play / stop cycles
+                    bool cycles = true;
+                    for (int i = 0; i < 3; ++i) {
+                        cycles = cycles && Editor::EnterPlay(ctx) && Editor::StopPlay(ctx);
+                        cycles = cycles && document() == authored;
+                    }
+                    Expect("3 play / stop cycles leave the document unchanged", cycles, "");
+                    // the pause key in edit mode enters play mode first (state captured before any step)
+                    ctx.input.InjectPress(Action::Pause);
+                    m_phase = 8;
+                    return false;
+                }
+                case 8: {
+                    Expect("the pause key in edit mode starts play mode", Editor::CurrentMode() == Editor::Mode::Play, std::string(ToString(ctx.state)));
+                    Editor::StopPlay(ctx);
+                    Expect("...and Stop restores the document", document() == authored, "");
                     return true;
                 }
             }

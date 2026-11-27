@@ -112,6 +112,9 @@ namespace Phisiks::Physics::Advanced {
         uint64_t coupledImpulsesApplied = 0;
     };
     Stats GetStats();
+    // Destroys every particle system and soft body simulation; the scene systems rebuild them from
+    // their components on the next step (the editor's play-mode Stop: back to the authored state).
+    void ResetSimulations();
 
     // Verification / tooling readbacks (synchronise with the GPU; not for per-frame use). Work on
     // both backends; the Gpu* reference helpers below need the GPU backend.

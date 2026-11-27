@@ -469,7 +469,7 @@ namespace Projects {
             default: break;
         }
         ctx.camera.SetOrbit(v.target, v.distance, v.yaw, v.pitch);
-        if (m_camera == MissionView && !m_playing) MissionPlay();
+        if (m_camera == MissionView && !m_playing) { Editor::EnterPlay(ctx); MissionPlay(); }   // the mission is a simulation: play mode
     }
 
     // ==================================================================== mission
@@ -787,7 +787,7 @@ namespace Projects {
 
         ImGui::Spacing();
         ImGui::TextColored(heading, "MISSION PLAYBACK");
-        if (Retro::TransportButton("##omd_play", Retro::Glyph::Play, m_playing, "Play mission")) MissionPlay();
+        if (Retro::TransportButton("##omd_play", Retro::Glyph::Play, m_playing, "Play mission (enters play mode)")) { Editor::EnterPlay(ctx); MissionPlay(); }
         ImGui::SameLine();
         if (Retro::TransportButton("##omd_pause", Retro::Glyph::Pause, !m_playing && m_phase != Phase::Idle, "Pause")) MissionPause();
         ImGui::SameLine();

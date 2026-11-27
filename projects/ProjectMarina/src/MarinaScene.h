@@ -39,6 +39,7 @@ namespace Projects {
         void OnEnter(Phisiks::GameContext& ctx) override;
         void OnExit(Phisiks::GameContext& ctx) override;
         void Update(Phisiks::GameContext& ctx, float dt) override;
+        bool RunsWhilePaused() const override { return true; }   // workspace tools and view animation in edit mode
         void DrawUI(Phisiks::GameContext& ctx) override;   // flow animation (ribbons, this frame)
 
         // Editor::WorkspaceExtension
