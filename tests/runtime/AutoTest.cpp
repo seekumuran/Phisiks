@@ -1781,7 +1781,9 @@ namespace Phisiks {
                     fs::create_directories(dir, ec);
                     std::string source = Assets::ResolveDirectory("engine/shaders");   // repository
                     if (source.empty()) source = Assets::ResolveDirectory("shaders");    // release package
-                    fs::copy(source, dir, fs::copy_options::overwrite_existing, ec);
+                    // `recursive`: for a directory source the standard copies its files only with recursive (or
+                    // none); libstdc++ follows that strictly, so overwrite_existing alone copied nothing on Linux.
+                    fs::copy(source, dir, fs::copy_options::overwrite_existing | fs::copy_options::recursive, ec);
                     std::ifstream in(tonemap, std::ios::binary);
                     std::stringstream text;
                     text << in.rdbuf();
@@ -1790,6 +1792,7 @@ namespace Phisiks {
                     Expect("watching a copy of engine/shaders", enabled && Render::GetShaderReloadStatus().filesOverridden == 0,
                            dir.string() + F(" (%.0f files overridden: identical to the embedded sources)", Render::GetShaderReloadStatus().filesOverridden));
                     m_scratch[0] = float(status.reloads);
+                    if (!enabled || m_shaderOriginal.rfind('}') == std::string::npos) return true;   // reported above; nothing to edit
                     // edit: the tone mapper now paints everything magenta
                     writeTonemap("\n// hot-reload test\n#define main main_original\n");
                     {

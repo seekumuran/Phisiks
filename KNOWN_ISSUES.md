@@ -36,6 +36,7 @@ macOS-specific limitations, by design:
 - **Old-McDonald:** the rover route (A* on the navigation grid) and the arm pose (IK) are computed by the engine. The drone flight, crop mapping, data transfer and measurements are scripted: no flight dynamics, image processing or sensor values. The panel tags every mission stage with what drives it.
 - The CAD workspaces and the mission scene disable the replay timeline. Their state (explode offsets, mission progress) is more than entity transforms, and a transform replay would leave the two out of step.
 - The models are generic models of their component classes, styled from photographs where noted in the project READMEs. They are not measured from the prototypes.
+- The workspace tools find parts **by name** (explode offsets, subsystem rows, wiring groups, mission parts). Renaming a part in the inspector detaches it from those tools until the scene is rebuilt; moving, scaling and re-materialing are safe.
 
 ## Packaging (1.1)
 
