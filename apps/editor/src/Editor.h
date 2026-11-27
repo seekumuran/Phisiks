@@ -19,8 +19,11 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
+#include "Phisiks/Assets/AssetDatabase.h"
+
 namespace Phisiks {
     struct GameContext;
+    class Entity;
     class Scene;
     class SceneManager;
 }
@@ -110,7 +113,7 @@ namespace Editor {
     // Width for `perRow` buttons sharing the remaining width of the current panel row.
     float RowButtonWidth(int perRow);
     // Bottom dock tab shown (the dock also has buttons for it).
-    enum class OutputTab { Console = 0, Telemetry = 1, Timeline = 2 };
+    enum class OutputTab { Console = 0, Telemetry = 1, Timeline = 2, Assets = 3 };
     void ShowOutputTab(OutputTab tab);
 
     // ---- viewport
@@ -126,6 +129,20 @@ namespace Editor {
     // scene's renderable objects.
     void SetQuadView(Phisiks::Scene& scene, bool enabled, const QuadFraming* framing = nullptr);
     bool IsQuadView(Phisiks::Scene& scene);
+
+    // ---- project and assets (EditorAssets.cpp)
+    // A project is a folder with assets/ (the AssetDatabase root) and scenes/ (--project <dir>, or
+    // the ASSETS tab). Without one, <user data>/projects/Default is used when assets are first needed.
+    bool OpenProject(const std::string& directory, std::string* status = nullptr);
+    const std::string& ProjectDirectory();
+    Phisiks::AssetDatabase& ProjectAssets();          // the open project's database (opens the default)
+    Phisiks::AssetImportResult ImportAsset(const std::string& file, const std::string& folder = std::string(), std::string* status = nullptr);
+    // Assigns a project asset to an entity, as one undo step, with an asset reference:
+    // mesh -> MeshRenderer.mesh; texture -> a material of the entity (copied from its current one) with
+    // the texture; audio -> AudioSource.clip; model -> SkinnedModel.path; script -> Script.file.
+    bool AssignAsset(Phisiks::GameContext& ctx, Phisiks::Entity entity, uint64_t asset, std::string* status = nullptr);
+    // A new entity showing a mesh or model asset at the orbit target (one undo step; selected).
+    Phisiks::Entity InstantiateAsset(Phisiks::GameContext& ctx, uint64_t asset, std::string* status = nullptr);
 
     // ---- undo / redo (EditorHistory.cpp)
     // Every edit made in edit mode becomes one undo step: inspector values, gizmo moves / rotations /

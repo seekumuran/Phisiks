@@ -95,8 +95,13 @@ namespace Editor::Internal {
             ImGui::EndPopup();
         }
 
-        void DragDropTarget(Entity e) {
+        void DragDropTarget(GameContext& ctx, Entity e) {
             if (!ImGui::BeginDragDropTarget()) return;
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("PHISIKS_ASSET")) {   // from the ASSETS tab
+                uint64_t guid = 0;
+                std::memcpy(&guid, payload->Data, sizeof(guid));
+                AssignAsset(ctx, e, guid);
+            }
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("PHISIKS_ENTITY")) {
                 const uint32_t id = *static_cast<const uint32_t*>(payload->Data);
                 if (Entity child = e.GetScene()->FromId(id); child && !(child == e)) {
@@ -125,7 +130,7 @@ namespace Editor::Internal {
                 ImGui::Text("Parent '%s' to ...", e.GetName().c_str());
                 ImGui::EndDragDropSource();
             }
-            DragDropTarget(e);
+            DragDropTarget(ctx, e);
             EntityContextMenu(ctx, scene, e);
             if (!children.empty()) {   // right-aligned descendant count, when it does not cover the name
                 char count[16];
@@ -690,22 +695,25 @@ namespace Editor::Internal {
         }
     }
 
-    void SetOutputTab(int tab) { g_dockTab = std::clamp(tab, 0, 2); }
+    void SetOutputTab(int tab) { g_dockTab = std::clamp(tab, 0, 3); }
 
     void BottomDock(GameContext& ctx, Scene* scene, float x, float y, float w, float h) {
         g_frameNorm[g_cursor] = ctx.stats.cpuFrameMs / 33.3f;
         g_cursor = (g_cursor + 1) % g_frameNorm.size();
         if (!Retro::BeginDockedPanel("OUTPUT##dock", x, y, w, h, ImGuiWindowFlags_NoScrollbar)) { Retro::EndPanel(); return; }
-        const char* tabs[] = { "CONSOLE", "TELEMETRY", "TIMELINE" };
-        const float tabW = std::min(110.0f * GetLayout().scale, RowButtonWidth(3));
-        for (int i = 0; i < 3; ++i) {
+        const size_t missing = MissingAssetCount();
+        const std::string assets = missing ? "ASSETS (" + std::to_string(missing) + " MISSING)" : std::string("ASSETS");
+        const char* tabs[] = { "CONSOLE", "TELEMETRY", "TIMELINE", assets.c_str() };
+        const float tabW = std::min(110.0f * GetLayout().scale, RowButtonWidth(4));
+        for (int i = 0; i < 4; ++i) {
             if (i) ImGui::SameLine();
-            if (Retro::Button(tabs[i], tabW, g_dockTab == i ? 1 : 0)) g_dockTab = i;
+            if (Retro::Button(tabs[i], i == 3 && missing ? tabW * 1.6f : tabW, g_dockTab == i ? 1 : (i == 3 && missing ? 2 : 0))) g_dockTab = i;
         }
         ImGui::Separator();
         if (g_dockTab == 0) Console();
         else if (g_dockTab == 1) Telemetry(ctx);
-        else Timeline(ctx, scene);
+        else if (g_dockTab == 2) Timeline(ctx, scene);
+        else AssetBrowser(ctx, scene);
         Retro::EndPanel();
     }
 }

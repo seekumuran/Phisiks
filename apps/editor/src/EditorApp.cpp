@@ -14,7 +14,7 @@ namespace Editor {
             std::cerr << "Usage: " << program << " [--scene <name>] [--open <scene file>] [--fullscreen] [--run-dir <dir>] [--max-frames <n>]\n"
                       << "       [--deterministic] [--steps-per-frame <n>] [--headless | --hidden]\n"
                       << "       [--export-dir <dir> [--export-frames] [--export-data] [--export-vision] [--export-every <n>]]\n"
-                      << "       [--gl41] [--quality low|medium|high] [--no-ui] [--hot-reload [dir]] [--assets <dir>]" << (autotest ? " [--autotest]" : "") << "\n"
+                      << "       [--gl41] [--quality low|medium|high] [--no-ui] [--hot-reload [dir]] [--assets <dir>] [--project <dir>]" << (autotest ? " [--autotest]" : "") << "\n"
                       << "  --gl41       force the OpenGL 4.1 feature tier (CPU culling + CPU compute; the macOS path)\n"
                       << "  --quality    scalability preset (low = reduced internal resolution + FSR 1, for integrated GPUs)\n"
                       << "  --no-ui      no editor panels (the viewport only)\n";
@@ -44,6 +44,7 @@ namespace Editor {
             else if (arg == "--export-every" && hasValue) o.exportEvery = std::atoi(argv[++i]);
             else if (arg == "--gl41") o.maxGLVersion = 41;
             else if (arg == "--no-ui" || arg == "--no-studio") out.ui = false;
+            else if (arg == "--project" && hasValue) out.project = argv[++i];
             else if (arg == "--assets" && hasValue) {
                 const char* dir = argv[++i];
                 if (!AddAssetDirectory(dir)) { std::cerr << "Asset folder '" << dir << "' not found\n"; return 64; }
@@ -109,6 +110,10 @@ namespace Editor {
         o.pauseOnSceneLoad = o.enableUI;   // edit mode: nothing is simulated until Play (headless runs simulate at once)
         host.quality = launch.quality;
         host.openOnStart = launch.open;
+        if (!launch.project.empty()) {
+            std::string status;
+            if (!OpenProject(launch.project, &status)) { std::cerr << status << "\n"; return 64; }
+        }
         Phisiks::Application app;
         if (!app.Init(o, host, std::move(harness))) {
             app.Shutdown();

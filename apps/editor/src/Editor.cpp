@@ -61,7 +61,7 @@ namespace Editor {
         PendingSave g_save;
 
         // ---- file dialog
-        enum class DialogMode { None, Open, SaveAs };
+        enum class DialogMode { None, Open, SaveAs, Import };
         DialogMode g_dialog = DialogMode::None;
         bool g_dialogOpenRequest = false;
         fs::path g_dialogDir;
@@ -97,6 +97,7 @@ namespace Editor {
             g_dialogError.clear();
             std::error_code ec;
             fs::path start = g_path.empty() ? fs::path() : fs::path(g_path).parent_path();
+            if ((start.empty() || !fs::is_directory(start, ec)) && !ProjectDirectory().empty() && mode != DialogMode::Import) start = fs::path(ProjectDirectory()) / "scenes";
             if (start.empty() || !fs::is_directory(start, ec)) {
                 start = fs::current_path(ec) / "scenes";
                 if (!fs::is_directory(start, ec)) start = fs::current_path(ec);
@@ -247,7 +248,7 @@ namespace Editor {
         }
 
         void FileDialog(GameContext& ctx) {
-            const char* id = g_dialog == DialogMode::SaveAs ? "Save scene as" : "Open scene";
+            const char* id = g_dialog == DialogMode::SaveAs ? "Save scene as" : g_dialog == DialogMode::Import ? "Import asset" : "Open scene";
             if (g_dialogOpenRequest) { ImGui::OpenPopup(id); g_dialogOpenRequest = false; }
             const float s = g_layout.scale;
             ImGui::SetNextWindowSize(ImVec2(640.0f * s, 440.0f * s), ImGuiCond_Appearing);
@@ -272,7 +273,7 @@ namespace Editor {
                     const std::string name = it->path().filename().string();
                     if (name.empty() || name[0] == '.') continue;
                     if (it->is_directory(ec)) dirs.push_back(*it);
-                    else if (it->path().extension() == ".json") files.push_back(*it);
+                    else if (g_dialog == DialogMode::Import ? AssetTypeOf(name) != AssetType::Unknown : it->path().extension() == ".json") files.push_back(*it);
                 }
                 auto byName = [](const fs::directory_entry& a, const fs::directory_entry& b) { return a.path().filename() < b.path().filename(); };
                 std::sort(dirs.begin(), dirs.end(), byName);
@@ -293,13 +294,13 @@ namespace Editor {
                         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) accept = true;
                     }
                 }
-                if (dirs.empty() && files.empty()) ImGui::TextDisabled("(no folders or .json files here)");
+                if (dirs.empty() && files.empty()) ImGui::TextDisabled(g_dialog == DialogMode::Import ? "(no folders or supported asset files here)" : "(no folders or .json files here)");
             }
             ImGui::EndChild();
             ImGui::SetNextItemWidth(-1.0f);
             if (ImGui::InputText("##name", g_dialogName, sizeof(g_dialogName), ImGuiInputTextFlags_EnterReturnsTrue)) accept = true;
             if (!g_dialogError.empty()) ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.35f, 1.0f), "%s", g_dialogError.c_str());
-            if (Retro::Button(g_dialog == DialogMode::SaveAs ? "SAVE" : "OPEN", 110.0f * s)) accept = true;
+            if (Retro::Button(g_dialog == DialogMode::SaveAs ? "SAVE" : g_dialog == DialogMode::Import ? "IMPORT" : "OPEN", 110.0f * s)) accept = true;
             ImGui::SameLine();
             bool cancel = Retro::Button("CANCEL", 110.0f * s) || ImGui::IsKeyPressed(ImGuiKey_Escape);
             if (accept && g_dialogName[0]) {
@@ -318,6 +319,12 @@ namespace Editor {
                         ImGui::CloseCurrentPopup();
                         g_dialog = DialogMode::None;
                     }
+                }
+                else if (g_dialog == DialogMode::Import) {
+                    std::string status;
+                    const AssetImportResult r = ImportAsset(file.string(), Internal::BrowserFolder(), &status);
+                    if (r.ok) { g_status = status; ImGui::CloseCurrentPopup(); g_dialog = DialogMode::None; ShowOutputTab(OutputTab::Assets); }
+                    else g_dialogError = status;
                 }
                 else {
                     if (fs::is_regular_file(file, ec)) {
@@ -382,6 +389,8 @@ namespace Editor {
                 if (ImGui::MenuItem(editing ? "Save" : "Save (stop playing first)", "Ctrl+S", false, scene != nullptr && editing)) SaveCurrent(ctx);
                 if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S", false, scene != nullptr && editing)) OpenFileDialog(DialogMode::SaveAs);
                 if (ImGui::MenuItem("Reopen from disk", nullptr, false, scene && !g_path.empty())) Guard(ctx, Action::Open, g_path);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Import asset...", "Ctrl+I")) OpenFileDialog(DialogMode::Import);
                 ImGui::Separator();
                 if (ImGui::MenuItem("Quit", "Ctrl+Q")) Guard(ctx, Action::Quit);
                 ImGui::EndMenu();
@@ -505,6 +514,7 @@ namespace Editor {
             if (io.WantTextInput || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) return;
             if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) { if (io.KeyShift) OpenFileDialog(DialogMode::SaveAs); else if (scene) SaveCurrent(ctx); }
             if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false)) OpenFileDialog(DialogMode::Open);
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_I, false)) OpenFileDialog(DialogMode::Import);
             if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_N, false)) Guard(ctx, Action::New);
             if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Q, false)) Guard(ctx, Action::Quit);
             if (!scene) return;
@@ -521,6 +531,7 @@ namespace Editor {
     // ===================================================================== internal accessors
     namespace Internal {
         Layout& GetLayout() { return g_layout; }
+        void OpenImportDialog() { OpenFileDialog(DialogMode::Import); }
         WorkspaceExtension* Workspace(GameContext& ctx) { return dynamic_cast<WorkspaceExtension*>(ctx.CurrentScene()); }
         Entity Selected(Scene& scene) { return g_selected ? scene.FromId(g_selected - 1) : Entity(); }
         ImVec4 Amber() { return ImVec4(Retro::AMBER[0], Retro::AMBER[1], Retro::AMBER[2], 1.0f); }

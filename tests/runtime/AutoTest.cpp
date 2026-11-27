@@ -37,6 +37,7 @@
 #include "Phisiks/Framework/GameplayComponents.h"
 #include "Phisiks/Render/RenderStats.h"
 #include "Phisiks/Assets/Assets.h"
+#include "Phisiks/Assets/AssetDatabase.h"
 #include "Phisiks/Audio/Audio.h"
 
 #include <glm/geometric.hpp>
@@ -2876,6 +2877,102 @@ namespace Phisiks {
                     Expect("the pause key in edit mode starts play mode", Editor::CurrentMode() == Editor::Mode::Play, std::string(ToString(ctx.state)));
                     Editor::StopPlay(ctx);
                     Expect("...and Stop restores the document", document() == authored, "");
+                    return true;
+                }
+            }
+            return false;
+        } });
+
+        // Asset workflow in the editor (EditorAssets.cpp + AssetDatabase): project, import, assign,
+        // undo, save, "restart" (project and scene reopened), rename, missing file, rendering.
+        m_steps.push_back({ "Editor: asset pipeline (import, assign, persist, reopen)", [this](GameContext& ctx) {
+            namespace fs = std::filesystem;
+            static uint64_t meshAsset = 0, stlAsset = 0, texAsset = 0, gear = 0;
+            static std::string sceneFile, project;
+            Scene* scene = ctx.CurrentScene();
+            switch (m_phase) {
+                case 0: ctx.scenes->Request("Untitled"); m_phase = 1; return false;
+                case 1: {
+                    if (!scene || scene->Name() != "Untitled" || m_stepFrames < 3) return false;
+                    project = m_runDirectory + "/asset_project";
+                    std::error_code ec;
+                    fs::remove_all(project, ec);
+                    const fs::path incoming = fs::path(m_runDirectory) / "incoming";
+                    fs::create_directories(incoming, ec);
+                    { std::ofstream(incoming / "gear.obj") << "v -0.5 0 -0.5\nv 0.5 0 -0.5\nv 0.5 0 0.5\nv -0.5 0 0.5\nv 0 0.8 0\nf 1 2 5\nf 2 3 5\nf 3 4 5\nf 4 1 5\nf 1 4 3\nf 1 3 2\n"; }
+                    {
+                        std::vector<uint8_t> stl(84 + 50, 0);
+                        const uint32_t one = 1;
+                        std::memcpy(stl.data() + 80, &one, 4);
+                        const float tri[12] = { 0, 0, 1, 0, 0, 0, 100, 0, 0, 0, 100, 0 };   // millimetres
+                        std::memcpy(stl.data() + 84, tri, sizeof(tri));
+                        std::ofstream(incoming / "bracket.stl", std::ios::binary).write(reinterpret_cast<const char*>(stl.data()), std::streamsize(stl.size()));
+                    }
+                    Assets::Image img;
+                    img.width = img.height = 8;
+                    img.rgba.assign(8 * 8 * 4, 0);
+                    for (size_t i = 0; i < img.rgba.size(); i += 4) { img.rgba[i] = 200; img.rgba[i + 1] = 40; img.rgba[i + 2] = 40; img.rgba[i + 3] = 255; }
+                    Assets::WritePng((incoming / "red.png").string(), img);
+                    std::string status;
+                    Expect("open a project folder (assets/ + scenes/)", Editor::OpenProject(project, &status) && fs::is_directory(project + "/assets") && fs::exists(project + "/phisiks.project"), status);
+                    const AssetImportResult a = Editor::ImportAsset((incoming / "gear.obj").string(), "meshes", &status);
+                    const AssetImportResult b = Editor::ImportAsset((incoming / "bracket.stl").string(), "meshes", &status);
+                    const AssetImportResult c = Editor::ImportAsset((incoming / "red.png").string(), "textures", &status);
+                    const AssetImportResult dup = Editor::ImportAsset((incoming / "gear.obj").string(), "", &status);
+                    meshAsset = a.guid; stlAsset = b.guid; texAsset = c.guid;
+                    Expect("import OBJ, STL and PNG into the project; a duplicate import returns the existing asset",
+                           a.ok && b.ok && c.ok && dup.ok && dup.duplicate && dup.guid == a.guid && Editor::ProjectAssets().List().size() == 3, status);
+                    Entity e = Editor::InstantiateAsset(ctx, meshAsset, &status);
+                    Entity s = Editor::InstantiateAsset(ctx, stlAsset, &status);
+                    gear = e.GetGuid();
+                    Expect("add to scene: entities with asset references (STL scaled from millimetres)",
+                           e && Assets::IsReference(e.Get<MeshRenderer>().mesh) && s && std::fabs(s.LocalTransform().scale.x - 0.001f) < 1e-7f, e ? e.Get<MeshRenderer>().mesh : std::string());
+                    const size_t steps = Editor::History().undoCount;
+                    Expect("assign a texture to the selected entity (one undo step)", Editor::AssignAsset(ctx, e, texAsset, &status) && Editor::History().undoCount == steps + 1
+                           && Render::FindMaterial(e.Get<MeshRenderer>().material) && Assets::IsReference(Render::FindMaterial(e.Get<MeshRenderer>().material)->albedoTexture), status);
+                    Editor::Undo(ctx);
+                    Expect("undo the assignment", scene->FindByGuid(gear).Get<MeshRenderer>().material.empty(), scene->FindByGuid(gear).Get<MeshRenderer>().material);
+                    Editor::Redo(ctx);
+                    Editor::ShowOutputTab(Editor::OutputTab::Assets);   // the browser draws over the next frames
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 2;
+                    return false;
+                }
+                case 2: {
+                    if (m_stepFrames - m_scratch[0] < 30) return false;
+                    Entity e = scene->FindByGuid(gear);
+                    Expect("the referenced mesh and texture load in the renderer", e && Render::HasMesh(e.Get<MeshRenderer>().mesh) && GetRenderStats().texturesResident >= 1,
+                           e ? e.Get<MeshRenderer>().mesh : std::string());
+                    std::string status, error;
+                    // rename the mesh file: the reference keeps working
+                    const bool moved = Editor::ProjectAssets().Move(meshAsset, "meshes/renamed/gear_v2.obj", &error);
+                    sceneFile = project + "/scenes/assets.scene.json";
+                    const bool saved = Editor::SaveScene(ctx, sceneFile, &status);
+                    // "restart": reopen the project (a new database instance reads the .meta files) and the scene
+                    Editor::OpenProject(project, &status);
+                    const bool loaded = Editor::LoadScene(ctx, sceneFile, &status);
+                    e = ctx.CurrentScene()->FindByGuid(gear);
+                    const std::vector<AssetReference> refs = AssetDatabase::CollectReferences(*ctx.CurrentScene());
+                    size_t resolved = 0;
+                    for (const AssetReference& r : refs) resolved += r.resolved;
+                    Expect("after a rename, save and restart, every asset reference resolves",
+                           moved && saved && loaded && e && refs.size() == 3 && resolved == 3 && Assets::Resolve(e.Get<MeshRenderer>().mesh).find("gear_v2.obj") != std::string::npos,
+                           F("%.0f of ", double(resolved)) + F("%.0f references; ", double(refs.size())) + error + status);
+                    // a deleted file: reported missing (scene and database), nothing crashes
+                    std::error_code ec;
+                    fs::remove(fs::path(Editor::ProjectAssets().AbsolutePath(stlAsset)), ec);
+                    Editor::ProjectAssets().Refresh();
+                    AssetInfo info;
+                    size_t missing = 0;
+                    for (const AssetReference& r : AssetDatabase::CollectReferences(*ctx.CurrentScene())) missing += !r.resolved;
+                    Expect("a deleted asset file is reported missing", Editor::ProjectAssets().Find(stlAsset, info) && info.missing && missing == 1, "");
+                    m_scratch[0] = float(m_stepFrames);
+                    m_phase = 3;
+                    return false;
+                }
+                case 3: {
+                    if (m_stepFrames - m_scratch[0] < 10) return false;
+                    Editor::ShowOutputTab(Editor::OutputTab::Console);
                     return true;
                 }
             }

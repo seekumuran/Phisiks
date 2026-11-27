@@ -24,6 +24,7 @@ namespace Editor {
         bool ui = true;                // --no-ui
         bool autotest = false;         // --autotest (only executables with a test harness accept it)
         std::string open;              // --open <scene file>
+        std::string project;           // --project <folder> (assets/ + scenes/)
     };
 
     // Options: --scene <name> --open <file> --fullscreen --run-dir <dir> --max-frames <n> --deterministic

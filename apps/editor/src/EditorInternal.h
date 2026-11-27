@@ -52,6 +52,12 @@ namespace Editor::Internal {
     int& GizmoOperation();              // ImGuizmo::OPERATION
     int& GizmoMode();                   // ImGuizmo::MODE
 
+    // ---- asset browser (EditorAssets.cpp)
+    void AssetBrowser(Phisiks::GameContext& ctx, Phisiks::Scene* scene);
+    size_t MissingAssetCount();
+    void OpenImportDialog();            // File > Import asset... (Editor.cpp file dialog)
+    const std::string& BrowserFolder();
+
     // ---- history + play mode (EditorHistory.cpp)
     bool IsEditorEntity(const Phisiks::Entity& e);   // the 4-way view cameras (not part of the document)
     void HistoryNoteEdit();

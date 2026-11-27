@@ -321,7 +321,7 @@ namespace Editor {
         }
 
         void HistoryEndFrame(GameContext& ctx) {
-            if (g.mode == Mode::Play && ImGui::GetCurrentContext()) {   // mode indication: amber frame + note on the viewport
+            if (g.mode == Mode::Play && ImGui::GetCurrentContext() && UI::PanelsVisible()) {   // mode indication (not in the Tab presentation view)
                 const glm::vec4 v = ViewportRect();
                 const float s = GetLayout().scale;
                 ImDrawList* dl = ImGui::GetForegroundDrawList();
