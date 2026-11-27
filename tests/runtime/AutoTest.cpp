@@ -1464,6 +1464,7 @@ namespace Phisiks {
                     Expect("replay recorded every fixed step", replay.Enabled() && replay.Size() >= 150, F("%.0f snapshots", double(replay.Size())));
                     if (replay.Size() < 61) return true;
                     m_scratch[2] = float(replay.Size() - 60);
+                    m_scratch[4] = float(replay.At(replay.Size() - 1).step);   // newest step before scrubbing back
                     ctx.state = GameState::Paused;
                     ctx.replay.Restore(*ctx.CurrentScene(), size_t(m_scratch[2]));
                     m_scratch[3] = float(m_stepFrames);
@@ -1485,13 +1486,24 @@ namespace Phisiks {
                            F("snapshot %.0f (step %.0f): max deviation %.2e m", m_scratch[2], double(snap.step), worst));
                     ctx.state = GameState::Running;   // resume from the scrubbed step
                     m_scratch[3] = float(m_stepFrames);
+                    m_scratch[5] = float(ctx.stats.totalFixedSteps);
                     m_phase = 4;
                     return false;
                 }
                 case 4: {
                     if (m_stepFrames - m_scratch[3] < 10) return false;
-                    Expect("resuming discards the newer timeline", ctx.replay.Size() < size_t(m_scratch[2]) + 1 + 40 && !ctx.replay.Scrubbed(),
-                           F("%.0f snapshots after resuming from %.0f", double(ctx.replay.Size()), m_scratch[2]));
+                    {
+                        // Counted in fixed steps, not frames: a slow renderer (llvmpipe) runs several steps per frame.
+                        // Kept timeline: the snapshot after the restored one would be the old next step; discarded: it is
+                        // a step recorded after resuming, newer than everything that was dropped.
+                        const size_t base = size_t(m_scratch[2]);
+                        const double stepsSince = double(ctx.stats.totalFixedSteps) - double(m_scratch[5]);
+                        const double expected = double(base) + 1.0 + stepsSince;
+                        const bool fresh = ctx.replay.Size() > base + 1 && double(ctx.replay.At(base + 1).step) > double(m_scratch[4]);
+                        Expect("resuming discards the newer timeline", fresh && std::abs(double(ctx.replay.Size()) - expected) <= 1.0 && !ctx.replay.Scrubbed(),
+                               F("%.0f snapshots after resuming from %.0f", double(ctx.replay.Size()), double(base)) + F(" (%.0f steps since; ", stepsSince) +
+                               (fresh ? std::string("next snapshot is new)") : std::string("next snapshot is from the old timeline)")));
+                    }
                     // JSON round trip of the live scene
                     Scene& scene = *ctx.CurrentScene();
                     const std::string before = SceneSerializer::ToJson(scene);
@@ -2181,8 +2193,22 @@ namespace Phisiks {
                                                        F("%.0f bed parts", partsInView("2 Growing Beds")));
                     if (preset == OMD::TopPlan) {
                         const Entity cam = Find(ctx, "MainCamera");
-                        Expect("top plan: orthographic, all 16 sampling points visible", cam && cam.Get<Camera>().projection == Projection::Orthographic && partsInView("5 Sampling Grid") >= 32,
-                               F("%.0f sampling-grid parts in view (disc + stake per point)", partsInView("5 Sampling Grid")));
+                        // The disc marks each point; the 8 mm stake can fall below a pixel at low render resolutions.
+                        int discs = 0;
+                        {
+                            std::vector<uint32_t> ids(m_capture.entityIds);
+                            std::sort(ids.begin(), ids.end());
+                            ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+                            const Entity grid = Find(ctx, "5 Sampling Grid");
+                            for (uint32_t id : ids) {
+                                if (!id || !grid) continue;
+                                const Entity e = ctx.CurrentScene()->FromId(id - 1);
+                                const std::string& n = e.GetName();
+                                if (e.IsDescendantOf(grid) && n.size() > 5 && n.compare(n.size() - 5, 5, " disc") == 0) ++discs;
+                            }
+                        }
+                        Expect("top plan: orthographic, all 16 sampling points visible", cam && cam.Get<Camera>().projection == Projection::Orthographic && discs == 16,
+                               F("%.0f of 16 sampling discs in view", discs) + F(" (%.0f grid parts incl. stakes)", partsInView("5 Sampling Grid")));
                     }
                     if (preset == OMD::DroneExploded) {
                         Entity fc = Find(ctx, "Flight controller - Pixhawk 2.4.8"), bat = Find(ctx, "Battery - LiPo");
