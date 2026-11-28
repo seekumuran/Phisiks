@@ -1,0 +1,72 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "vs2026-x64",
+      "displayName": "Windows: Visual Studio 2026 (v145) x64, PhysX + WASAPI",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/Build/vs2026",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "windows-portable",
+      "displayName": "Windows: portable backends (native physics + miniaudio), as on Linux/macOS",
+      "inherits": "vs2026-x64",
+      "binaryDir": "${sourceDir}/Build/portable",
+      "cacheVariables": {
+        "PHISIKS_PHYSICS_BACKEND": "Native",
+        "PHISIKS_AUDIO_BACKEND": "miniaudio",
+        "PHISIKS_OUTPUT_DIR": "${sourceDir}/Build/bin-portable"
+      }
+    },
+    {
+      "name": "unix-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/Build/${presetName}",
+      "cacheVariables": {
+        "PHISIKS_PHYSICS_BACKEND": "Native",
+        "PHISIKS_AUDIO_BACKEND": "miniaudio",
+        "PHISIKS_OUTPUT_DIR": "${sourceDir}/Build/bin-${presetName}"
+      }
+    },
+    {
+      "name": "linux-release", "displayName": "Linux Release (Ninja, native physics, miniaudio)", "inherits": "unix-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "linux-debug", "displayName": "Linux Debug", "inherits": "unix-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "macos-release", "displayName": "macOS Release (Ninja, OpenGL 4.1 tier, native physics, miniaudio)", "inherits": "unix-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    },
+    {
+      "name": "macos-debug", "displayName": "macOS Debug", "inherits": "unix-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release",          "configurePreset": "vs2026-x64", "configuration": "Release" },
+    { "name": "relwithdebinfo",   "configurePreset": "vs2026-x64", "configuration": "RelWithDebInfo" },
+    { "name": "debug",            "configurePreset": "vs2026-x64", "configuration": "Debug" },
+    { "name": "portable-release", "configurePreset": "windows-portable", "configuration": "Release" },
+    { "name": "linux-release",    "configurePreset": "linux-release" },
+    { "name": "linux-debug",      "configurePreset": "linux-debug" },
+    { "name": "macos-release",    "configurePreset": "macos-release" },
+    { "name": "macos-debug",      "configurePreset": "macos-debug" }
+  ],
+  "testPresets": [
+    { "name": "release",          "configurePreset": "vs2026-x64", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "portable-release", "configurePreset": "windows-portable", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "linux-release",    "configurePreset": "linux-release", "output": { "outputOnFailure": true } },
+    { "name": "macos-release",    "configurePreset": "macos-release", "output": { "outputOnFailure": true } }
+  ]
+}

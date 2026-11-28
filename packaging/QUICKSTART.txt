@@ -1,0 +1,119 @@
+PHISIKS 1.1 - QUICK START
+=========================
+
+PHISIKS is a resource-aware 3D engineering visualisation and simulation engine (C++20, OpenGL)
+with an integrated editor, parametric CAD modelling and a local agent interface. Extract the archive anywhere and run the programs in this folder: no
+installer, no build tools. The programs find assets/ and shaders/ next to
+themselves, so they work from any working directory.
+
+  Phisiks                 the PHISIKS editor (starts with an empty scene)
+  PhisiksSamples          the engine sample scenes inside the editor, with a sample browser
+  Showcase01_RoboticArm   6-DOF industrial arm: FK / IK, pick-and-place, joint + Cartesian jog
+  Showcase02_PoolFluid    tiled pool with a buoyant ball, refraction, Fresnel, caustics
+  Showcase03_BlackHole    ray-traced Schwarzschild black hole with a particle accretion disk
+  Showcase04_TurbineCad   turbine assembly with exploded view and see-through casing
+  glprobe                 checks whether your GPU / driver can run PHISIKS
+
+(Windows: the files end in .exe. Linux / macOS: run them as ./Phisiks etc.)
+Every program accepts --help.
+
+REQUIREMENTS
+  - A GPU with OpenGL 4.6 (full feature tier) or OpenGL 4.1 (start with --gl41; macOS always uses
+    4.1). Run glprobe if a program does not start.
+  - Windows 10 / 11 x64. Everything needed (including the Visual C++ runtime) is in this folder.
+  - Linux x64: OpenGL drivers (Mesa or vendor), X11, ALSA / PulseAudio / PipeWire.
+  - macOS (experimental, see KNOWN_ISSUES.md): the programs are not signed. After extracting, run
+    once in Terminal:   xattr -dr com.apple.quarantine <this folder>
+
+THE EDITOR
+  Menu bar      File (New / Open / Save / Save as / Reopen / Import asset / Quit), Edit (Undo / Redo,
+                Delete, Deselect, Frame), Create (empty, cube, sphere, plane, rigid cube, lights,
+                CAD part), View, Simulation, Help
+  Tool bar      MOVE / ROTATE / SCALE gizmo, WORLD / LOCAL, play / pause / step / stop, 4-WAY,
+                FRAME; status: scene name (* = unsaved), state, camera mode, FPS
+  SCENE         the hierarchy: click to select, drag onto another entity to parent (onto the
+                empty area to unparent), right-click for Create child / Unparent / Frame / Delete,
+                search box filters by name
+  INSPECTOR     name, transform (position / rotation / scale), mesh (pick from the asset folders)
+                and material, light, collider, rigidbody and the other components; add component
+  SETTINGS      physics (gravity, substeps, friction) and rendering (quality preset, upscaler,
+                exposure, bloom, SSAO, culling, shadows, fog, shader watching)
+  OUTPUT        CONSOLE (log, filter by level / text), TELEMETRY (frame time, GPU, physics, RAM),
+                TIMELINE (replay ring: step back / rewind / step forward / record / clear / scrub),
+                ASSETS (project folders, search, import, missing assets)
+  Drag the thin bars between panels to resize them. Tab hides every panel.
+  Every edit can be undone (Ctrl+Z / Ctrl+Y). Play captures the scene and Stop restores it.
+  Quitting, opening and New ask before discarding unsaved edits.
+  Projects: --project <folder> (assets/ + scenes/) or the ASSETS tab; assets keep stable ids.
+
+CAD (docs/CAD.md in the source repository)
+  Create > CAD part makes a parametric part. Select it: the inspector shows parameters, the
+  feature history (sketch, extrude, revolve, fillet, chamfer, booleans, patterns, mirror, import)
+  and inspection; EDIT SKETCH draws and constrains in the viewport. STEP / IGES files in the
+  project's assets become exact parts; parts export STEP / IGES / STL / BREP into assets/exports.
+
+AGENT INTERFACE (docs/PAI.md)
+  Phisiks --pai [--pai-write] [--pai-simulate]: JSON-RPC 2.0 on stdin / stdout for a program you
+  start (an agent tool, a script). Off unless you pass --pai; no network listener.
+  BUILD_INFO.txt records the commit and the CI run this package was built by.
+
+CONTROLS
+  RMB drag / MMB drag / wheel   orbit / pan / zoom (orbit camera)
+  LMB                           select in the viewport; drag a gizmo handle to transform
+  F                             frame the selection (or the whole scene)
+  F3                            4-way view (perspective + orthographic top / front / side)
+  F4                            orbit camera <-> first person;  V cycles first / third person / fly
+  WASD / arrows, Mouse          move / look in first person, third person and free fly
+  Delete                        delete the selection (asks first)
+  Ctrl+N / Ctrl+O / Ctrl+S      new / open / save;  Ctrl+Shift+S save as;  Ctrl+Q quit
+  Ctrl+Z / Ctrl+Y               undo / redo (Ctrl+Shift+Z also redoes)
+  Esc                           pause / resume the simulation (Q while paused quits)
+  Tab                           hide / show the panels
+  F1 / F2                       telemetry overlay / physics debug draw
+  Keyboard and mouse go to the 3D view only while the pointer is not over a panel and no text
+  field is active.
+
+SAMPLES (PhisiksSamples)
+  The SAMPLES panel lists the sample scenes (hover a row for a description): transforms and rotors,
+  RK4 vs Euler orbits, friction and raycasts, rigid-body stacking, PBR lighting, GPU culling +
+  particles + XPBD + SDF, emitters and two-way coupling, glTF skinning + camera paths, bloom / SSAO /
+  trails / decals, terrain + foliage + navigation, joints + Lua scripting. The Samples menu too.
+  In the Sandbox sample (first person): E interact, LMB push / damage, Space jump.
+
+SHOWCASES (Showcase01..04)
+  1 2 3 4 5    cinematic camera shots;  0 back to the free camera
+  M            cycle view mode: FINAL RENDER -> WIREFRAME -> SDF + FIELDS -> RAW PARTICLES -> CAD 4-WAY
+  F3           CAD 4-way blueprint view
+  01 RoboticArm   Program (RUN PROGRAM, HOME, gripper), Joint Jog J1..J6, Cartesian Jog X/Y/Z (IK),
+                  Timeline Replay (60 s joint-space recording), Display (frames, trail, CAD ink)
+  02 PoolFluid    left-click the water for a ripple; shader-pass breakdown; caustics / refraction;
+                  DROP BALL, RAIN, CALM
+  03 BlackHole    mass, inclination, Doppler, beaming, disk glow, time scale; integrator split test
+                  (Euler / Verlet / RK4); star and photon-ring brightness
+  04 TurbineCad   explode slider (AUTO, ASSEMBLE, EXPLODE ALL), casing opacity / wire, CAD ink,
+                  rotor RPM, bill of materials
+
+USEFUL OPTIONS (editor-based programs)
+  --open <scene.json>         open a scene file at start
+  --scene <name>              start in a scene (PhisiksSamples: Sandbox, PhysicsTower, FieldLab,
+                              Rotors, Orbits, PBR, Fountain, Animation, VFX, Terrain, Joints)
+  --assets <dir>              an extra asset folder
+  --project <dir>             open a project folder (assets/ + scenes/)
+  --quality low|medium|high   scalability preset (low = reduced internal resolution + FSR 1)
+  --gl41                      force the OpenGL 4.1 tier
+  --fullscreen                fullscreen window
+  --hot-reload [dir]          live-edit GLSL in shaders/ while the program runs
+  --run-dir <dir>             where logs and crash dumps go (default Build/runs/latest under the
+                              working directory, or the per-user folder if that is not writable)
+  Showcases: --width W --height H, --autotest [--quick] (built-in verification; exit code = failed
+  checks), --quality, --gl41, --hot-reload.
+  Environment: PHISIKS_UI_SCALE=1.25 sets the editor UI scale (default: the monitor's DPI scale).
+
+FOLDER CONTENTS
+  assets/                meshes, textures, models, audio, post-pass shaders, Lua scripts (CC0)
+  shaders/               the engine GLSL sources (embedded in the programs; used by --hot-reload)
+  THIRD_PARTY_LICENSES/  licence texts of the third-party libraries in the programs (Open CASCADE
+                         in OpenCASCADE/)
+  PhisiksCad, TK*        the CAD library and the Open CASCADE libraries (LGPL-2.1 + exception,
+                         replaceable; see THIRD_PARTY_NOTICES.md)
+  LICENSE, THIRD_PARTY_NOTICES.md, README.md, KNOWN_ISSUES.md, QUICKSTART.txt

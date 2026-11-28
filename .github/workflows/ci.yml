@@ -1,0 +1,161 @@
+# Build check on Windows (MSVC), Linux (GCC) and macOS (Apple Clang). All three build the portable
+# configuration: native physics + miniaudio + GLFW (system / bundled), with the portable third-party
+# sources fetched by tools/fetch_deps.py. The Windows PhysX build needs the vendored SDK binaries
+# and is checked locally (BUILD_WINDOWS.md).
+#
+# Runners have no GPU. The build jobs run the headless ctest (unit tests, layering, deterministic
+# replay; PHISIKS_TEST_SKIP_RENDER=ON skips the tests that need an OpenGL window). The rendered
+# runtime tests run in their own jobs on software OpenGL (Linux: Mesa llvmpipe under Xvfb; macOS:
+# the runner's OpenGL 4.1): those jobs are not required for the build to pass, but their failures
+# are shown as failed jobs, not hidden.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Third-party sources
+        run: python tools/fetch_deps.py
+      - name: Open CASCADE (cache)
+        id: occt
+        uses: actions/cache@v4
+        with:
+          path: vendor/occt
+          key: occt-7.9.3-windows-vs2022-${{ hashFiles('tools/build_occt.py') }}
+      - name: Open CASCADE (build the CAD kernel subset once; cached)
+        if: steps.occt.outputs.cache-hit != 'true'
+        run: python tools/build_occt.py --generator "Visual Studio 17 2022"
+      - name: Configure (portable backends, GLFW via FetchContent, Open CASCADE)
+        run: cmake -S . -B Build/ci -G "Visual Studio 17 2022" -A x64 -DPHISIKS_PHYSICS_BACKEND=Native -DPHISIKS_AUDIO_BACKEND=miniaudio -DPHISIKS_CAD_KERNEL=OCCT -DPHISIKS_TEST_SKIP_RENDER=ON
+      - name: Build
+        shell: bash
+        run: bash tools/ci_build.sh cmake --build Build/ci --config Release --parallel
+      - name: Tests (unit, layering, deterministic replay)
+        run: ctest --test-dir Build/ci -C Release --output-on-failure
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libglfw3-dev libgl1-mesa-dev libasound2-dev
+          gcc --version
+          cmake --version
+      - name: Third-party sources
+        run: python3 tools/fetch_deps.py
+      - name: Open CASCADE (cache)
+        id: occt
+        uses: actions/cache@v4
+        with:
+          path: vendor/occt
+          key: occt-7.9.3-ubuntu-24.04-gcc-${{ hashFiles('tools/build_occt.py') }}
+      - name: Open CASCADE (build the CAD kernel subset once; cached)
+        if: steps.occt.outputs.cache-hit != 'true'
+        run: python3 tools/build_occt.py --generator "Ninja"
+      - name: Configure
+        run: cmake --preset linux-release -DPHISIKS_CAD_KERNEL=OCCT -DPHISIKS_TEST_SKIP_RENDER=ON
+      - name: Build
+        run: bash tools/ci_build.sh cmake --build --preset linux-release --parallel
+      - name: Tests (unit, layering, deterministic replay)
+        run: ctest --preset linux-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-bin
+          path: Build/bin-linux-release
+          retention-days: 3
+
+  linux-runtime:
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages (Mesa llvmpipe, Xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglfw3 libgl1 libgl1-mesa-dri libasound2t64 xvfb mesa-utils gdb
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-bin
+          path: Build/bin-linux-release
+      - name: OpenGL on the runner
+        run: xvfb-run -a -s "-screen 0 1280x800x24" glxinfo -B | grep -E "OpenGL (renderer|core profile version)" | sed 's/^ */::notice title=glxinfo::/' || true
+      - name: Runtime tests, OpenGL 4.1 tier on llvmpipe
+        run: |
+          chmod +x Build/bin-linux-release/Release/*
+          CI_XVFB=1 CI_GDB=1 bash tools/ci_report.sh Build/runs/ci-linux ./Build/bin-linux-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-linux
+      - name: PAI protocol and permission checks (editor over stdio, llvmpipe)
+        run: xvfb-run -a -s "-screen 0 1280x800x24" python3 examples/pai_client/pai_client.py --check --gl41 --exe ./Build/bin-linux-release/Release/Phisiks
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-runtime-report
+          path: |
+            Build/runs/ci-linux/autotest_report.txt
+            Build/runs/ci-linux/engine.log
+          if-no-files-found: ignore
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          brew install ninja || true
+          clang++ --version
+          cmake --version
+          sw_vers
+      - name: Third-party sources
+        run: python3 tools/fetch_deps.py
+      - name: Open CASCADE (cache)
+        id: occt
+        uses: actions/cache@v4
+        with:
+          path: vendor/occt
+          key: occt-7.9.3-macos-15-${{ hashFiles('tools/build_occt.py') }}
+      - name: Open CASCADE (build the CAD kernel subset once; cached)
+        if: steps.occt.outputs.cache-hit != 'true'
+        run: python3 tools/build_occt.py --generator "Ninja"
+      - name: Configure
+        run: cmake --preset macos-release -DPHISIKS_BUNDLED_GLFW=ON -DPHISIKS_CAD_KERNEL=OCCT -DPHISIKS_TEST_SKIP_RENDER=ON
+      - name: Build
+        run: bash tools/ci_build.sh cmake --build --preset macos-release --parallel
+      - name: Tests (unit, layering, deterministic replay)
+        run: ctest --preset macos-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bin
+          path: Build/bin-macos-release
+          retention-days: 3
+
+  macos-runtime:
+    needs: macos
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-bin
+          path: Build/bin-macos-release
+      - name: Runtime tests, OpenGL 4.1 (the macOS tier)
+        run: |
+          chmod +x Build/bin-macos-release/Release/*
+          system_profiler SPDisplaysDataType | grep -E "Chipset|Metal|Vendor" | sed 's/^ */::notice title=Display::/' || true
+          CI_NO_GL_OK=1 bash tools/ci_report.sh Build/runs/ci-macos ./Build/bin-macos-release/Release/PhisiksRuntimeTests --autotest --gl41 --hidden --run-dir Build/runs/ci-macos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-runtime-report
+          path: |
+            Build/runs/ci-macos/autotest_report.txt
+            Build/runs/ci-macos/engine.log
+          if-no-files-found: ignore

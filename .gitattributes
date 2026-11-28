@@ -1,0 +1,11 @@
+# Normalise text files to LF in the repository (Windows checkouts may still use CRLF locally).
+* text=auto
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wav binary
+*.glb binary
+*.dll binary
+*.exe binary
+*.zip binary

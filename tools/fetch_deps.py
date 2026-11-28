@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Downloads the portable third-party dependencies into vendor/ (pinned versions).
+
+    python tools/fetch_deps.py            # everything that is missing
+    python tools/fetch_deps.py --force    # re-download
+
+Fetched: glm, EnTT, stb_image(_write), glad (generated with glad2: GL 4.6 core loader),
+Dear ImGui (+ GLFW / OpenGL3 backends), ImGuizmo (+ a compatibility patch for this ImGui
+version), miniaudio, nlohmann/json, Lua 5.4 (sources from lua.org). Not fetched: the Windows prebuilt GLFW and PhysX binaries
+(see docs/BUILD.md); Linux/macOS use a system GLFW (or CMake fetches it) and the native physics
+backend. Licences: THIRD_PARTY_NOTICES.md.
+"""
+import io
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import urllib.request
+import zipfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VENDOR = os.environ.get("PHISIKS_VENDOR_DIR") or os.path.join(ROOT, "vendor")
+FORCE = "--force" in sys.argv
+
+GLM = "1.0.1"
+ENTT = "v3.11.1"
+STB = "6b5799bae8a1fe3792691ef4b72ae26434c3e799"          # stb master (stb_image 2.34)
+IMGUI = "v1.93.0"
+IMGUIZMO = "105e4fde45e4e74aae8973d98750820ef7aca7e2"
+MINIAUDIO = "0.11.21"
+JSON = "v3.11.3"
+GLAD = "2.0.8"
+LUA = "5.4.7"
+LUA_SHA256 = "9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30"
+GLAD_EXTENSIONS = "GL_ARB_bindless_texture,GL_ATI_meminfo,GL_EXT_debug_label,GL_EXT_texture_compression_s3tc,GL_KHR_texture_compression_astc_ldr,GL_NVX_gpu_memory_info"
+
+
+def fetch(url):
+    print("  " + url)
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+
+def write(rel, data):
+    path = os.path.join(VENDOR, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def need(rel):
+    return FORCE or not os.path.exists(os.path.join(VENDOR, rel))
+
+
+def extract(zip_bytes, prefix_in_zip, dest_rel):
+    """Extracts the zip entries below `prefix_in_zip` (after the top-level folder) to vendor/dest_rel."""
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        for name in z.namelist():
+            parts = name.split("/", 1)
+            if len(parts) < 2 or not parts[1].startswith(prefix_in_zip) or name.endswith("/"):
+                continue
+            rel = parts[1][len(prefix_in_zip):]
+            write(os.path.join(dest_rel, rel), z.read(name))
+
+
+def raw(repo, ref, path):
+    return fetch("https://raw.githubusercontent.com/%s/%s/%s" % (repo, ref, path))
+
+
+def main():
+    os.makedirs(VENDOR, exist_ok=True)
+    if need("glm/glm/glm.hpp"):
+        print("glm " + GLM)
+        extract(fetch("https://github.com/g-truc/glm/archive/refs/tags/%s.zip" % GLM), "glm/", "glm/glm")
+    if need("entt/entt.hpp"):
+        print("EnTT " + ENTT)
+        extract(fetch("https://github.com/skypjack/entt/archive/refs/tags/%s.zip" % ENTT), "src/entt/", "entt")
+    if need("stb_image/stb_image.h"):
+        print("stb " + STB[:10])
+        for f in ("stb_image.h", "stb_image_write.h"):
+            write("stb_image/" + f, raw("nothings/stb", STB, f))
+    if need("imgui/imgui.h"):
+        print("Dear ImGui " + IMGUI)
+        for f in ("imgui.cpp", "imgui.h", "imgui_internal.h", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
+                  "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h", "imstb_truetype.h", "LICENSE.txt",
+                  "backends/imgui_impl_glfw.cpp", "backends/imgui_impl_glfw.h", "backends/imgui_impl_opengl3.cpp",
+                  "backends/imgui_impl_opengl3.h", "backends/imgui_impl_opengl3_loader.h"):
+            write("imgui/" + f, raw("ocornut/imgui", IMGUI, f))
+    if need("imguizmo/ImGuizmo.h"):
+        print("ImGuizmo " + IMGUIZMO[:10])
+        for f in ("src/ImGuizmo.cpp", "src/ImGuizmo.h", "LICENSE"):
+            write("imguizmo/" + f.split("/")[-1], raw("CedricGuillemet/ImGuizmo", IMGUIZMO, f))
+    patch_imguizmo()
+    if need("miniaudio/miniaudio.h"):
+        print("miniaudio " + MINIAUDIO)
+        for f in ("miniaudio.h", "LICENSE"):
+            write("miniaudio/" + f, raw("mackron/miniaudio", MINIAUDIO, f))
+    if need("nlohmann/json.hpp"):
+        print("nlohmann/json " + JSON)
+        write("nlohmann/json.hpp", raw("nlohmann/json", JSON, "single_include/nlohmann/json.hpp"))
+        write("nlohmann/LICENSE.MIT", raw("nlohmann/json", JSON, "LICENSE.MIT"))
+    if need("lua/src/lua.h"):
+        print("Lua " + LUA)
+        data = fetch("https://www.lua.org/ftp/lua-%s.tar.gz" % LUA)
+        import hashlib
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != LUA_SHA256:
+            sys.exit("Lua archive checksum mismatch: %s" % digest)
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as t:
+            for member in t.getmembers():
+                parts = member.name.split("/", 1)
+                if len(parts) < 2 or not member.isfile():
+                    continue
+                if parts[1].startswith("src/") or parts[1] in ("README", "doc/readme.html"):
+                    f = t.extractfile(member)
+                    write("lua/" + parts[1], f.read())
+    if need("glad/src/gl.c"):
+        print("glad " + GLAD + " (pip install glad2==%s)" % GLAD)
+        python = glad_python()
+        out = os.path.join(VENDOR, "glad")
+        shutil.rmtree(out, ignore_errors=True)
+        subprocess.check_call([python, "-m", "glad", "--api", "gl:core=4.6", "--extensions", GLAD_EXTENSIONS,
+                               "--out-path", out, "c", "--loader", "--debug"])
+    licenses()
+    print("vendor/ ready")
+
+
+GLFW = "3.4"            # FetchContent / bundled builds (CMakeLists.txt); the vendored Windows binaries are GLFW 3.3.0 (same zlib licence)
+PHYSX = "105.1-physx-5.3.1"   # NVIDIA-Omniverse/PhysX tag of the vendored PhysX 5.3.1 binaries (Windows)
+
+
+def licenses():
+    """vendor/licenses/<library>.txt: the licence text of every third-party library at its pinned
+    version. CMake installs the folder as THIRD_PARTY_LICENSES/ in release packages (MIT, BSD-3 and
+    zlib require the notice to accompany binary copies)."""
+    def lic(name, data):
+        rel = "licenses/" + name + ".txt"
+        if need(rel):
+            write(rel, data)
+
+    def from_file(name, rel):
+        path = os.path.join(VENDOR, rel)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                lic(name, f.read())
+
+    if need("licenses/glm.txt"):
+        print("licences")
+    lic_sources = [
+        ("glm", lambda: raw("g-truc/glm", GLM, "copying.txt")),
+        ("entt", lambda: raw("skypjack/entt", ENTT, "LICENSE")),
+        ("stb", lambda: raw("nothings/stb", STB, "LICENSE")),
+        ("glfw", lambda: raw("glfw/glfw", GLFW, "LICENSE.md")),
+        ("physx", lambda: raw("NVIDIA-Omniverse/PhysX", PHYSX, "LICENSE.md")),
+        ("nlohmann-json", lambda: raw("nlohmann/json", JSON, "LICENSE.MIT")),
+    ]
+    for name, get in lic_sources:
+        if need("licenses/%s.txt" % name):
+            try:
+                lic(name, get())
+            except Exception as e:   # keep going: the build does not depend on licence files
+                print("  warning: %s licence not fetched (%s)" % (name, e))
+    from_file("dear-imgui", "imgui/LICENSE.txt")
+    from_file("imguizmo", "imguizmo/LICENSE")
+    from_file("miniaudio", "miniaudio/LICENSE")
+    from_file("nlohmann-json", "nlohmann/LICENSE.MIT")
+    # Lua: the notice at the end of lua.h. glad: the SPDX header of the generated loader.
+    lua_h = os.path.join(VENDOR, "lua", "src", "lua.h")
+    if os.path.exists(lua_h) and need("licenses/lua.txt"):
+        with open(lua_h, encoding="latin-1") as f:
+            text = f.read()
+        start = text.rfind("* Copyright (C)")
+        start = text.rfind("/*", 0, start) if start >= 0 else -1
+        lic("lua", (text[start:] if start >= 0 else text[-1200:]).encode("utf-8"))
+    gl_h = os.path.join(VENDOR, "glad", "include", "glad", "gl.h")
+    if os.path.exists(gl_h) and need("licenses/glad.txt"):
+        with open(gl_h, encoding="utf-8", errors="replace") as f:
+            header = f.read().split("*/", 1)[0] + "*/\n"
+        lic("glad", (header + "\nThe generated loader is (WTFPL OR CC0-1.0) AND Apache-2.0 (Khronos API registry).\n"
+                     "Apache-2.0: https://www.apache.org/licenses/LICENSE-2.0\n").encode("utf-8"))
+
+
+def glad_python():
+    """A Python interpreter with glad2 installed. The current interpreter is used when pip may install
+    into it; an "externally managed" interpreter (PEP 668: Homebrew Python on macOS, Debian / Ubuntu
+    system Python) gets a private virtual environment in vendor/.glad-venv instead."""
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "glad2==" + GLAD])
+        return sys.executable
+    except subprocess.CalledProcessError:
+        print("  pip refused the current interpreter; using a virtual environment (vendor/.glad-venv)")
+    venv = os.path.join(VENDOR, ".glad-venv")
+    if not os.path.isdir(venv):
+        subprocess.check_call([sys.executable, "-m", "venv", venv])
+    python = os.path.join(venv, "Scripts", "python.exe") if os.name == "nt" else os.path.join(venv, "bin", "python")
+    subprocess.check_call([python, "-m", "pip", "install", "--quiet", "glad2==" + GLAD])
+    return python
+
+
+def patch_imguizmo():
+    """ImGui 1.92.8+ swapped AddPolyline's thickness/flags and removed CaptureMouseFromApp()."""
+    path = os.path.join(VENDOR, "imguizmo", "ImGuizmo.cpp")
+    with open(path, encoding="utf-8") as f:
+        s = f.read()
+    original = s
+    s = s.replace("colors[3 - axis], false, 2);", "colors[3 - axis], 2.0f, 0);")
+    s = s.replace("IM_COL32(0xFF, 0x80, 0x10, 0xFF), true, 2);", "IM_COL32(0xFF, 0x80, 0x10, 0xFF), 2.0f, ImDrawFlags_Closed);")
+    s = s.replace("directionColor[i], true, 1.0f);", "directionColor[i], 1.0f, ImDrawFlags_Closed);")
+    s = s.replace("ImGui::CaptureMouseFromApp();", "ImGui::SetNextFrameWantCaptureMouse(true);")
+    if s != original:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(s)
+        print("  patched ImGuizmo for ImGui " + IMGUI)
+
+
+if __name__ == "__main__":
+    main()

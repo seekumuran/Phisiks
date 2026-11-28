@@ -1,0 +1,203 @@
+# Release: on a version tag (v1.1.0, ...) build Release binaries on Windows, Linux and macOS, package
+# them with CPack into portable archives and attach them to a DRAFT GitHub Release. Nothing is
+# public until the draft is reviewed and published by hand on the Releases page.
+#
+#   Phisiks-<version>-win64.zip            Windows x64  (MSVC, native physics + miniaudio, app-local MSVC runtime)
+#   Phisiks-<version>-linux-x86_64.tar.gz  Linux x64    (GCC 12 on Ubuntu 22.04: glibc 2.35+)
+#   Phisiks-<version>-macos-arm64.zip      macOS arm64  (Apple Clang, OpenGL 4.1 tier, unsigned)
+#
+# These three CI archives are the only release artifacts: no locally built package is attached.
+# Each carries BUILD_INFO.txt (commit, run, toolchain), checked below before upload.
+# All builds use the portable backends (the vendored PhysX SDK binaries are not available on the
+# runners) and build GLFW from source as a static library (PHISIKS_BUNDLED_GLFW), so the archives
+# need nothing but the OS and its OpenGL driver. Runners have no GPU: the headless tests run before
+# packaging; the rendered runtime tests run in ci.yml and locally (BUILD_WINDOWS.md).
+name: release
+
+on:
+  push:
+    tags: [ 'v*' ]
+    branches: [ 'release/**' ]   # release branches: build and check the archives (publish runs on tags only)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            name: windows
+            configure: cmake -S . -B Build/release -G "Visual Studio 17 2022" -A x64 -DPHISIKS_PHYSICS_BACKEND=Native -DPHISIKS_AUDIO_BACKEND=miniaudio -DPHISIKS_CAD_KERNEL=OCCT -DPHISIKS_TEST_SKIP_RENDER=ON
+          - os: ubuntu-22.04
+            name: linux
+            configure: cmake -S . -B Build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DPHISIKS_PHYSICS_BACKEND=Native -DPHISIKS_AUDIO_BACKEND=miniaudio -DPHISIKS_BUNDLED_GLFW=ON -DPHISIKS_CAD_KERNEL=OCCT -DPHISIKS_TEST_SKIP_RENDER=ON
+          - os: macos-15
+            name: macos
+            configure: cmake -S . -B Build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPHISIKS_PHYSICS_BACKEND=Native -DPHISIKS_AUDIO_BACKEND=miniaudio -DPHISIKS_BUNDLED_GLFW=ON -DPHISIKS_CAD_KERNEL=OCCT -DPHISIKS_TEST_SKIP_RENDER=ON
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches the CMake project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^project(Phisiks VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "CMake version: $version, tag: $GITHUB_REF_NAME"
+          test "v$version" = "$GITHUB_REF_NAME"
+
+      - name: System packages (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-12 g++-12 libgl1-mesa-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libxkbcommon-dev wayland-protocols
+
+      - name: Ninja (macOS)
+        if: matrix.name == 'macos'
+        run: brew install ninja || true
+
+      - name: Third-party sources
+        run: python3 tools/fetch_deps.py || python tools/fetch_deps.py
+      - name: Open CASCADE (cache)
+        id: occt
+        uses: actions/cache@v4
+        with:
+          path: vendor/occt
+          key: occt-7.9.3-release-${{ matrix.name }}-${{ hashFiles('tools/build_occt.py') }}
+      - name: Open CASCADE (build the CAD kernel subset with the release toolchain; cached)
+        if: steps.occt.outputs.cache-hit != 'true'
+        run: |
+          if [ "${{ matrix.name }}" = "windows" ]; then python tools/build_occt.py --generator "Visual Studio 17 2022"
+          elif [ "${{ matrix.name }}" = "linux" ]; then CC=gcc-12 CXX=g++-12 python3 tools/build_occt.py --generator Ninja
+          else python3 tools/build_occt.py --generator Ninja; fi
+      - name: Configure
+        run: ${{ matrix.configure }}
+      - name: Build
+        run: bash tools/ci_build.sh cmake --build Build/release --config Release --parallel
+      - name: Tests (unit, layering, deterministic replay)
+        run: ctest --test-dir Build/release -C Release --output-on-failure
+      - name: Package (CPack)
+        run: cpack --config Build/release/CPackConfig.cmake -C Release
+
+      - name: Check the archive contents
+        # bash -eo pipefail: no command here may fail on purpose. The archive is found with a
+        # nullglob array (each OS produces only one format) and extracted with "cmake -E tar",
+        # which reads .zip and .tar.gz on every runner.
+        run: |
+          shopt -s nullglob
+          cd dist
+          all=(Phisiks-*.zip Phisiks-*.tar.gz)
+          echo "dist/: $(ls)"
+          runtime=(); sdk=()
+          for a in "${all[@]}"; do case "$a" in *-sdk.*) sdk+=("$a");; *) runtime+=("$a");; esac; done
+          if [ ${#runtime[@]} -ne 1 ] || [ ${#sdk[@]} -ne 1 ]; then echo "expected one runtime and one SDK archive, found: ${all[*]}"; exit 1; fi
+          archive=${runtime[0]}
+          echo "archive: $archive"
+          rm -rf check && mkdir check
+          (cd check && cmake -E tar xf "../$archive")
+          roots=(check/Phisiks-*/)
+          if [ ${#roots[@]} -ne 1 ]; then echo "expected one top-level folder, found: $(ls check)"; exit 1; fi
+          root=${roots[0]%/}
+          echo "root: $root"
+          ext=""
+          if [ "${{ matrix.name }}" = "windows" ]; then ext=".exe"; fi
+          missing=0
+          for exe in Phisiks PhisiksSamples Showcase01_RoboticArm Showcase02_PoolFluid Showcase03_BlackHole Showcase04_TurbineCad glprobe; do
+            if [ ! -f "$root/$exe$ext" ]; then echo "missing $exe$ext"; missing=1; fi
+          done
+          for f in BUILD_INFO.txt QUICKSTART.txt LICENSE THIRD_PARTY_NOTICES.md README.md assets/shaders/black_hole.frag.glsl assets/meshes/hero assets/scripts \
+                   shaders/tonemap.frag.glsl THIRD_PARTY_LICENSES/OpenCASCADE/LICENSE_LGPL_21.txt THIRD_PARTY_LICENSES/OpenCASCADE/OCCT_LGPL_EXCEPTION.txt \
+                   THIRD_PARTY_LICENSES/dear-imgui.txt THIRD_PARTY_LICENSES/glfw.txt THIRD_PARTY_LICENSES/lua.txt; do
+            if [ ! -e "$root/$f" ]; then echo "missing $f"; missing=1; fi
+          done
+          # CAD: PhisiksCad and the Open CASCADE kernel libraries ship next to the programs
+          case "${{ matrix.name }}" in
+            windows) cad=("$root/PhisiksCad.dll" "$root/TKernel.dll" "$root/TKDESTEP.dll");;
+            linux) cad=("$root/libPhisiksCad.so" $(ls "$root"/libTKernel.so* 2>/dev/null | head -1));;
+            *) cad=("$root/libPhisiksCad.dylib" $(ls "$root"/libTKernel*.dylib 2>/dev/null | head -1));;
+          esac
+          for f in "${cad[@]}"; do if [ ! -e "$f" ]; then echo "missing CAD runtime $f"; missing=1; fi; done
+          if [ ${#cad[@]} -lt 2 ]; then echo "missing the Open CASCADE runtime"; missing=1; fi
+          # Provenance: built by this CI run with a released toolchain, from this commit.
+          if [ -f "$root/BUILD_INFO.txt" ]; then
+            cat "$root/BUILD_INFO.txt"
+            grep -q "^toolchain: *released$" "$root/BUILD_INFO.txt" || { echo "BUILD_INFO: not a released toolchain"; missing=1; }
+            grep -q "actions/runs/$GITHUB_RUN_ID " "$root/BUILD_INFO.txt" || { echo "BUILD_INFO: not built by this run"; missing=1; }
+            grep -q "^commit: *$GITHUB_SHA$" "$root/BUILD_INFO.txt" || { echo "BUILD_INFO: commit is not $GITHUB_SHA"; missing=1; }
+          fi
+          case "$archive" in *preview-toolchain*) echo "preview-toolchain archive"; missing=1;; esac
+          if [ "${{ matrix.name }}" = "linux" ]; then
+            ldd "$root/Phisiks" | tee ldd.txt
+            if grep -q "not found" ldd.txt; then echo "unresolved shared libraries"; missing=1; fi
+            rm -f ldd.txt
+          fi
+          if [ "${{ matrix.name }}" = "macos" ]; then
+            otool -L "$root/Phisiks" | tee otool.txt
+            if grep -vE "^[[:space:]]*(/(System|usr/lib)/|@rpath/|@loader_path/|@executable_path/)|:$" otool.txt | grep -q .; then echo "non-system dynamic libraries"; missing=1; fi
+            for lib in $(otool -L "$root/Phisiks" "$root/libPhisiksCad.dylib" | grep -oE "@(rpath|loader_path|executable_path)/[^ ]+" | sed -E 's#^@[a-z_]+/##' | sort -u); do
+              if [ ! -e "$root/$lib" ]; then echo "bundled library $lib is not in the package"; missing=1; fi
+            done
+            rm -f otool.txt
+          fi
+          rm -rf check
+          # SDK archive: package config, headers, libraries, licences, provenance
+          sdkarchive=${sdk[0]}
+          echo "SDK archive: $sdkarchive"
+          mkdir check && (cd check && cmake -E tar xf "../$sdkarchive")
+          sdkroots=(check/Phisiks-*/)
+          sdkroot=${sdkroots[0]%/}
+          for f in lib/cmake/phisiks/phisiks-config.cmake lib/cmake/phisiks/phisiks-config-version.cmake lib/cmake/phisiks/phisiks-targets.cmake \
+                   include/Phisiks/Version.h include/Phisiks/Runtime/Application.h include/PhisiksEditor/EditorApp.h include/glm/vec3.hpp \
+                   include/entt/entt.hpp include/imgui/imgui.h share/phisiks/LICENSE share/phisiks/SDK.md share/phisiks/BUILD_INFO.txt \
+                   share/phisiks/examples/sdk_consumer/CMakeLists.txt share/phisiks/THIRD_PARTY_LICENSES/glfw.txt \
+                   include/Phisiks/Cad/Document.h include/PhisiksPAI/Pai.h share/phisiks/THIRD_PARTY_LICENSES/OpenCASCADE/LICENSE_LGPL_21.txt; do
+            if [ ! -e "$sdkroot/$f" ]; then echo "SDK: missing $f"; missing=1; fi
+          done
+          libs=$(find "$sdkroot/lib" -maxdepth 1 \( -name '*.lib' -o -name '*.a' \) | wc -l)
+          echo "SDK: $libs static libraries"
+          if [ "$libs" -lt 4 ]; then echo "SDK: expected the PHISIKS static libraries"; missing=1; fi
+          grep -q "^toolchain: *released$" "$sdkroot/share/phisiks/BUILD_INFO.txt" || { echo "SDK BUILD_INFO: not a released toolchain"; missing=1; }
+          if grep -rq "$GITHUB_WORKSPACE" "$sdkroot/lib/cmake/phisiks"; then echo "SDK: package files refer to the build machine's source tree"; missing=1; fi
+          rm -rf check
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "archives OK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phisiks-${{ matrix.name }}
+          path: |
+            dist/Phisiks-*.zip
+            dist/Phisiks-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          (cd dist && sha256sum Phisiks-* > SHA256SUMS.txt)
+          notes="PHISIKS ${GITHUB_REF_NAME}: portable builds of the PHISIKS editor (with the CAD workspace and the agent interface), the sample browser and the four showcases, plus the SDK archive. Extract the archive for your OS and run Phisiks (see QUICKSTART.txt inside). All archives were built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} from commit ${GITHUB_SHA} with the native physics backend; each contains BUILD_INFO.txt, and SHA256SUMS.txt lists their checksums. Release notes: RELEASE_NOTES.md; limitations: KNOWN_ISSUES.md."
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            # A draft: published by hand after review (Releases page), never automatically.
+            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "PHISIKS ${GITHUB_REF_NAME}" --notes "$notes" --draft
+          fi
