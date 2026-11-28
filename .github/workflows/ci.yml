@@ -37,7 +37,8 @@ jobs:
         shell: bash
         run: bash tools/ci_build.sh cmake --build Build/ci --config Release --parallel
       - name: Tests (unit, layering, deterministic replay)
-        run: ctest --test-dir Build/ci -C Release --output-on-failure
+        shell: bash
+        run: bash tools/ci_test.sh ctest --test-dir Build/ci -C Release
 
   linux:
     runs-on: ubuntu-24.04
@@ -65,7 +66,7 @@ jobs:
       - name: Build
         run: bash tools/ci_build.sh cmake --build --preset linux-release --parallel
       - name: Tests (unit, layering, deterministic replay)
-        run: ctest --preset linux-release
+        run: bash tools/ci_test.sh ctest --preset linux-release
       - uses: actions/upload-artifact@v4
         with:
           name: linux-bin
@@ -129,7 +130,7 @@ jobs:
       - name: Build
         run: bash tools/ci_build.sh cmake --build --preset macos-release --parallel
       - name: Tests (unit, layering, deterministic replay)
-        run: ctest --preset macos-release
+        run: bash tools/ci_test.sh ctest --preset macos-release
       - uses: actions/upload-artifact@v4
         with:
           name: macos-bin

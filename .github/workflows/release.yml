@@ -83,7 +83,7 @@ jobs:
       - name: Build
         run: bash tools/ci_build.sh cmake --build Build/release --config Release --parallel
       - name: Tests (unit, layering, deterministic replay)
-        run: ctest --test-dir Build/release -C Release --output-on-failure
+        run: bash tools/ci_test.sh ctest --test-dir Build/release -C Release
       - name: Package (CPack)
         run: cpack --config Build/release/CPackConfig.cmake -C Release
 
